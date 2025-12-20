@@ -5,7 +5,7 @@ export interface Run {
   name: string
   description?: string
   status: RunStatus
-  
+
   // Config
   generators: string[]
   models: any[]
@@ -15,25 +15,29 @@ export interface Run {
   gptr_settings?: any
   evaluation: any
   pairwise: any
-  
+
   // Progress & Stats
   progress: number // Percentage 0-100
   tasks: TaskSummary[]
   total_cost_usd: number
   cost_by_model: Record<string, number>
   cost_by_document: Record<string, number>
-  
+
   // Timing
   created_at: string
   started_at?: string
   completed_at?: string
   total_duration_seconds?: number
-  
+  duration_seconds?: number // For running time calculation
+
   tags: string[]
 
   // Legacy/UI specific fields that might be needed or were used
   mode?: string
   current_phase?: string
+  pre_combine_evals?: any[] // Array of evaluation results
+  fpf_stats?: any // FPF live stats
+  pairwise_results?: any // Pairwise evaluation results
 }
 
 export interface TaskSummary {

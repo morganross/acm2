@@ -56,8 +56,8 @@ class Preset(Base):
     models: Mapped[list] = mapped_column(JSON, default=list)     # List of model names
     generators: Mapped[list] = mapped_column(JSON, default=list) # ['fpf', 'gptr']
     
-    # Execution settings
-    iterations: Mapped[int] = mapped_column(Integer, default=1)
+    # Execution settings (iterations moved to new config section below)
+    # iterations: Mapped[int] = mapped_column(Integer, default=1)  # Moved to timing config section
     evaluation_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     pairwise_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     
@@ -69,6 +69,29 @@ class Preset(Base):
     # Options: "ERROR", "WARNING", "INFO", "DEBUG", "VERBOSE"
     # VERBOSE captures FPF output to file for debugging
     log_level: Mapped[str] = mapped_column(String(20), default="INFO")
+    
+    # =========================================================================
+    # Timing & Retry Configuration
+    # =========================================================================
+    max_retries: Mapped[int] = mapped_column(Integer, nullable=False)
+    retry_delay: Mapped[float] = mapped_column(nullable=False)
+    request_timeout: Mapped[int] = mapped_column(Integer, nullable=False)
+    eval_timeout: Mapped[int] = mapped_column(Integer, nullable=False)
+    
+    # Concurrency Configuration
+    generation_concurrency: Mapped[int] = mapped_column(Integer, nullable=False)
+    eval_concurrency: Mapped[int] = mapped_column(Integer, nullable=False)
+    
+    # Iteration Configuration (moved from above, now required)
+    # iterations field already exists above - will need to make non-nullable
+    eval_iterations: Mapped[int] = mapped_column(Integer, nullable=False)
+    
+    # FPF Logging Configuration
+    fpf_log_output: Mapped[str] = mapped_column(String(20), nullable=False)  # 'stream', 'file', 'none'
+    fpf_log_file_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    
+    # Post-Combine Configuration
+    post_combine_top_n: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     
     # Extra settings
     config_overrides: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)

@@ -37,6 +37,7 @@ export default function Execute() {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [currentRun, setCurrentRun] = useState<Run | null>(null);
   const [isRunning, setIsRunning] = useState(false);
+  const [runningRunsCount, setRunningRunsCount] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<'evaluation' | 'pairwise' | 'timeline'>('evaluation');
   const [error, setError] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -153,6 +154,26 @@ export default function Execute() {
       }
     };
   }, [runId]);
+
+  // Fetch running runs count
+  const fetchRunningCount = useCallback(async () => {
+    try {
+      const res = await fetch('/api/v1/runs/count?status=running');
+      if (res.ok) {
+        const data = await res.json();
+        setRunningRunsCount(data.total);
+      }
+    } catch (err) {
+      console.error('Failed to fetch running count:', err);
+    }
+  }, []);
+
+  // Poll for running count every 10s
+  useEffect(() => {
+    fetchRunningCount();
+    const interval = setInterval(fetchRunningCount, 10000);
+    return () => clearInterval(interval);
+  }, [fetchRunningCount]);
 
   // Fetch presets on mount
   useEffect(() => {
@@ -634,11 +655,7 @@ export default function Execute() {
             <div>
               <div style={{ color: '#9ca3af', fontSize: '14px' }}>FPF Live Stats</div>
               <div style={{ color: 'white', fontSize: '18px', fontWeight: 'bold' }}>
-                {currentRun?.fpf_stats ? (
-                  <span>
-                    {currentRun.fpf_stats.successful_calls} OK / {currentRun.fpf_stats.failed_calls} Fail / {currentRun.fpf_stats.retries} Retry
-                  </span>
-                ) : 'No stats'}
+                {runningRunsCount !== null ? `${runningRunsCount} Active Runs` : 'Checking...'}
               </div>
             </div>
           </div>

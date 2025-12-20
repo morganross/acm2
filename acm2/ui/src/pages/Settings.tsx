@@ -4,20 +4,32 @@ import { cn } from '@/lib/utils'
 import { notify } from '@/stores/notifications'
 
 // Concurrency settings interface
-interface ConcurrencySettings {
+export interface ConcurrencySettings {
   generationConcurrency: number
   evalConcurrency: number
   requestTimeout: number
+  evalTimeout: number
   maxRetries: number
   retryDelay: number
+  iterations: number
+  evalIterations: number
+  fpfLogOutput: 'stream' | 'file' | 'none'
+  fpfLogFilePath: string
+  postCombineTopN: number | null
 }
 
 const defaultConcurrency: ConcurrencySettings = {
-  generationConcurrency: 3,
-  evalConcurrency: 3,
-  requestTimeout: 1800,
+  generationConcurrency: 5,
+  evalConcurrency: 5,
+  requestTimeout: 600,
+  evalTimeout: 600,
   maxRetries: 3,
-  retryDelay: 2,
+  retryDelay: 2.0,
+  iterations: 1,
+  evalIterations: 1,
+  fpfLogOutput: 'file',
+  fpfLogFilePath: 'logs/{run_id}/fpf_output.log',
+  postCombineTopN: 5,  // Enable post-combine eval by default
 }
 
 // Helper to load settings from localStorage
@@ -326,7 +338,7 @@ export default function Settings() {
                   </label>
                   <input
                     type="number"
-                    min="0"
+                    min="0.5"
                     max="30"
                     step="0.5"
                     value={concurrency.retryDelay}
@@ -338,6 +350,134 @@ export default function Settings() {
                   </p>
                 </div>
               </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium text-foreground">
+                    Evaluation Timeout (seconds)
+                  </label>
+                  <span className="text-sm font-mono bg-muted px-2 py-0.5 rounded">{concurrency.evalTimeout}s</span>
+                </div>
+                <input
+                  type="range"
+                  min="60"
+                  max="3600"
+                  step="60"
+                  value={concurrency.evalTimeout}
+                  onChange={(e) => setConcurrency(prev => ({ ...prev, evalTimeout: Number(e.target.value) }))}
+                  className="w-full"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Maximum time for evaluation requests
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-card border rounded-lg p-4 space-y-4">
+            <h2 className="font-semibold text-foreground">Iteration Settings</h2>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">
+                  Generation Iterations
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="10"
+                  value={concurrency.iterations}
+                  onChange={(e) => setConcurrency(prev => ({ ...prev, iterations: Number(e.target.value) }))}
+                  className="w-full px-3 py-2 border rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Number of document generation iterations
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">
+                  Evaluation Iterations
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="10"
+                  value={concurrency.evalIterations}
+                  onChange={(e) => setConcurrency(prev => ({ ...prev, evalIterations: Number(e.target.value) }))}
+                  className="w-full px-3 py-2 border rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Number of evaluation iterations
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-card border rounded-lg p-4 space-y-4">
+            <h2 className="font-semibold text-foreground">FPF Logging Settings</h2>
+            
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">
+                  FPF Log Output
+                </label>
+                <select 
+                  value={concurrency.fpfLogOutput}
+                  onChange={(e) => setConcurrency(prev => ({ ...prev, fpfLogOutput: e.target.value as 'stream' | 'file' | 'none' }))}
+                  className="w-full px-3 py-2 border rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option value="stream">Stream (real-time to console)</option>
+                  <option value="file">File (log to disk)</option>
+                  <option value="none">None (silent)</option>
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  Where FPF subprocess output is logged
+                </p>
+              </div>
+
+              {concurrency.fpfLogOutput === 'file' && (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">
+                    FPF Log File Path
+                  </label>
+                  <input
+                    type="text"
+                    value={concurrency.fpfLogFilePath}
+                    onChange={(e) => setConcurrency(prev => ({ ...prev, fpfLogFilePath: e.target.value }))}
+                    placeholder="logs/{run_id}/fpf_output.log"
+                    className="w-full px-3 py-2 border rounded-md bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Use {'{run_id}'} as placeholder for run identifier
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="bg-card border rounded-lg p-4 space-y-4">
+            <h2 className="font-semibold text-foreground">Post-Combine Settings</h2>
+            
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-foreground">
+                Post-Combine Top-N Limit (optional)
+              </label>
+              <input
+                type="number"
+                min="2"
+                max="20"
+                value={concurrency.postCombineTopN || ''}
+                onChange={(e) => setConcurrency(prev => ({ 
+                  ...prev, 
+                  postCombineTopN: e.target.value ? Number(e.target.value) : null 
+                }))}
+                placeholder="null (compare all)"
+                className="w-full px-3 py-2 border rounded-md bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+              <p className="text-xs text-muted-foreground">
+                Limit number of documents compared in post-combine evaluation (leave empty for no limit)
+              </p>
             </div>
           </div>
 

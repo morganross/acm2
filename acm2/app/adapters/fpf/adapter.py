@@ -107,14 +107,14 @@ class FpfAdapter(BaseAdapter):
             with tempfile.TemporaryDirectory() as tmp_dir:
                 tmp_path = Path(tmp_dir)
 
-                # Create file_a (content) - use document_content if provided, otherwise empty
-                file_a_path = tmp_path / "content.txt"
-                file_a_content = document_content or ""
-                file_a_path.write_text(file_a_content, encoding="utf-8")
+                # Create file_a (instructions/prompt) - use query as instructions
+                file_a_path = tmp_path / "instructions.txt"
+                file_a_path.write_text(query, encoding="utf-8")
 
-                # Create file_b (instructions/prompt) - use query as instructions
-                file_b_path = tmp_path / "instructions.txt"
-                file_b_path.write_text(query, encoding="utf-8")
+                # Create file_b (content) - use document_content if provided, otherwise empty
+                file_b_path = tmp_path / "content.txt"
+                file_b_content = document_content or ""
+                file_b_path.write_text(file_b_content, encoding="utf-8")
 
                 # Set up output path
                 output_path = tmp_path / "output.md"

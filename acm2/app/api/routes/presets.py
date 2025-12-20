@@ -639,7 +639,7 @@ async def execute_preset(
         pairwise_top_n=None,
         enable_combine=combine_config.get("enabled", False),
         combine_strategy=combine_config.get("strategy", ""),
-        combine_model=combine_config.get("model", ""),
+        combine_models=[combine_config.get("model", "")] if combine_config.get("enabled", False) else [],
         log_level=getattr(preset, 'log_level', 'INFO') or 'INFO',
     )
     

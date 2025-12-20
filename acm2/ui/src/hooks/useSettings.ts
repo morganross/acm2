@@ -5,8 +5,14 @@ export interface ConcurrencySettings {
   generationConcurrency: number
   evalConcurrency: number
   requestTimeout: number
+  evalTimeout: number
   maxRetries: number
   retryDelay: number
+  iterations: number
+  evalIterations: number
+  fpfLogOutput: 'stream' | 'file' | 'none'
+  fpfLogFilePath: string
+  postCombineTopN: number | null
 }
 
 interface Settings {
@@ -29,11 +35,17 @@ interface Settings {
 }
 
 const defaultConcurrency: ConcurrencySettings = {
-  generationConcurrency: 3,
-  evalConcurrency: 3,
-  requestTimeout: 1800,
+  generationConcurrency: 5,
+  evalConcurrency: 5,
+  requestTimeout: 600,
+  evalTimeout: 600,
   maxRetries: 3,
-  retryDelay: 2,
+  retryDelay: 2.0,
+  iterations: 1,
+  evalIterations: 1,
+  fpfLogOutput: 'file',
+  fpfLogFilePath: 'logs/{run_id}/fpf_output.log',
+  postCombineTopN: 5,
 }
 
 const defaultSettings: Settings = {

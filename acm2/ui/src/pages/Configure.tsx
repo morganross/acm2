@@ -82,13 +82,18 @@ function serializeConfigToPreset(
     });
   }
 
-  // Serialize GeneralConfig
+  // Serialize GeneralConfig - get settings from localStorage
+  const concurrencySettings = getConcurrencySettings();
   const general_config: GeneralConfig = {
-    iterations: config.general.iterations,
+    iterations: concurrencySettings.iterations,
+    eval_iterations: concurrencySettings.evalIterations,
     output_dir: config.general.outputDir,
     enable_logging: config.general.enableLogging,
     log_level: config.general.logLevel,
     save_intermediate: config.general.saveIntermediate,
+    fpf_log_output: concurrencySettings.fpfLogOutput,
+    fpf_log_file_path: concurrencySettings.fpfLogFilePath,
+    post_combine_top_n: concurrencySettings.postCombineTopN,
   };
 
   // Serialize FpfConfig
@@ -187,8 +192,12 @@ function serializeConfigToPreset(
     max_concurrent: config.concurrency.maxConcurrent,
     launch_delay: config.concurrency.launchDelay,
     enable_rate_limiting: config.concurrency.enableRateLimiting,
-    max_retries: config.concurrency.maxRetries,
-    retry_delay: config.concurrency.retryDelay,
+    max_retries: concurrencySettings.maxRetries,
+    retry_delay: concurrencySettings.retryDelay,
+    generation_concurrency: concurrencySettings.generationConcurrency,
+    eval_concurrency: concurrencySettings.evalConcurrency,
+    request_timeout: concurrencySettings.requestTimeout,
+    eval_timeout: concurrencySettings.evalTimeout,
   };
 
   // Serialize CombineConfig

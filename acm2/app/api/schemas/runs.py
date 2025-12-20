@@ -204,21 +204,41 @@ class CombineConfigComplete(BaseModel):
 
 class GeneralConfigComplete(BaseModel):
     """Complete General configuration for preset persistence."""
-    iterations: int = Field(3, ge=1, le=10)
-    output_dir: str = "./output"
-    enable_logging: bool = True
-    log_level: str = "info"
-    save_intermediate: bool = True
+    iterations: int = Field(1, ge=1, le=10, description="Number of document generation iterations")
+    eval_iterations: int = Field(1, ge=1, le=10, description="Number of evaluation iterations")
+    
+    # Logging
+    log_level: str = Field("INFO", description="Log level: DEBUG, INFO, WARNING, ERROR")
+    fpf_log_output: str = Field("file", description="FPF log output: stream, file, none")
+    fpf_log_file_path: Optional[str] = Field(None, description="Path for FPF log file (required if fpf_log_output=file)")
+    
+    # Post-combine settings
+    post_combine_top_n: Optional[int] = Field(None, ge=2, description="Optional limit for post-combine eval comparison")
+    
+    # Legacy fields
+    output_dir: str = Field("./output", description="Deprecated")
+    enable_logging: bool = Field(True, description="Deprecated")
+    save_intermediate: bool = Field(True, description="Deprecated")
 
 
 class ConcurrencyConfigComplete(BaseModel):
     """Complete Concurrency configuration for preset persistence."""
-    max_concurrent: int = Field(5, ge=1, le=20)
-    launch_delay: float = Field(1.0, ge=0)
-    enable_rate_limiting: bool = True
-    max_retries: int = Field(3, ge=0, le=10)
-    retry_delay: float = Field(2.0, ge=0)
-    request_timeout: int = Field(600, ge=60, le=7200, description="Request timeout in seconds (60-7200). This is the safety ceiling for each LLM API call.")
+    # Concurrency limits
+    generation_concurrency: int = Field(5, ge=1, le=50, description="Max concurrent document generations")
+    eval_concurrency: int = Field(5, ge=1, le=50, description="Max concurrent evaluation calls")
+    
+    # Timeouts
+    request_timeout: int = Field(600, ge=60, le=3600, description="Request timeout in seconds")
+    eval_timeout: int = Field(600, ge=60, le=3600, description="Evaluation timeout in seconds")
+    
+    # Retry settings
+    max_retries: int = Field(3, ge=1, le=10, description="Max retries per model before moving to next")
+    retry_delay: float = Field(2.0, ge=0.5, le=30.0, description="Seconds to wait between retry attempts")
+    
+    # Legacy fields for backward compatibility
+    max_concurrent: int = Field(5, ge=1, le=20, description="Deprecated: use generation_concurrency")
+    launch_delay: float = Field(1.0, ge=0, description="Deprecated")
+    enable_rate_limiting: bool = Field(True, description="Deprecated")
 
 
 # ============================================================================

@@ -856,6 +856,17 @@ async def create_run(
     return _to_summary(run)
 
 
+@router.get("/count")
+async def count_runs(
+    status: Optional[str] = Query(None, description="Filter by status"),
+    db: AsyncSession = Depends(get_db)
+) -> dict:
+    """Return total number of runs (optionally filtered by status)."""
+    repo = RunRepository(db)
+    total = await repo.count(status=status)
+    return {"total": total, "status": status}
+
+
 @router.get("", response_model=RunList)
 async def list_runs(
     status: Optional[str] = Query(None, description="Filter by status"),
@@ -1049,6 +1060,8 @@ async def start_run(
         # Get judge models from eval_config.judge_models (already formatted as "provider:model" strings)
         # NO FALLBACK - must be configured in preset's eval_config.judge_models
         eval_judge_models=eval_config.get("judge_models") or [],
+        # Per-call eval timeout from GUI eval panel
+        eval_timeout=eval_config.get("timeout_seconds", 600),
         # pairwise_top_n is in eval_config, not pairwise_config
         pairwise_top_n=eval_config.get("pairwise_top_n"),
         # Custom evaluation instructions from Content Library

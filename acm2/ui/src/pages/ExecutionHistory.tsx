@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { Search, Filter, Clock, CheckCircle2, XCircle, ChevronRight, AlertCircle, Loader2, Trash2 } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { runsApi, type Run } from '../api'
+import { notify } from '@/stores/notifications'
 
 // Normalize ISO timestamp to UTC by appending Z if missing
 function normalizeUtcTime(t: string): string {
@@ -27,6 +28,7 @@ export default function ExecutionHistory() {
   const [error, setError] = useState<string | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
+  const [bulkDeleting, setBulkDeleting] = useState(false)
 
   // Fetch runs from API
   useEffect(() => {
@@ -70,6 +72,57 @@ export default function ExecutionHistory() {
     setDeleteConfirm(null)
   }
 
+  const handleDeleteAllCompletedFailed = async () => {
+    if (bulkDeleting) return
+    if (deleting) return
+
+    const runIdsToDelete = runs
+      .filter((r) => r.status === 'completed' || r.status === 'failed')
+      .map((r) => r.id)
+
+    if (runIdsToDelete.length === 0) {
+      notify.info('No completed or failed runs to delete')
+      return
+    }
+
+    const ok = window.confirm(
+      `Delete ${runIdsToDelete.length} completed/failed run(s)? This cannot be undone.`
+    )
+    if (!ok) return
+
+    setBulkDeleting(true)
+    setError(null)
+
+    const deletedIds: string[] = []
+    const errors: string[] = []
+
+    try {
+      // Keep it simple: delete sequentially using existing DELETE /runs/{id} endpoint.
+      for (const runId of runIdsToDelete) {
+        try {
+          await runsApi.delete(runId)
+          deletedIds.push(runId)
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          errors.push(`${runId}: ${msg}`)
+        }
+      }
+
+      if (deletedIds.length > 0) {
+        setRuns((prev) => prev.filter((r) => !deletedIds.includes(r.id)))
+        notify.success(`Deleted ${deletedIds.length} run(s)`) 
+      }
+
+      if (errors.length > 0) {
+        setError(`Some runs failed to delete (${errors.length}). See console for details.`)
+        // Avoid spamming UI; log details for diagnosis.
+        console.error('Bulk delete errors:', errors)
+      }
+    } finally {
+      setBulkDeleting(false)
+    }
+  }
+
   const filteredRuns = runs.filter(run => {
     if (statusFilter !== 'all' && run.status !== statusFilter) return false
     if (searchQuery) {
@@ -87,6 +140,25 @@ export default function ExecutionHistory() {
             <h1 className="text-2xl font-bold">Execution History</h1>
             <p className="text-sm text-gray-400">View past preset executions and results</p>
           </div>
+
+          <button
+            onClick={handleDeleteAllCompletedFailed}
+            disabled={loading || bulkDeleting || !!deleting}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-gray-700 disabled:text-gray-400 text-white rounded-lg text-sm font-medium transition-colors"
+            title="Delete all completed and failed runs"
+          >
+            {bulkDeleting ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Deleting…
+              </>
+            ) : (
+              <>
+                <Trash2 className="w-4 h-4" />
+                Delete Completed/Failed
+              </>
+            )}
+          </button>
         </div>
 
         {/* Filters */}

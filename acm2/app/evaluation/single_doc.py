@@ -27,6 +27,7 @@ class SingleEvalConfig:
     temperature: float = 0.0
     max_tokens: int = 4096
     concurrent_limit: int = 3  # Max concurrent evaluations
+    timeout_seconds: int = 600  # Per-call timeout (GUI EvalPanel)
     
     # Custom instructions from Content Library
     custom_instructions: Optional[str] = None
@@ -38,6 +39,7 @@ class SingleEvalConfig:
             model=model,
             temperature=self.temperature,
             max_tokens=self.max_tokens,
+            timeout_seconds=self.timeout_seconds,
         )
 
 

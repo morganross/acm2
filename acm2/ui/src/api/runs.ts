@@ -150,7 +150,7 @@ export interface Run {
   winner?: string
   // New structured evaluation data for heatmaps
   generated_docs?: GeneratedDocInfo[]  // List of generated documents
-  pre_combine_evals?: Record<string, Record<string, number>>  // { gen_doc_id: { judge_model: score } }
+  pre_combine_evals?: any[]  // Array of evaluation results for UI accumulation
   post_combine_evals?: Record<string, Record<string, number>>  // { combined_doc_id: { judge_model: score } }
   pairwise_results?: PairwiseResults
   post_combine_pairwise?: PairwiseResults  // Pairwise comparison: combined doc vs winner
@@ -163,6 +163,8 @@ export interface Run {
   // ACM1-style timeline and generation events
   timeline_events?: TimelineEvent[]  // All timeline events
   generation_events?: GenerationEvent[]  // Generation event records
+  // UI-specific fields
+  duration_seconds?: number // For running time display
 }
 export interface CreateRunRequest {
   title: string
@@ -259,7 +261,7 @@ export const runsApi = {
       winner: r.winner,
       // New structured evaluation data
       generated_docs: r.generated_docs || [],
-      pre_combine_evals: r.pre_combine_evals || {},
+      pre_combine_evals: r.pre_combine_evals || [],
       post_combine_evals: r.post_combine_evals || {},
       pairwise_results: r.pairwise_results,
       post_combine_pairwise: r.post_combine_pairwise,  // Post-combine pairwise: combined doc vs winner

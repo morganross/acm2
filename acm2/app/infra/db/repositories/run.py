@@ -4,7 +4,7 @@ Run repository for CRUD operations on runs.
 from datetime import datetime
 from typing import Optional, Sequence
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -57,6 +57,14 @@ class RunRepository(BaseRepository[Run]):
         
         result = await self.session.execute(stmt)
         return result.scalars().all()
+    
+    async def count(self, status: Optional[str] = None) -> int:
+        """Return the total number of runs (optionally filtered by status)."""
+        stmt = select(func.count()).select_from(Run)
+        if status:
+            stmt = stmt.where(Run.status == status)
+        result = await self.session.execute(stmt)
+        return result.scalar_one()
     
     async def get_active_runs(self) -> Sequence[Run]:
         """Get all runs that are currently in progress."""

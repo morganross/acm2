@@ -86,7 +86,9 @@ export default function EvaluationTab({ currentRun, execStatus }: EvaluationTabP
   // Extract unique judge models from new format eval results
   const judgeModels = new Set<string>()
   Object.values(preCombineEvals).forEach(scores => {
-    Object.keys(scores).forEach(jm => judgeModels.add(jm))
+    if (typeof scores === 'object' && scores !== null) {
+      Object.keys(scores).forEach(jm => judgeModels.add(jm))
+    }
   })
   Object.values(postCombineEvals).forEach(scores => {
     Object.keys(scores).forEach(jm => judgeModels.add(jm))

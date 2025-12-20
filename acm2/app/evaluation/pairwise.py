@@ -29,6 +29,7 @@ class PairwiseConfig:
     temperature: float = 0.0
     max_tokens: int = 4096
     concurrent_limit: int = 3
+    timeout_seconds: int = 600  # Per-call timeout (GUI EvalPanel)
     
     # Top-N filtering
     top_n: Optional[int] = None  # If set, only compare top N by single-doc score
@@ -49,6 +50,7 @@ class PairwiseConfig:
             model=model,
             temperature=self.temperature,
             max_tokens=self.max_tokens,
+            timeout_seconds=self.timeout_seconds,
         )
     
     def to_elo_config(self) -> EloConfig:

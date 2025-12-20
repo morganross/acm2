@@ -71,49 +71,161 @@ class GeneratedDocument:
 
 @dataclass
 class RunConfig:
-    """Configuration for a run."""
-    # Inputs
+    """Configuration for a run. All fields are REQUIRED unless explicitly Optional."""
+    
+    # Inputs - REQUIRED (no defaults)
     document_ids: List[str]
     document_contents: Dict[str, str]  # doc_id -> content
     
-    # Generators
+    # Generators - REQUIRED (no defaults)
     generators: List[GeneratorType]
     models: List[str]  # Model names to use
     
-    # Instructions/prompt for FPF (optional, has default)
-    instructions: str = ""  # The prompt/instructions to use with FPF
-    iterations: int = 1
+    # Iterations - REQUIRED (no defaults)
+    iterations: int
+    eval_iterations: int
     
-    # Evaluation
+    # Concurrency settings - REQUIRED (no defaults)
+    generation_concurrency: int
+    eval_concurrency: int
+    request_timeout: int
+    eval_timeout: int
+    max_retries: int
+    retry_delay: float
+    
+    # Logging - REQUIRED (no defaults)
+    log_level: str
+    
+    # Instructions - Validated based on enabled features (optional but validated in __post_init__)
+    instructions: Optional[str] = None  # REQUIRED if FPF generator enabled
+    
+    # Evaluation - Defaults provided
     enable_single_eval: bool = True
     enable_pairwise: bool = True
-    eval_iterations: int = 1
-    eval_judge_models: List[str] = field(default_factory=list)  # REQUIRED - must be set by preset
-    pairwise_top_n: Optional[int] = None  # Top-N filtering
+    eval_judge_models: List[str] = field(default_factory=list)  # REQUIRED when eval enabled
+    pairwise_top_n: Optional[int] = None  # Optional top-N filtering
     
-    # Custom evaluation instructions (from Content Library)
-    single_eval_instructions: Optional[str] = None
-    pairwise_eval_instructions: Optional[str] = None
-    eval_criteria: Optional[str] = None
+    # Custom evaluation instructions (from Content Library) - Validated based on enabled features
+    single_eval_instructions: Optional[str] = None  # REQUIRED if enable_single_eval
+    pairwise_eval_instructions: Optional[str] = None  # REQUIRED if enable_pairwise
+    eval_criteria: Optional[str] = None  # REQUIRED if any eval enabled
     
-    # Combine
+    # Combine - Validated if enabled
     enable_combine: bool = False
-    combine_strategy: str = ""  # REQUIRED from preset if combine enabled
-    combine_models: List[str] = field(default_factory=list)  # REQUIRED - must be set by preset
-    combine_instructions: Optional[str] = None  # REQUIRED from Content Library if combine enabled
+    combine_strategy: str = ""  # REQUIRED if combine enabled
+    combine_models: List[str] = field(default_factory=list)  # REQUIRED if combine enabled
+    combine_instructions: Optional[str] = None  # REQUIRED if combine enabled
     
-    # Concurrency settings (from GUI Settings page) - REQUIRED from preset
-    generation_concurrency: int = 5  # Max concurrent document generations
-    eval_concurrency: int = 5  # Max concurrent evaluation calls  
-    request_timeout: int = 600  # Request timeout in seconds - REQUIRED from GUI
-    max_retries: int = 3  # Max retries on transient failures
-    retry_delay: float = 2.0  # Delay between retries
+    # FPF Logging - Defaults provided
+    fpf_log_output: str = "file"  # REQUIRED: 'stream', 'file', or 'none'
+    fpf_log_file_path: Optional[str] = None  # REQUIRED if fpf_log_output='file'
     
-    # Logging
-    log_level: str = "INFO"  # Default INFO, can be overridden by preset
+    # Post-Combine Configuration - Optional
+    post_combine_top_n: Optional[int] = None  # Optional limit for post-combine eval
     
     # Callbacks
     on_progress: Optional[Callable[[str, float, str], None]] = None
+    
+    def __post_init__(self):
+        """Validate all required fields and conditional requirements."""
+        
+        # Validate required numeric fields
+        if self.iterations is None or self.iterations < 1:
+            raise ValueError("iterations must be >= 1 and is required")
+        if self.eval_iterations is None or self.eval_iterations < 1:
+            raise ValueError("eval_iterations must be >= 1 and is required")
+        if self.max_retries is None or not (1 <= self.max_retries <= 10):
+            raise ValueError("max_retries must be 1-10 and is required")
+        if self.retry_delay is None or not (0.5 <= self.retry_delay <= 30.0):
+            raise ValueError("retry_delay must be 0.5-30.0 and is required")
+        if self.request_timeout is None or not (60 <= self.request_timeout <= 3600):
+            raise ValueError("request_timeout must be 60-3600 and is required")
+        if self.eval_timeout is None or not (60 <= self.eval_timeout <= 3600):
+            raise ValueError("eval_timeout must be 60-3600 and is required")
+        if self.generation_concurrency is None or not (1 <= self.generation_concurrency <= 50):
+            raise ValueError("generation_concurrency must be 1-50 and is required")
+        if self.eval_concurrency is None or not (1 <= self.eval_concurrency <= 50):
+            raise ValueError("eval_concurrency must be 1-50 and is required")
+        
+        # Validate log_level
+        if self.log_level not in ['DEBUG', 'INFO', 'WARNING', 'ERROR']:
+            raise ValueError(f"log_level must be DEBUG/INFO/WARNING/ERROR, got {self.log_level}")
+        
+        # Validate fpf_log_output
+        if self.fpf_log_output not in ['stream', 'file', 'none']:
+            raise ValueError(f"fpf_log_output must be 'stream', 'file', or 'none', got {self.fpf_log_output}")
+        if self.fpf_log_output == 'file' and not self.fpf_log_file_path:
+            raise ValueError("fpf_log_file_path required when fpf_log_output='file'")
+        
+        # Validate inputs
+        if not self.document_ids:
+            raise ValueError("document_ids is required and cannot be empty")
+        if not self.document_contents:
+            raise ValueError("document_contents is required and cannot be empty")
+        for doc_id in self.document_ids:
+            if doc_id not in self.document_contents:
+                raise ValueError(f"Missing content for document_id: {doc_id}")
+            if not self.document_contents[doc_id] or not self.document_contents[doc_id].strip():
+                raise ValueError(f"Content for document_id {doc_id} is empty or whitespace")
+        
+        # Validate generators
+        if not self.generators:
+            raise ValueError("generators list is required and cannot be empty")
+        if not self.models:
+            raise ValueError("models list is required and cannot be empty")
+        
+        # Validate FPF instructions
+        if GeneratorType.FPF in self.generators and not self.instructions:
+            raise ValueError(
+                "FPF generator requires instructions. "
+                "Select instructions from Content Library in preset."
+            )
+        
+        # Validate evaluation instructions
+        if self.enable_single_eval:
+            if not self.eval_judge_models:
+                raise ValueError("eval_judge_models required when single evaluation enabled")
+            if not self.single_eval_instructions:
+                raise ValueError(
+                    "Single evaluation enabled but no instructions provided. "
+                    "Select single_eval_instructions from Content Library in preset."
+                )
+        
+        if self.enable_pairwise:
+            if not self.eval_judge_models:
+                raise ValueError("eval_judge_models required when pairwise evaluation enabled")
+            if not self.pairwise_eval_instructions:
+                raise ValueError(
+                    "Pairwise evaluation enabled but no instructions provided. "
+                    "Select pairwise_eval_instructions from Content Library in preset."
+                )
+        
+        if (self.enable_single_eval or self.enable_pairwise) and not self.eval_criteria:
+            raise ValueError(
+                "Evaluation enabled but no criteria provided. "
+                "Select eval_criteria from Content Library in preset."
+            )
+        
+        # Validate combine configuration
+        if self.enable_combine:
+            if not self.combine_models:
+                raise ValueError(
+                    "Combine enabled but no models provided. "
+                    "Add at least one combine model in preset."
+                )
+            if not self.combine_instructions:
+                raise ValueError(
+                    "Combine enabled but no instructions provided. "
+                    "Select combine_instructions from Content Library in preset."
+                )
+            if not self.combine_strategy:
+                raise ValueError("Combine enabled but no strategy provided")
+        
+        # Validate optional top-N settings
+        if self.pairwise_top_n is not None and self.pairwise_top_n < 2:
+            raise ValueError("pairwise_top_n must be >= 2 or None")
+        if self.post_combine_top_n is not None and self.post_combine_top_n < 2:
+            raise ValueError("post_combine_top_n must be >= 2 or None")
 
 
 @dataclass
@@ -146,8 +258,6 @@ class RunResult:
     
     # Final output
     winner_doc_id: Optional[str] = None
-    combined_content: Optional[str] = None  # Legacy: first combined doc content
-    combined_doc: Optional[GeneratedDocument] = None  # Legacy: first combined doc
     combined_docs: List[GeneratedDocument] = field(default_factory=list)  # All combined docs
     
     # Post-combine evaluation
@@ -318,7 +428,7 @@ class RunExecutor:
             raise ValueError(f"Unknown generator: {generator}")
     
     async def _save_generated_content(self, run_id: str, gen_doc: GeneratedDocument) -> None:
-        """Save generated document content to a file for later retrieval.
+        """Save generated document content to a file. FAILS if content is empty.
         
         Files are stored in logs/{run_id}/generated/{doc_id}.md
         """
@@ -326,6 +436,13 @@ class RunExecutor:
         import aiofiles
         
         try:
+            # Validate content before saving - NO FALLBACK
+            if not gen_doc.content:
+                raise ValueError(f"Cannot save document {gen_doc.doc_id}: content is None or empty")
+            
+            if not gen_doc.content.strip():
+                raise ValueError(f"Cannot save document {gen_doc.doc_id}: content is only whitespace")
+            
             # Create directory structure
             gen_dir = Path("logs") / run_id / "generated"
             gen_dir.mkdir(parents=True, exist_ok=True)
@@ -334,12 +451,15 @@ class RunExecutor:
             safe_doc_id = gen_doc.doc_id.replace(':', '_').replace('/', '_').replace('\\', '_')
             file_path = gen_dir / f"{safe_doc_id}.md"
             
-            # Write content
+            # Write content - no fallback
             async with aiofiles.open(file_path, 'w', encoding='utf-8') as f:
-                await f.write(gen_doc.content or "")
+                await f.write(gen_doc.content)
             
             logger.debug(f"Saved generated content to {file_path}")
         except Exception as e:
+            # Re-raise to fail the run - empty content is a critical error
+            logger.error(f"Failed to save generated content for {gen_doc.doc_id}: {e}")
+            raise RuntimeError(f"Failed to save {gen_doc.doc_id}: {e}") from e
             logger.exception(f"Failed to save generated content for {gen_doc.doc_id}: {e}")
     
     async def execute(self, run_id: str, config: RunConfig) -> RunResult:
@@ -473,7 +593,8 @@ class RunExecutor:
                 await self._run_combine(config, result)
             
             # Phase 4: Post-Combine Eval (optional)
-            if config.enable_combine and result.combined_doc and (config.enable_single_eval or config.enable_pairwise):
+            logger.debug(f"Post-combine eval check: enable_combine={config.enable_combine}, combined_docs={len(result.combined_docs)}, enable_pairwise={config.enable_pairwise}")
+            if config.enable_combine and result.combined_docs and config.enable_pairwise:
                 logger.info(f"Run {run_id}: Starting post-combine eval phase")
                 result.status = RunPhase.POST_COMBINE_EVAL
                 if getattr(self, '_run_store', None):
@@ -627,6 +748,7 @@ class RunExecutor:
                 custom_instructions=config.single_eval_instructions,
                 custom_criteria=config.eval_criteria,
                 concurrent_limit=config.eval_concurrency,
+                timeout_seconds=config.eval_timeout,
             )
             logger.info(f"[STATS-DEBUG] Creating SingleDocEvaluator with stats_tracker={self._fpf_stats is not None}")
             single_evaluator = SingleDocEvaluator(eval_config, stats_tracker=self._fpf_stats)
@@ -649,7 +771,11 @@ class RunExecutor:
                 if getattr(self, '_run_store', None):
                     run = self._run_store.get(run_id)
                     if run:
-                        tasks_list = run.get('tasks', [])
+                        if 'tasks' not in run:
+                            logger.error(f"Run {run_id} missing 'tasks' field")
+                            tasks_list = []
+                        else:
+                            tasks_list = run['tasks']
                         for t in tasks_list:
                             if t['id'] == task_id:
                                 t['status'] = 'running'
@@ -670,7 +796,10 @@ class RunExecutor:
                     if getattr(self, '_run_store', None):
                         run = self._run_store.get(run_id)
                         if run:
-                            tasks_list = run.get('tasks', [])
+                            if 'tasks' not in run:
+                                logger.warning(f"Run {run_id} missing 'tasks' field in progress callback")
+                                return
+                            tasks_list = run['tasks']
                             for tt in tasks_list:
                                 if tt['id'] == task_id:
                                     tt['progress'] = progress
@@ -779,7 +908,11 @@ class RunExecutor:
                     if getattr(self, '_run_store', None):
                         run = self._run_store.get(run_id)
                         if run:
-                            tasks_list = run.get('tasks', [])
+                            if 'tasks' not in run:
+                                logger.error(f"Run {run_id} missing 'tasks' field on completion")
+                                tasks_list = []
+                            else:
+                                tasks_list = run['tasks']
                             for t in tasks_list:
                                 if t['id'] == task_id:
                                     t['status'] = 'completed'
@@ -848,24 +981,30 @@ class RunExecutor:
             # For FPF: query=instructions, document_content=the document
             # For GPTR: query=the document content (GPTR generates research, not processes docs)
             if generator == GeneratorType.FPF:
-                # Compute FPF log settings based on log_level
-                fpf_log_output = "console"
-                fpf_log_file = None
+                # FPF instructions already validated in __post_init__ - should not be empty
+                if not instructions:
+                    raise ValueError(
+                        "FPF requires instructions but none provided. "
+                        "This should have been caught in RunConfig validation."
+                    )
+                
+                # Use configured FPF log settings from preset
+                fpf_log_output = config.fpf_log_output
+                fpf_log_file = config.fpf_log_file_path
                 run_log_file = None
-                if run_id:
+                
+                # If file output, ensure log directory exists and set paths
+                if run_id and fpf_log_output == 'file':
                     from pathlib import Path
                     log_dir = Path("logs") / run_id
                     log_dir.mkdir(parents=True, exist_ok=True)
-                    # Always stream FPF output to the run log file
                     run_log_file = str(log_dir / "run.log")
-                    if log_level == "VERBOSE":
-                        fpf_log_output = "file"
+                    if not fpf_log_file:
+                        # Default file path if not specified
                         fpf_log_file = str(log_dir / "fpf_output.log")
-                elif log_level in ("ERROR", "WARNING"):
-                    fpf_log_output = "none"
                 
                 gen_result = await adapter.generate(
-                    query=instructions or "",  # Instructions come from preset, no fallback
+                    query=instructions,  # No fallback - already validated
                     config=gen_config,
                     document_content=content,
                     progress_callback=progress_callback,
@@ -1049,117 +1188,136 @@ class RunExecutor:
                 logger.warning("Combine skipped: Need at least 2 top documents")
                 return
 
-            # Combine instructions - REQUIRED from Content Library via preset
+            # Combine instructions already validated in __post_init__
             combine_instructions = config.combine_instructions
-            if not combine_instructions:
-                raise ValueError(
-                    "Combine is enabled but no combine_instructions provided. "
-                    "You must configure combine_instructions_id in your preset to point to "
-                    "a Content Library item with combine instructions."
+            
+            # Get original instructions for context - REQUIRED, no fallback
+            if not result.generated_docs:
+                raise RuntimeError("Cannot combine: No generated documents available")
+            
+            source_doc_id = result.generated_docs[0].source_doc_id
+            if source_doc_id not in config.document_contents:
+                raise ValueError(f"Missing original instructions for source doc: {source_doc_id}")
+            
+            original_instructions = config.document_contents[source_doc_id]
+            if not original_instructions or not original_instructions.strip():
+                raise ValueError(f"Original instructions for {source_doc_id} are empty")
+            
+            # Iterate through ALL combine models - each gets retry attempts
+            if not config.combine_models:
+                raise ValueError("No combine models configured")
+            
+            max_retries = config.max_retries
+            all_models_failed = True
+            
+            for model_idx, combine_model in enumerate(config.combine_models):
+                # Parse provider:model format - REQUIRED, no fallback
+                if ":" not in combine_model:
+                    raise ValueError(
+                        f"Combine model must be in 'provider:model' format, got: {combine_model}. "
+                        "Valid providers: openai, anthropic, google, groq"
+                    )
+                
+                provider, model_name = combine_model.split(":", 1)
+                if provider not in ['openai', 'anthropic', 'google', 'groq']:
+                    raise ValueError(f"Unknown provider: {provider}. Valid: openai, anthropic, google, groq")
+                if not model_name:
+                    raise ValueError(f"Model name cannot be empty in: {combine_model}")
+                
+                combine_gen_config = GenerationConfig(
+                    provider=provider,
+                    model=model_name,
                 )
-            
-            # Get original instructions for context
-            original_instructions = ""
-            if result.generated_docs:
-                original_instructions = config.document_contents.get(result.generated_docs[0].source_doc_id, "")
-            
-            # Iterate over all combine models
-            for idx, combine_model in enumerate(config.combine_models):
-                try:
-                    # Parse provider:model format
-                    if ":" in combine_model:
-                        provider, model_name = combine_model.split(":", 1)
-                    else:
-                        provider = "openai"
-                        model_name = combine_model
-                    
-                    combine_gen_config = GenerationConfig(
-                        provider=provider,
-                        model=model_name,
-                    )
-                    
+                
+                logger.info(f"Combining with model {combine_model} ({model_idx + 1}/{len(config.combine_models)})")
+                model_succeeded = False
+                
+                # Retry logic for this specific model
+                for attempt in range(1, max_retries + 1):
                     combine_started_at = datetime.utcnow()
-                    logger.info(f"Combining with model {combine_model} ({idx + 1}/{len(config.combine_models)})")
-                    
-                    combine_result = await combine_adapter.combine(
-                        reports=top_docs,
-                        instructions=combine_instructions,
-                        config=combine_gen_config,
-                        original_instructions=original_instructions
-                    )
-                    combine_completed_at = datetime.utcnow()
-                    combine_duration = (combine_completed_at - combine_started_at).total_seconds()
-                    
-                    result.total_cost_usd += combine_result.cost_usd
-                    
-                    # Create unique doc_id with model info
-                    # Use last 8 chars of run_id + 4-char random ID for shorter filenames
-                    safe_model_name = combine_model.replace(":", "_")
-                    short_run_id = result.run_id[-8:] if len(result.run_id) >= 8 else result.run_id
-                    file_uuid = str(uuid4())[:4]
-                    combined_doc_id = f"combined.{short_run_id}.{file_uuid}.{safe_model_name}"
-                    
-                    # Create GeneratedDocument for combined content
-                    combined_doc = GeneratedDocument(
-                        doc_id=combined_doc_id,
-                        content=combine_result.content,
-                        generator=GeneratorType.FPF,
-                        model=combine_model,
-                        source_doc_id=result.generated_docs[0].source_doc_id if result.generated_docs else "",
-                        iteration=1,
-                        cost_usd=combine_result.cost_usd,
-                        duration_seconds=combine_duration,
-                        started_at=combine_started_at,
-                        completed_at=combine_completed_at,
-                    )
-                    
-                    # Add to list of combined docs
-                    result.combined_docs.append(combined_doc)
-                    
-                    # Save combined content to file for later retrieval
-                    await self._save_generated_content(result.run_id, combined_doc)
-                    
-                    # Set legacy fields to first combined doc for backwards compat
-                    if idx == 0:
-                        result.combined_content = combine_result.content
-                        result.combined_doc = combined_doc
-                    
-                    # Emit combine timeline event for this model
-                    await self._emit_timeline_event(
-                        run_id=result.run_id,
-                        phase="combination",
-                        event_type="combine",
-                        description=f"Combined documents using {combine_model}",
-                        model=combine_model,
-                        timestamp=combine_started_at,
-                        completed_at=combine_completed_at,
-                        duration_seconds=combine_duration,
-                        success=True,
-                        details={"combined_doc_id": combined_doc_id},
-                    )
-                    
-                    logger.info(f"Combine with {combine_model} complete. Cost: ${combine_result.cost_usd:.4f}")
-                    
-                except Exception as e:
-                    logger.error(f"Combine with {combine_model} failed: {e}")
-                    result.errors.append(f"Combine with {combine_model} failed: {str(e)}")
+                    try:
+                        logger.info(f"Combine attempt {attempt}/{max_retries} for {combine_model}")
+                        
+                        combine_result = await combine_adapter.combine(
+                            reports=top_docs,
+                            instructions=combine_instructions,
+                            config=combine_gen_config,
+                            original_instructions=original_instructions
+                        )
+                        combine_completed_at = datetime.utcnow()
+                        combine_duration = (combine_completed_at - combine_started_at).total_seconds()
+                        
+                        result.total_cost_usd += combine_result.cost_usd
+                        
+                        # Create unique doc_id with model info
+                        safe_model_name = combine_model.replace(":", "_")
+                        short_run_id = result.run_id[-8:] if len(result.run_id) >= 8 else result.run_id
+                        file_uuid = str(uuid4())[:4]
+                        combined_doc_id = f"combined.{short_run_id}.{file_uuid}.{safe_model_name}"
+                        
+                        # Create GeneratedDocument for combined content
+                        combined_doc = GeneratedDocument(
+                            doc_id=combined_doc_id,
+                            content=combine_result.content,
+                            generator=GeneratorType.FPF,
+                            model=combine_model,
+                            source_doc_id=result.generated_docs[0].source_doc_id if result.generated_docs else "",
+                            iteration=1,
+                            cost_usd=combine_result.cost_usd,
+                            duration_seconds=combine_duration,
+                            started_at=combine_started_at,
+                            completed_at=combine_completed_at,
+                        )
+                        
+                        # Add to list of combined docs
+                        result.combined_docs.append(combined_doc)
+                        
+                        # Save combined content to file
+                        await self._save_generated_content(result.run_id, combined_doc)
+                        
+                        # Emit combine timeline event
+                        await self._emit_timeline_event(
+                            run_id=result.run_id,
+                            phase="combination",
+                            event_type="combine",
+                            description=f"Combined documents using {combine_model}",
+                            model=combine_model,
+                            timestamp=combine_started_at,
+                            completed_at=combine_completed_at,
+                            duration_seconds=combine_duration,
+                            success=True,
+                            details={"combined_doc_id": combined_doc_id, "attempt": attempt, "model_index": model_idx},
+                        )
+                        
+                        logger.info(f"Combine with {combine_model} succeeded on attempt {attempt}. Cost: ${combine_result.cost_usd:.4f}")
+                        model_succeeded = True
+                        all_models_failed = False
+                        break  # Success for this model, move to next model
+                        
+                    except Exception as e:
+                        logger.error(f"Combine attempt {attempt}/{max_retries} for {combine_model} failed: {e}")
+                        
+                        if attempt < max_retries:
+                            # Wait before retry with same model
+                            await asyncio.sleep(config.retry_delay)
+                        else:
+                            # All retries exhausted for this model
+                            error_msg = f"Combine with {combine_model} failed after {max_retries} attempts: {str(e)}"
+                            result.errors.append(error_msg)
+                            logger.warning(f"{error_msg} - will try next model if available")
+                
+                # Continue to next model to get multiple combined docs for comparison
+                if model_succeeded:
+                    logger.info(f"Combine with {combine_model} succeeded, continuing to next model")
             
-            # Broadcast update after all combines
-            if getattr(self, '_run_store', None):
-                try:
-                    self._run_store.update(result.run_id, total_cost_usd=result.total_cost_usd)
-                    if getattr(self, '_run_ws_manager', None):
-                        try:
-                            await self._run_ws_manager.broadcast(result.run_id, {"event": "combine", "run": self._run_store.get(result.run_id)})
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
+            # Check if all models failed
+            if all_models_failed:
+                raise RuntimeError(f"All {len(config.combine_models)} combine models failed after {max_retries} retries each")
             
-            logger.info(f"All combines complete. Total combined docs: {len(result.combined_docs)}")
+            logger.info(f"Combine phase complete. Total combined docs: {len(result.combined_docs)}")
             
         except Exception as e:
-            logger.error(f"Combine failed: {e}")
+            logger.error(f"Combine failed: {e}", exc_info=True)
             result.errors.append(f"Combine failed: {str(e)}")
 
     async def _run_post_combine_eval(
@@ -1168,76 +1326,101 @@ class RunExecutor:
         result: RunResult,
     ) -> None:
         """
-        Run pairwise evaluation including all generated docs and all combined docs.
+        Run post-combine pairwise evaluation.
         
-        This compares ALL documents:
-        - All original generated documents
-        - All combined documents
+        Compares combined documents against the top-ranked originals that were sent to the combiner.
+        This validates whether combining improved quality vs individual winners.
         """
         if not result.combined_docs:
-            logger.warning("Post-combine eval skipped: No combined documents")
+            logger.warning("Post-combine eval skipped: No combined documents produced")
+            return
+
+        if not config.enable_pairwise:
+            logger.info("Post-combine eval skipped: Pairwise evaluation disabled in config")
+            return
+
+        if config.post_combine_top_n is None:
+            logger.info("Post-combine eval skipped: post_combine_top_n not configured")
             return
 
         try:
-            if config.enable_pairwise:
-                pairwise_config = PairwiseConfig(
-                    iterations=config.eval_iterations,
-                    judge_models=config.eval_judge_models,
-                    top_n=None,
-                    custom_instructions=config.pairwise_eval_instructions,
-                    concurrent_limit=config.eval_concurrency,
+            # Create pairwise config with same settings as pre-combine
+            # Use post_combine_top_n if configured, otherwise compare all
+            pairwise_config = PairwiseConfig(
+                iterations=config.eval_iterations,
+                judge_models=config.eval_judge_models,
+                top_n=config.post_combine_top_n,  # Use config value, not hardcoded None
+                custom_instructions=config.pairwise_eval_instructions,
+                concurrent_limit=config.eval_concurrency,
+            )
+            evaluator = PairwiseEvaluator(pairwise_config, stats_tracker=self._fpf_stats)
+            
+            # Collect documents for comparison
+            all_doc_ids = []
+            all_contents = {}
+            
+            # Get the original docs that were sent to combiner (top-ranked from pairwise)
+            # FAIL FAST - post-combine eval requires pairwise rankings
+            if not result.pairwise_results or not result.pairwise_results.rankings:
+                raise ValueError(
+                    "Post-combine evaluation requires pairwise rankings to determine which "
+                    "documents were sent to combiner. Enable pairwise evaluation in preset, "
+                    "or disable post-combine evaluation."
                 )
-                evaluator = PairwiseEvaluator(pairwise_config, stats_tracker=self._fpf_stats)
-                
-                # Build list of documents: only those sent to combiner + all combined
-                all_doc_ids = []
-                all_contents = {}
-                
-                # Get the doc IDs that were sent to combiner (top N from pairwise rankings)
-                docs_sent_to_combiner = []
-                if result.pairwise_results and result.pairwise_results.rankings:
-                    # rankings is List[Tuple[str, float]] as (doc_id, rating) - get top 2
-                    docs_sent_to_combiner = [doc_id for doc_id, rating in result.pairwise_results.rankings[:2]]
-                
-                # Add only the docs that were sent to combiner
-                for doc in result.generated_docs:
-                    if doc.doc_id in docs_sent_to_combiner:
-                        all_doc_ids.append(doc.doc_id)
-                        all_contents[doc.doc_id] = doc.content
-                
-                # Add all combined docs
-                for combined_doc in result.combined_docs:
-                    all_doc_ids.append(combined_doc.doc_id)
-                    all_contents[combined_doc.doc_id] = combined_doc.content
-                
-                if len(all_doc_ids) < 2:
-                    logger.warning("Post-combine eval skipped: Need at least 2 documents")
-                    return
-                
-                logger.info(f"Post-combine pairwise: comparing {len(all_doc_ids)} documents ({len(docs_sent_to_combiner)} sent to combiner + {len(result.combined_docs)} combined)")
-                
-                summary = await evaluator.evaluate_all_pairs(all_doc_ids, all_contents)
-                result.post_combine_eval_results = summary
-                
-                logger.info(
-                    f"Post-combine pairwise complete | "
-                    f"winner={summary.winner_doc_id} | "
-                    f"total_comparisons={summary.total_comparisons}"
+            
+            # Get top 2 that were used for combining
+            docs_sent_to_combiner = [doc_id for doc_id, rating in result.pairwise_results.rankings[:2]]
+            
+            # Add original docs that went into combiner
+            for doc in result.generated_docs:
+                if doc.doc_id in docs_sent_to_combiner:
+                    all_doc_ids.append(doc.doc_id)
+                    all_contents[doc.doc_id] = doc.content
+            
+            # Add all combined docs
+            for combined_doc in result.combined_docs:
+                all_doc_ids.append(combined_doc.doc_id)
+                all_contents[combined_doc.doc_id] = combined_doc.content
+            
+            # Validate we have enough documents
+            if len(all_doc_ids) < 2:
+                logger.error(
+                    f"Post-combine eval failed: Need at least 2 documents for comparison, "
+                    f"but only have {len(all_doc_ids)} (originals: {len(docs_sent_to_combiner)}, "
+                    f"combined: {len(result.combined_docs)})"
                 )
-                
-                if getattr(self, '_run_store', None):
-                    try:
-                        if getattr(self, '_run_ws_manager', None):
-                            await self._run_ws_manager.broadcast(result.run_id, {
-                                "event": "post_combine_eval", 
-                                "winner": summary.winner_doc_id,
-                                "summary": asdict(summary) if hasattr(summary, 'to_dict') else summary.__dict__
-                            })
-                    except Exception:
-                        pass
+                return
+            
+            logger.info(
+                f"Post-combine pairwise starting: {len(all_doc_ids)} documents total "
+                f"({len(docs_sent_to_combiner)} originals + {len(result.combined_docs)} combined)"
+            )
+            
+            # Run pairwise evaluation
+            summary = await evaluator.evaluate_all_pairs(all_doc_ids, all_contents)
+            result.post_combine_eval_results = summary
+            
+            logger.info(
+                f"Post-combine pairwise complete | "
+                f"winner={summary.winner_doc_id} | "
+                f"comparisons={summary.total_comparisons} | "
+                f"pairs={summary.total_pairs}"
+            )
+            
+            # Broadcast results via WebSocket
+            if getattr(self, '_run_store', None):
+                try:
+                    if getattr(self, '_run_ws_manager', None):
+                        await self._run_ws_manager.broadcast(result.run_id, {
+                            "event": "post_combine_eval_complete", 
+                            "winner": summary.winner_doc_id,
+                            "total_comparisons": summary.total_comparisons,
+                        })
+                except Exception as e:
+                    logger.warning(f"Failed to broadcast post-combine eval results: {e}")
 
         except Exception as e:
-            logger.error(f"Post-combine eval failed: {e}")
+            logger.error(f"Post-combine eval failed: {e}", exc_info=True)
             result.errors.append(f"Post-combine eval failed: {str(e)}")
     
     def cancel(self) -> None:

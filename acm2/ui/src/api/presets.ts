@@ -139,10 +139,14 @@ export interface CombineConfigComplete {
 
 export interface GeneralConfigComplete {
   iterations: number;
+  eval_iterations: number;
   output_dir: string;
   enable_logging: boolean;
   log_level: string;
   save_intermediate: boolean;
+  fpf_log_output: string;
+  fpf_log_file_path: string | null;
+  post_combine_top_n: number | null;
 }
 
 export interface ConcurrencyConfigComplete {
@@ -151,6 +155,10 @@ export interface ConcurrencyConfigComplete {
   enable_rate_limiting: boolean;
   max_retries: number;
   retry_delay: number;
+  generation_concurrency: number;
+  eval_concurrency: number;
+  request_timeout: number;
+  eval_timeout: number;
 }
 
 // ============================================================================
