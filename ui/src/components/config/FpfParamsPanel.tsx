@@ -1,0 +1,111 @@
+import { useEffect } from 'react'
+import { Section } from '../ui/section'
+import { Slider } from '../ui/slider'
+import { Checkbox, CheckboxGroup } from '../ui/checkbox'
+import { FileText, Cpu, Zap, RefreshCw } from 'lucide-react'
+import { useConfigStore } from '../../stores/config'
+import { useModelCatalog } from '../../stores/modelCatalog'
+
+export function FpfParamsPanel() {
+  const config = useConfigStore()
+  const { fpfModels, isLoading, fetchModels } = useModelCatalog()
+
+  // Fetch models on mount if empty
+  useEffect(() => {
+    if (fpfModels.length === 0) {
+      fetchModels()
+    }
+  }, [])
+
+  return (
+    <Section
+      title="FilePromptForge (FPF) Parameters"
+      icon={<FileText className="w-5 h-5" />}
+      defaultExpanded={true}
+    >
+      <CheckboxGroup
+        title="Enable FilePromptForge"
+        enabled={config.fpf.enabled}
+        onEnabledChange={(enabled) => config.updateFpf({ enabled })}
+      >
+        {/* Model Selection */}
+        <div className="mb-4">
+          <h4 className="text-sm font-semibold text-gray-300 mb-2 flex items-center gap-2">
+            <Cpu className="w-4 h-4" /> Model Selection
+            <button 
+              onClick={() => fetchModels()}
+              disabled={isLoading}
+              className="ml-auto text-xs text-gray-500 hover:text-gray-300"
+              title="Refresh models from FPF"
+            >
+              <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin' : ''}`} />
+            </button>
+          </h4>
+          <div className="grid grid-cols-2 gap-2" data-section="fpf-models">
+            {fpfModels.map((model) => (
+              <Checkbox
+                key={model}
+                checked={config.fpf.selectedModels.includes(model)}
+                onChange={(checked) => {
+                  const selectedModels = checked
+                    ? [...config.fpf.selectedModels, model]
+                    : config.fpf.selectedModels.filter((m) => m !== model)
+                  config.updateFpf({ selectedModels })
+                }}
+                label={model}
+                dataTestId={`fpf-model-${model}`}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Parameter Sliders */}
+        <div className="space-y-3 border-t border-gray-700 pt-4">
+          <h4 className="text-sm font-semibold text-gray-300 flex items-center gap-2">
+            <Zap className="w-4 h-4" /> Generation Parameters
+          </h4>
+
+          <Slider
+            label="Grounding Level"
+            value={config.fpf.groundingLevel}
+            onChange={(val) => config.updateFpf({ groundingLevel: val })}
+            min={0}
+            max={100}
+            step={1}
+            displayValue={`${config.fpf.groundingLevel}%`}
+          />
+
+          <Slider
+            label="Temperature"
+            value={config.fpf.temperature}
+            onChange={(val) => config.updateFpf({ temperature: val })}
+            min={0}
+            max={2}
+            step={0.1}
+            displayValue={config.fpf.temperature.toFixed(1)}
+          />
+
+          <Slider
+            label="Max Output Tokens"
+            value={config.fpf.maxTokens}
+            onChange={(val) => config.updateFpf({ maxTokens: val })}
+            min={512}
+            max={200000}
+            step={256}
+            displayValue={config.fpf.maxTokens}
+          />
+
+          <Slider
+            label="Thinking Budget (tokens)"
+            value={config.fpf.thinkingBudget}
+            onChange={(val) => config.updateFpf({ thinkingBudget: val })}
+            min={256}
+            max={200000}
+            step={256}
+            displayValue={config.fpf.thinkingBudget}
+          />
+        </div>
+      </CheckboxGroup>
+    </Section>
+  )
+}
