@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Model Pricing Index (OpenRouter, per-million tokens)",
+  "description": "USD pricing per 1,000,000 tokens for models returned by the OpenRouter API (https://openrouter.ai/api/v1/models).",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "description": "Pricing record for a single model",
+    "properties": {
+      "provider": {
+        "type": "string",
+        "description": "Top-level provider extracted from model id (e.g., 'openai', 'google')."
+      },
+      "model": {
+        "type": "string",
+        "description": "Exact model identifier as returned by OpenRouter (e.g., 'openai/gpt-4o-mini' or 'google/gemini-2.5-pro')."
+      },
+      "input_price_per_million_usd": {
+        "type": [
+          "number",
+          "null"
+        ],
+        "minimum": 0,
+        "description": "Price in USD per 1,000,000 input (prompt) tokens. Null if unavailable."
+      },
+      "output_price_per_million_usd": {
+        "type": [
+          "number",
+          "null"
+        ],
+        "minimum": 0,
+        "description": "Price in USD per 1,000,000 output (completion) tokens. Null if unavailable."
+      },
+      "unit": {
+        "type": "string",
+        "enum": [
+          "per_million_tokens"
+        ],
+        "description": "Indicates pricing unit normalization; always 'per_million_tokens'."
+      },
+      "last_updated": {
+        "type": "string",
+        "format": "date",
+        "description": "UTC date (YYYY-MM-DD) when the pricing record was generated."
+      },
+      "source": {
+        "type": "string",
+        "const": "openrouter",
+        "description": "Source of pricing data. Fixed to 'openrouter'."
+      },
+      "source_url": {
+        "type": "string",
+        "format": "uri",
+        "description": "URL used to retrieve the data (https://openrouter.ai/api/v1/models)."
+      },
+      "metadata": {
+        "type": "object",
+        "description": "Optional extra information to aid costing and diagnostics.",
+        "properties": {
+          "context_length": {
+            "type": [
+              "integer",
+              "number",
+              "null"
+            ],
+            "description": "Approximate maximum context length, if provided by OpenRouter."
+          },
+          "raw_pricing": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Original pricing sub-object from OpenRouter response for reference."
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "required": [
+      "provider",
+      "model",
+      "unit",
+      "last_updated",
+      "source",
+      "source_url"
+    ],
+    "anyOf": [
+      {
+        "required": [
+          "input_price_per_million_usd"
+        ]
+      },
+      {
+        "required": [
+          "output_price_per_million_usd"
+        ]
+      }
+    ],
+    "additionalProperties": true
+  }
+}

@@ -1,23 +1,36 @@
+# Environments
 .env
 .env.*
 .venv/
 venv/
+
+# Dependencies
 node_modules/
 *.egg-info/
+
+# Python cache
 __pycache__/
 *.pyc
 .pytest_cache/
 .mypy_cache/
+
+# Build artifacts
 dist/
 build/
 ui/dist/
 app/static/assets/
-logs/
+
+# Data & logs
 *.db
+logs/
 server.log
 server.err
+
+# Media and large outputs
 screenshots/
 *.png
+
+# OS/IDE noise
 .DS_Store
 Thumbs.db
 .vscode/

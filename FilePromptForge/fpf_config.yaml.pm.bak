@@ -1,0 +1,22 @@
+provider: openai
+model: gpt-5-mini
+provider_urls:
+  openai: https://api.openai.com/v1/responses
+  google: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent
+test:
+  out: test/output/<file_b_stem>.<model_name>.fpf.response.md
+  file_a: test/input/sample_utf8.txt
+  file_b: test/prompts/standard_prompt.txt
+prompt_template: null
+web_search:
+  search_context_size: low
+  search_prompt: Perform a focused web search for up-to-date information relevant
+    to the user's request. Summarize the most relevant findings and include citation
+    links.
+include:
+- web_search_call.action.sources
+reasoning:
+  effort: low
+max_completion_tokens: 50000
+grounding:
+  max_results: 1
