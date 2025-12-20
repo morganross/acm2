@@ -110,6 +110,15 @@ def _get_runs_safely(preset):
     except Exception:
         return []
 
+def _derive_iterations(preset) -> int:
+    """Derive iterations from config_overrides.general or fall back to 1."""
+    try:
+        general_cfg = (preset.config_overrides or {}).get("general") or {}
+        return general_cfg.get("iterations") or 1
+    except Exception:
+        return 1
+
+
 def _preset_to_response(preset) -> PresetResponse:
     """Convert DB preset to API response."""
     runs = _get_runs_safely(preset)
@@ -183,7 +192,7 @@ def _preset_to_response(preset) -> PresetResponse:
         # Legacy fields (backward compatibility)
         generators=[GeneratorType(g) for g in (preset.generators or ["gptr"])],
         models=[ModelConfig(**m) for m in (preset.models or [])],
-        iterations=preset.iterations,
+        iterations=_derive_iterations(preset),
         gptr_settings=GptrSettings(**preset.gptr_config) if preset.gptr_config else None,
         fpf_settings=FpfSettings(**preset.fpf_config) if preset.fpf_config else None,
         evaluation=EvaluationSettings(enabled=preset.evaluation_enabled),
@@ -205,7 +214,7 @@ def _preset_to_summary(preset) -> PresetSummary:
         description=preset.description,
         document_count=len(preset.documents) if preset.documents else 0,
         model_count=len(preset.models) if preset.models else 0,
-        iterations=preset.iterations,
+        iterations=_derive_iterations(preset),
         generators=[GeneratorType(g) for g in (preset.generators or ["gptr"])],
         created_at=preset.created_at,
         updated_at=preset.updated_at,
@@ -299,7 +308,6 @@ async def create_preset(
         documents=data.documents,
         models=models if models else None,
         generators=generators,
-        iterations=iterations,
         evaluation_enabled=evaluation_enabled,
         pairwise_enabled=pairwise_enabled,
         gptr_config=data.gptr_settings.model_dump() if data.gptr_settings else None,

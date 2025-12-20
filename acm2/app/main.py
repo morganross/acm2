@@ -152,8 +152,22 @@ def create_app() -> FastAPI:
     # Include API routes
     app.include_router(api_router)
     
-    static_dir = Path(__file__).resolve().parent / "static"
+    # ---------------------------------------------------------------------
+    # Static UI (SPA)
+    #
+    # Prefer the Vite build output at acm2/acm2/ui/dist if present, otherwise
+    # fall back to the legacy committed directory at acm2/acm2/app/static.
+    # This avoids the common "I changed the UI but nothing changed" issue when
+    # the backend is still serving old prebuilt assets.
+    # ---------------------------------------------------------------------
+    project_root = Path(__file__).resolve().parent.parent  # acm2/acm2
+    ui_dist_dir = project_root / "ui" / "dist"
+    legacy_static_dir = Path(__file__).resolve().parent / "static"
+
+    static_dir = ui_dist_dir if ui_dist_dir.exists() else legacy_static_dir
+
     if static_dir.exists():
+        logger.info("Serving UI static files from: %s", static_dir)
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
         @app.get("/", include_in_schema=False)

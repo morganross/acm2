@@ -615,14 +615,13 @@ export default function Configure() {
   const handleStartRun = async () => {
     setIsSubmitting(true)
     try {
-      // Get concurrency settings from localStorage (Settings page)
-      const concurrencySettings = getConcurrencySettings()
-      
       // Construct the run request based on store + local state
+      // Note: All configuration is loaded from the preset (preset_id is always provided)
+      // The backend will load complete config from the preset in the database
       const runRequest = {
         title: runName,
         description: runDescription,
-        preset_id: selectedPresetId || undefined,  // Link run to preset
+        preset_id: selectedPresetId || undefined,  // Link run to preset - backend loads all config from this
         documents: selectedInputDocIds,  // Input documents from Content Library
         models: config.fpf.selectedModels.length > 0 ? config.fpf.selectedModels : ['gpt-5'],
         generators: [
@@ -657,14 +656,8 @@ export default function Configure() {
         eval_criteria_id: config.eval.evalCriteriaId,
         combine_instructions_id: config.combine.combineInstructionsId,
         
-        // Concurrency settings from Settings page
-        concurrency_config: {
-          generation_concurrency: concurrencySettings.generationConcurrency,
-          eval_concurrency: concurrencySettings.evalConcurrency,
-          request_timeout: concurrencySettings.requestTimeout,
-          max_retries: concurrencySettings.maxRetries,
-          retry_delay: concurrencySettings.retryDelay,
-        },
+        // NOTE: Concurrency/timeout/iteration settings come from the preset
+        // No need to pass them here - backend loads full config from preset_id
       }
 
       const created = await runsApi.create(runRequest)

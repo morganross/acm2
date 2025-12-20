@@ -28,7 +28,7 @@ export default function ExecutionHistory() {
   const [error, setError] = useState<string | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
-  const [bulkDeleting, setBulkDeleting] = useState(false)
+  const [bulkDeleteTarget, setBulkDeleteTarget] = useState<null | 'completedFailed' | 'failed'>(null)
 
   // Fetch runs from API
   useEffect(() => {
@@ -72,25 +72,32 @@ export default function ExecutionHistory() {
     setDeleteConfirm(null)
   }
 
-  const handleDeleteAllCompletedFailed = async () => {
-    if (bulkDeleting) return
+  const handleBulkDelete = async (target: 'completedFailed' | 'failed') => {
+    if (bulkDeleteTarget) return
     if (deleting) return
 
+    const statuses = target === 'failed' ? ['failed'] : ['completed', 'failed']
     const runIdsToDelete = runs
-      .filter((r) => r.status === 'completed' || r.status === 'failed')
+      .filter((r) => statuses.includes(r.status))
       .map((r) => r.id)
 
     if (runIdsToDelete.length === 0) {
-      notify.info('No completed or failed runs to delete')
+      notify.info(
+        target === 'failed'
+          ? 'No failed runs to delete'
+          : 'No completed or failed runs to delete'
+      )
       return
     }
 
     const ok = window.confirm(
-      `Delete ${runIdsToDelete.length} completed/failed run(s)? This cannot be undone.`
+      target === 'failed'
+        ? `Delete ${runIdsToDelete.length} failed run(s)? This cannot be undone.`
+        : `Delete ${runIdsToDelete.length} completed/failed run(s)? This cannot be undone.`
     )
     if (!ok) return
 
-    setBulkDeleting(true)
+    setBulkDeleteTarget(target)
     setError(null)
 
     const deletedIds: string[] = []
@@ -110,7 +117,8 @@ export default function ExecutionHistory() {
 
       if (deletedIds.length > 0) {
         setRuns((prev) => prev.filter((r) => !deletedIds.includes(r.id)))
-        notify.success(`Deleted ${deletedIds.length} run(s)`) 
+        const label = target === 'failed' ? 'failed run(s)' : 'completed/failed run(s)'
+        notify.success(`Deleted ${deletedIds.length} ${label}`) 
       }
 
       if (errors.length > 0) {
@@ -119,7 +127,7 @@ export default function ExecutionHistory() {
         console.error('Bulk delete errors:', errors)
       }
     } finally {
-      setBulkDeleting(false)
+      setBulkDeleteTarget(null)
     }
   }
 
@@ -141,24 +149,44 @@ export default function ExecutionHistory() {
             <p className="text-sm text-gray-400">View past preset executions and results</p>
           </div>
 
-          <button
-            onClick={handleDeleteAllCompletedFailed}
-            disabled={loading || bulkDeleting || !!deleting}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-gray-700 disabled:text-gray-400 text-white rounded-lg text-sm font-medium transition-colors"
-            title="Delete all completed and failed runs"
-          >
-            {bulkDeleting ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Deleting…
-              </>
-            ) : (
-              <>
-                <Trash2 className="w-4 h-4" />
-                Delete Completed/Failed
-              </>
-            )}
-          </button>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <button
+              onClick={() => handleBulkDelete('failed')}
+              disabled={loading || !!deleting || !!bulkDeleteTarget}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-red-500 hover:bg-red-600 disabled:bg-gray-700 disabled:text-gray-400 text-white rounded-lg text-sm font-medium transition-colors"
+              title="Delete all failed runs"
+            >
+              {bulkDeleteTarget === 'failed' ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Deleting…
+                </>
+              ) : (
+                <>
+                  <Trash2 className="w-4 h-4" />
+                  Delete Failed
+                </>
+              )}
+            </button>
+            <button
+              onClick={() => handleBulkDelete('completedFailed')}
+              disabled={loading || !!deleting || !!bulkDeleteTarget}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-gray-700 disabled:text-gray-400 text-white rounded-lg text-sm font-medium transition-colors"
+              title="Delete all completed and failed runs"
+            >
+              {bulkDeleteTarget === 'completedFailed' ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Deleting…
+                </>
+              ) : (
+                <>
+                  <Trash2 className="w-4 h-4" />
+                  Delete Completed/Failed
+                </>
+              )}
+            </button>
+          </div>
         </div>
 
         {/* Filters */}

@@ -7,6 +7,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, Optional
 from uuid import uuid4
+from pathlib import Path
 
 from dataclasses import asdict, fields, is_dataclass
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, WebSocket, WebSocketDisconnect, Depends
@@ -573,96 +574,134 @@ def _to_detail(run) -> RunDetail:
     
     # Parse generated docs info
     generated_docs = []
-    for doc_info in (results_summary.get("generated_docs") or []):
-        generated_docs.append(GeneratedDocInfo(**doc_info))
+    try:
+        for doc_info in (results_summary.get("generated_docs") or []):
+            generated_docs.append(GeneratedDocInfo(**doc_info))
+    except Exception as e:
+        logger.warning(f"Failed to parse generated_docs for run {run.id}: {e}")
+        generated_docs = []
     
     # Parse pairwise results (including comparisons)
     pairwise_results = None
-    if results_summary.get("pairwise"):
-        pw = results_summary["pairwise"]
-        rankings = [PairwiseRanking(**r) for r in (pw.get("rankings") or [])]
-        comparisons = [PairwiseComparison(**c) for c in (pw.get("comparisons") or [])]
-        pairwise_results = PairwiseResults(
-            total_comparisons=pw.get("total_comparisons", 0),
-            winner_doc_id=pw.get("winner_doc_id"),
-            rankings=rankings,
-            comparisons=comparisons,
-        )
+    try:
+        if results_summary.get("pairwise"):
+            pw = results_summary["pairwise"]
+            rankings = [PairwiseRanking(**r) for r in (pw.get("rankings") or [])]
+            comparisons = [PairwiseComparison(**c) for c in (pw.get("comparisons") or [])]
+            pairwise_results = PairwiseResults(
+                total_comparisons=pw.get("total_comparisons", 0),
+                winner_doc_id=pw.get("winner_doc_id"),
+                rankings=rankings,
+                comparisons=comparisons,
+            )
+    except Exception as e:
+        logger.warning(f"Failed to parse pairwise for run {run.id}: {e}")
+        pairwise_results = None
     
     # Parse post-combine pairwise results (combined doc vs winner)
     post_combine_pairwise = None
-    if results_summary.get("post_combine_eval"):
-        pce = results_summary["post_combine_eval"]
-        # Build rankings from elo_ratings
-        pc_rankings = []
-        for elo in (pce.get("elo_ratings") or []):
-            pc_rankings.append(PairwiseRanking(
-                doc_id=elo.get("doc_id", ""),
-                wins=elo.get("wins", 0),
-                losses=elo.get("losses", 0),
-                elo=elo.get("rating", 1000.0),
-            ))
-        # Build comparisons from results
-        pc_comparisons = []
-        for res in (pce.get("results") or []):
-            pc_comparisons.append(PairwiseComparison(
-                doc_id_a=res.get("doc_id_1", ""),
-                doc_id_b=res.get("doc_id_2", ""),
-                winner=res.get("winner_doc_id", ""),
-                judge_model=res.get("model", ""),
-                reason=res.get("reason", ""),
-                score_a=None,
-                score_b=None,
-            ))
-        post_combine_pairwise = PairwiseResults(
-            total_comparisons=pce.get("total_comparisons", 0),
-            winner_doc_id=pce.get("winner_doc_id"),
-            rankings=pc_rankings,
-            comparisons=pc_comparisons,
-        )
+    try:
+        if results_summary.get("post_combine_eval"):
+            pce = results_summary["post_combine_eval"]
+            # Build rankings from elo_ratings
+            pc_rankings = []
+            for elo in (pce.get("elo_ratings") or []):
+                pc_rankings.append(PairwiseRanking(
+                    doc_id=elo.get("doc_id", ""),
+                    wins=elo.get("wins", 0),
+                    losses=elo.get("losses", 0),
+                    elo=elo.get("rating", 1000.0),
+                ))
+            # Build comparisons from results
+            pc_comparisons = []
+            for res in (pce.get("results") or []):
+                pc_comparisons.append(PairwiseComparison(
+                    doc_id_a=res.get("doc_id_1", ""),
+                    doc_id_b=res.get("doc_id_2", ""),
+                    winner=res.get("winner_doc_id", ""),
+                    judge_model=res.get("model", ""),
+                    reason=res.get("reason", ""),
+                    score_a=None,
+                    score_b=None,
+                ))
+            post_combine_pairwise = PairwiseResults(
+                total_comparisons=pce.get("total_comparisons", 0),
+                winner_doc_id=pce.get("winner_doc_id"),
+                rankings=pc_rankings,
+                comparisons=pc_comparisons,
+            )
+    except Exception as e:
+        logger.warning(f"Failed to parse post_combine_eval for run {run.id}: {e}")
+        post_combine_pairwise = None
     
     # Parse generation events (ACM1-style)
-    generation_events = [
-        GenerationEvent(**ge) for ge in (results_summary.get("generation_events") or [])
-    ]
+    generation_events = []
+    try:
+        generation_events = [
+            GenerationEvent(**ge) for ge in (results_summary.get("generation_events") or [])
+        ]
+    except Exception as e:
+        logger.warning(f"Failed to parse generation_events for run {run.id}: {e}")
+        generation_events = []
     
     # Parse timeline events (ACM1-style)
-    timeline_events = [
-        TimelineEvent(**te) for te in (results_summary.get("timeline_events") or [])
-    ]
+    timeline_events = []
+    try:
+        timeline_events = [
+            TimelineEvent(**te) for te in (results_summary.get("timeline_events") or [])
+        ]
+    except Exception as e:
+        logger.warning(f"Failed to parse timeline_events for run {run.id}: {e}")
+        timeline_events = []
     
     # Parse detailed evaluation data (ACM1-style with criteria breakdown)
     pre_combine_evals_detailed = {}
-    for doc_id, detail in (results_summary.get("pre_combine_evals_detailed") or {}).items():
-        evaluations = []
-        for eval_data in (detail.get("evaluations") or []):
-            scores = [CriterionScoreInfo(**s) for s in (eval_data.get("scores") or [])]
-            evaluations.append(JudgeEvaluation(
-                judge_model=eval_data.get("judge_model", ""),
-                trial=eval_data.get("trial", 0),
-                scores=scores,
-                average_score=eval_data.get("average_score", 0.0),
-            ))
-        pre_combine_evals_detailed[doc_id] = DocumentEvalDetail(
-            evaluations=evaluations,
-            overall_average=detail.get("overall_average", 0.0),
-        )
+    try:
+        for doc_id, detail in (results_summary.get("pre_combine_evals_detailed") or {}).items():
+            evaluations = []
+            for eval_data in (detail.get("evaluations") or []):
+                scores = [CriterionScoreInfo(**s) for s in (eval_data.get("scores") or [])]
+                evaluations.append(JudgeEvaluation(
+                    judge_model=eval_data.get("judge_model", ""),
+                    trial=eval_data.get("trial", 0),
+                    scores=scores,
+                    average_score=eval_data.get("average_score", 0.0),
+                ))
+            pre_combine_evals_detailed[doc_id] = DocumentEvalDetail(
+                evaluations=evaluations,
+                overall_average=detail.get("overall_average", 0.0),
+            )
+    except Exception as e:
+        logger.warning(f"Failed to parse pre_combine_evals_detailed for run {run.id}: {e}")
+        pre_combine_evals_detailed = {}
     
     post_combine_evals_detailed = {}
-    for doc_id, detail in (results_summary.get("post_combine_evals_detailed") or {}).items():
-        evaluations = []
-        for eval_data in (detail.get("evaluations") or []):
-            scores = [CriterionScoreInfo(**s) for s in (eval_data.get("scores") or [])]
-            evaluations.append(JudgeEvaluation(
-                judge_model=eval_data.get("judge_model", ""),
-                trial=eval_data.get("trial", 0),
-                scores=scores,
-                average_score=eval_data.get("average_score", 0.0),
-            ))
-        post_combine_evals_detailed[doc_id] = DocumentEvalDetail(
-            evaluations=evaluations,
-            overall_average=detail.get("overall_average", 0.0),
-        )
+    try:
+        for doc_id, detail in (results_summary.get("post_combine_evals_detailed") or {}).items():
+            evaluations = []
+            for eval_data in (detail.get("evaluations") or []):
+                scores = [CriterionScoreInfo(**s) for s in (eval_data.get("scores") or [])]
+                evaluations.append(JudgeEvaluation(
+                    judge_model=eval_data.get("judge_model", ""),
+                    trial=eval_data.get("trial", 0),
+                    scores=scores,
+                    average_score=eval_data.get("average_score", 0.0),
+                ))
+            post_combine_evals_detailed[doc_id] = DocumentEvalDetail(
+                evaluations=evaluations,
+                overall_average=detail.get("overall_average", 0.0),
+            )
+    except Exception as e:
+        logger.warning(f"Failed to parse post_combine_evals_detailed for run {run.id}: {e}")
+        post_combine_evals_detailed = {}
+    
+    # Parse models safely
+    models = []
+    try:
+        models = [ModelConfig(**m) for m in (config.get("models") or [])]
+    except Exception as e:
+        logger.warning(f"Failed to parse models for run {run.id}: {e}")
+        models = []
     
     return RunDetail(
         id=run.id,
@@ -670,7 +709,7 @@ def _to_detail(run) -> RunDetail:
         description=run.description,
         status=run.status,
         generators=[GeneratorType(g) for g in (config.get("generators") or [])],
-        models=[ModelConfig(**m) for m in (config.get("models") or [])],
+        models=models,
         document_ids=config.get("document_ids") or [],
         iterations=config.get("iterations", 1),
         log_level=config.get("log_level", "INFO"),  # Include log_level from config
@@ -812,6 +851,9 @@ async def create_run(
         concurrency_cfg = overrides.get("concurrency", {})
 
     # Construct config dict
+    if preset:
+        logger.info(f"DEBUG: Preset post_combine_top_n: {preset.post_combine_top_n}")
+    
     # log_level priority: preset's general_config.log_level > preset.log_level > request override > fallback INFO
     resolved_log_level = general_cfg.get("log_level") or (preset.log_level if preset else None) or data.log_level or "INFO"
     config = {
@@ -820,6 +862,7 @@ async def create_run(
         "models": models,
         "iterations": general_cfg.get("iterations") or (preset.iterations if preset else data.iterations),
         "log_level": resolved_log_level,
+        "post_combine_top_n": general_cfg.get("post_combine_top_n") or (preset.post_combine_top_n if preset else None),
         "evaluation_enabled": eval_cfg.get("enabled") if eval_cfg.get("enabled") is not None else (preset.evaluation_enabled if preset else data.evaluation.enabled),
         "pairwise_enabled": pairwise_cfg.get("enabled") if pairwise_cfg.get("enabled") is not None else (preset.pairwise_enabled if preset else data.pairwise.enabled),
         "gptr_config": gptr_cfg if gptr_cfg else (data.gptr_settings.model_dump() if data.gptr_settings else None),
@@ -897,19 +940,33 @@ async def list_runs(
     )
 
 
-@router.get("/{run_id}", response_model=RunDetail)
+@router.get("/{run_id}")
 async def get_run(
     run_id: str,
     db: AsyncSession = Depends(get_db)
-) -> RunDetail:
+) -> dict:
     """
     Get detailed information about a specific run.
     """
+    logger.info(f"Getting run {run_id}")
     repo = RunRepository(db)
     run = await repo.get_with_tasks(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
-    return _to_detail(run)
+    try:
+        detail = _to_detail(run)
+        return {
+            "id": run.id,
+            "status": run.status,
+            "progress": _calculate_progress(run),
+            "error": run.error_message,
+            "created_at": run.created_at.isoformat() if run.created_at else None,
+            "started_at": run.started_at.isoformat() if run.started_at else None,
+            "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+        }
+    except Exception as e:
+        logger.exception(f"Error serializing run {run_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Error retrieving run: {str(e)}")
 
 
 @router.delete("/{run_id}")
@@ -1074,7 +1131,10 @@ async def start_run(
         # NO FALLBACK - must be configured in preset's combine_config.selected_models
         combine_models=combine_config.get("selected_models") or [],
         combine_instructions=combine_instructions,
+        post_combine_top_n=run_config.get("post_combine_top_n"),
         log_level=run_config.get("log_level", "INFO"),
+        fpf_log_output="file",
+        fpf_log_file_path=str(Path("logs") / run_id / "fpf_output.log"),
         # Concurrency settings (from GUI Settings page via concurrency_config)
         # REQUIRED from preset - no fallback defaults
         generation_concurrency=concurrency_config.get("max_concurrent", concurrency_config.get("generation_concurrency")) or 5,
