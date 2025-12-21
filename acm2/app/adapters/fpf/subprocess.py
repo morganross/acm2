@@ -27,6 +27,7 @@ def _run_subprocess_streaming(
     timeout: float,
     log_file: Optional[str] = None,
     heartbeat_interval: float = 30.0,
+    idle_no_output_kill: Optional[float] = 180.0,
 ) -> tuple[int, str, str]:
     """
     Synchronous subprocess execution with real-time output streaming.
@@ -36,8 +37,9 @@ def _run_subprocess_streaming(
     """
     stdout_lines = []
     stderr_lines = []
-    last_heartbeat = time.time()
     start_time = time.time()
+    last_heartbeat = start_time
+    last_output = start_time
     
     # Open log file if specified
     log_fh = None
@@ -47,7 +49,7 @@ def _run_subprocess_streaming(
         except Exception as e:
             logger.warning(f"Could not open FPF log file {log_file}: {e}")
     
-    def write_log(line: str, prefix: str = "FPF"):
+    def write_log(line: str, prefix: str = "FPF", update_idle: bool = True):
         """Write to both logger and log file."""
         log_line = f"[{prefix}] {line}"
         logger.info(log_line)
@@ -57,6 +59,10 @@ def _run_subprocess_streaming(
                 log_fh.flush()
             except Exception:
                 pass
+        # Track last time we saw output for idle detection
+        if update_idle:
+            nonlocal last_output
+            last_output = time.time()
     
     try:
         # Use Popen for real-time streaming
@@ -66,39 +72,56 @@ def _run_subprocess_streaming(
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
+            encoding='utf-8',
+            errors='replace',
             bufsize=1,  # Line buffered
         )
         
         # Capture current context to propagate to threads
         ctx = contextvars.copy_context()
+        ctx_stdout = ctx.copy()
+        ctx_stderr = ctx.copy()
 
         # Read stdout and stderr in separate threads
         def read_stdout():
-            ctx.run(_read_stdout_impl)
+            ctx_stdout.run(_read_stdout_impl)
 
         def _read_stdout_impl():
             nonlocal last_heartbeat
-            for line in iter(process.stdout.readline, ''):
-                if line:
-                    line = line.rstrip('\n\r')
-                    stdout_lines.append(line)
-                    write_log(line, "FPF")
-                    last_heartbeat = time.time()
-            process.stdout.close()
+            try:
+                for line in iter(process.stdout.readline, ''):
+                    if line:
+                        line = line.rstrip('\n\r')
+                        stdout_lines.append(line)
+                        write_log(line, "FPF")
+                        last_heartbeat = time.time()
+            except Exception as e:
+                write_log(f"Error reading stdout: {e}", "ACM ERR")
+            finally:
+                try:
+                    process.stdout.close()
+                except Exception:
+                    pass
         
         def read_stderr():
-            ctx.run(_read_stderr_impl)
+            ctx_stderr.run(_read_stderr_impl)
 
         def _read_stderr_impl():
             nonlocal last_heartbeat
-            for line in iter(process.stderr.readline, ''):
-                if line:
-                    line = line.rstrip('\n\r')
-                    stderr_lines.append(line)
-                    write_log(line, "FPF ERR")
-                    last_heartbeat = time.time()
-            process.stderr.close()
+            try:
+                for line in iter(process.stderr.readline, ''):
+                    if line:
+                        line = line.rstrip('\n\r')
+                        stderr_lines.append(line)
+                        write_log(line, "FPF ERR")
+                        last_heartbeat = time.time()
+            except Exception as e:
+                write_log(f"Error reading stderr: {e}", "ACM ERR")
+            finally:
+                try:
+                    process.stderr.close()
+                except Exception:
+                    pass
         
         stdout_thread = threading.Thread(target=read_stdout, daemon=True)
         stderr_thread = threading.Thread(target=read_stderr, daemon=True)
@@ -107,27 +130,45 @@ def _run_subprocess_streaming(
         
         # Wait for process with timeout and heartbeats
         deadline = time.time() + timeout
+        write_log(f"Subprocess started. PID: {process.pid}, Timeout: {timeout}s, Deadline: {deadline}", "ACM")
+
         while process.poll() is None:
             now = time.time()
             
             # Check timeout
             if now > deadline:
+                write_log(f"TIMEOUT REACHED. Killing process {process.pid}...", "ACM")
                 process.kill()
                 process.wait()
-                write_log(f"Process timed out after {timeout}s", "ACM")
+                write_log(f"Process {process.pid} killed due to timeout.", "ACM")
                 if log_fh:
                     log_fh.close()
                 return -1, '\n'.join(stdout_lines), "Process timed out"
+
+            # Kill if no stdout/stderr seen for an extended period (prevents heartbeat-only hangs)
+            if idle_no_output_kill and (now - last_output) >= idle_no_output_kill:
+                write_log(f"IDLE TIMEOUT. No output for {int(idle_no_output_kill)}s. Killing process {process.pid}...", "ACM")
+                process.kill()
+                process.wait()
+                write_log(
+                    f"Terminated due to no output for {int(idle_no_output_kill)}s",
+                    "ACM",
+                )
+                if log_fh:
+                    log_fh.close()
+                return -2, '\n'.join(stdout_lines), f"No output for {int(idle_no_output_kill)}s"
             
             # Log heartbeat if needed
             if now - last_heartbeat >= heartbeat_interval:
                 elapsed = int(now - start_time)
-                write_log(f"Heartbeat: FPF subprocess running for {elapsed}s...", "ACM")
+                write_log(f"Heartbeat: FPF subprocess {process.pid} running for {elapsed}s... (start={start_time} now={now})", "ACM", update_idle=False)
                 last_heartbeat = now
             
             # Sleep briefly to avoid busy waiting
             time.sleep(0.1)
         
+        write_log(f"Process {process.pid} exited naturally. Return code: {process.returncode}", "ACM")
+
         # Wait for threads to finish
         stdout_thread.join(timeout=5)
         stderr_thread.join(timeout=5)
@@ -189,6 +230,7 @@ async def run_fpf_subprocess(
     fpf_log_output: str = "console",
     fpf_log_file: Optional[str] = None,
     run_log_file: Optional[str] = None,
+    idle_no_output_kill: Optional[float] = 180.0,
 ) -> tuple[int, str, str]:
     """
     Run FPF as a subprocess with real-time output streaming.
@@ -246,5 +288,6 @@ async def run_fpf_subprocess(
         timeout,
         run_log_file,
         30.0,  # heartbeat interval
+        idle_no_output_kill,
     )
     return returncode, stdout, stderr

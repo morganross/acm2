@@ -48,60 +48,10 @@ async def lifespan(app: FastAPI):
         if orphaned_runs:
             logger.info(f"Orphan recovery complete: marked {len([r for r in orphaned_runs if r.status == 'running'])} orphaned runs as failed")
     
-    # Seed default preset
-    async with async_session_factory() as session:
-        repo = PresetRepository(session)
-        doc_repo = DocumentRepository(session)
-        existing = await repo.get_by_name("Default Preset")
-        if not existing:
-            logger.info("Seeding default preset...")
-            
-            # Read instruction file - no fallback, instructions must be in file or empty
-            instructions = ""
-            try:
-                instr_path = Path("data/defaults/instructions.md")
-                if instr_path.exists():
-                    instructions = instr_path.read_text(encoding="utf-8")
-                else:
-                    logger.warning("No instructions.md file found at data/defaults/instructions.md")
-            except Exception as e:
-                logger.error(f"Failed to read instructions file: {e}")
-            
-            # Create default document in database
-            sample_input_path = "data/defaults/sample_input.txt"
-            sample_doc = await doc_repo.get_by_path(sample_input_path)
-            if not sample_doc:
-                try:
-                    sample_path = Path(sample_input_path)
-                    if sample_path.exists():
-                        sample_content = sample_path.read_text(encoding="utf-8")
-                    else:
-                        sample_content = "Sample input document content."
-                    sample_doc = await doc_repo.create(
-                        name="sample_input.txt",
-                        path=sample_input_path,
-                        content=sample_content,
-                        file_type="txt",
-                        size_bytes=len(sample_content.encode('utf-8'))
-                    )
-                    logger.info(f"Created default document: {sample_doc.id}")
-                except Exception as e:
-                    logger.error(f"Failed to create default document: {e}")
-
-            # Create default preset
-            await repo.create(
-                name="Default Preset",
-                description="A default preset with sample input and instructions.",
-                documents=[sample_doc.id if sample_doc else sample_input_path],
-                models=[{"provider": "openai", "model": "gpt-5", "temperature": 0.7, "max_tokens": 4000}],
-                generators=["fpf"],
-                iterations=1,
-                evaluation_enabled=True,
-                pairwise_enabled=False,
-                fpf_config={"prompt_template": instructions},
-                gptr_config=None
-            )
-            logger.info("Default preset created.")
+    # NO DEFAULT PRESET SEEDING
+    # All presets must be created through the GUI. 
+    # The GUI is the ONLY source of truth for presets.
+    # No hardcoded defaults, samples, or placeholders are permitted.
     
     # Startup complete
     yield

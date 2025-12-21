@@ -41,7 +41,6 @@ export default function Execute() {
   const [activeTab, setActiveTab] = useState<'evaluation' | 'pairwise' | 'timeline'>('evaluation');
   const [error, setError] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const pollIntervalRef = useRef<number | null>(null);
 
   const handleRunUpdate = useCallback((updatedRun: Run) => {
     if (!updatedRun?.id) return;
@@ -52,8 +51,11 @@ export default function Execute() {
       }
       return merged;
     });
+    // Update running state based on status
     if (updatedRun.status === 'running' || updatedRun.status === 'pending') {
       setIsRunning(true);
+    } else if (updatedRun.status === 'completed' || updatedRun.status === 'failed' || updatedRun.status === 'cancelled') {
+      setIsRunning(false);
     }
   }, []);
 
@@ -90,7 +92,7 @@ export default function Execute() {
     onEvalComplete: handleEvalComplete,
   });
 
-  // Load run from URL if runId is provided
+  // Load run from URL if runId is provided (initial load only - WebSocket handles updates)
   useEffect(() => {
     if (runId) {
       runsApi.get(runId)
@@ -116,43 +118,12 @@ export default function Execute() {
               console.error('Failed to fetch preset for run:', err);
             }
           }
-          
-          // If run is still running, start polling
-          if (run.status === 'running' || run.status === 'pending') {
-            const poll = async () => {
-              try {
-                const updatedRun = await runsApi.get(runId);
-                setCurrentRun(prev => {
-                  const merged: any = { ...(prev || {}), ...updatedRun };
-                  if (!updatedRun.fpf_stats && prev?.fpf_stats) {
-                    merged.fpf_stats = prev.fpf_stats;
-                  }
-                  return merged;
-                });
-                if (updatedRun.status !== 'running' && updatedRun.status !== 'pending') {
-                  setIsRunning(false);
-                  if (pollIntervalRef.current) {
-                    clearInterval(pollIntervalRef.current);
-                    pollIntervalRef.current = null;
-                  }
-                }
-              } catch (err) {
-                console.error('Failed to poll run:', err);
-              }
-            };
-            pollIntervalRef.current = window.setInterval(poll, 2000);
-          }
         })
         .catch(err => {
           console.error('Failed to load run:', err);
           setError('Failed to load run');
         });
     }
-    return () => {
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-      }
-    };
   }, [runId]);
 
   // Fetch running runs count
@@ -201,36 +172,6 @@ export default function Execute() {
     }
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  // Poll for execution status
-  const pollExecutionStatus = useCallback(async (runId: string) => {
-    try {
-      const response = await fetch(`/api/v1/runs/${runId}`);
-      const data = await response.json();
-      
-      setCurrentRun(prev => {
-        const merged: any = { ...(prev || {}), ...data };
-        if (!data.fpf_stats && prev?.fpf_stats) {
-          merged.fpf_stats = prev.fpf_stats;
-        }
-        return merged;
-      });
-      
-      // Update running state
-      if (data.status === 'running' || data.status === 'pending') {
-        setIsRunning(true);
-      } else {
-        setIsRunning(false);
-        // Stop polling when done
-        if (pollIntervalRef.current) {
-          clearInterval(pollIntervalRef.current);
-          pollIntervalRef.current = null;
-        }
-      }
-    } catch (err) {
-      console.error('Failed to poll execution status:', err);
-    }
   }, []);
 
   const startExecution = async () => {
@@ -302,11 +243,7 @@ export default function Execute() {
         throw new Error('Failed to start run');
       }
       
-      // Start polling
-      pollExecutionStatus(runId);
-      pollIntervalRef.current = window.setInterval(() => {
-        pollExecutionStatus(runId);
-      }, 2000);
+      // WebSocket handles all real-time updates - no polling needed
       
     } catch (err) {
       console.error('Failed to start execution:', err);
@@ -316,11 +253,6 @@ export default function Execute() {
   };
 
   const stopExecution = async () => {
-    if (pollIntervalRef.current) {
-      clearInterval(pollIntervalRef.current);
-      pollIntervalRef.current = null;
-    }
-    
     if (currentRun?.id) {
       try {
         await fetch(`/api/v1/runs/${currentRun.id}/cancel`, {
@@ -333,15 +265,6 @@ export default function Execute() {
     
     setIsRunning(false);
   };
-
-  // Cleanup polling on unmount
-  useEffect(() => {
-    return () => {
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-      }
-    };
-  }, []);
 
   const getStatusIcon = () => {
     if (!currentRun) return <Activity size={20} />;

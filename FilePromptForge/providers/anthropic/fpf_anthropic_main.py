@@ -20,7 +20,7 @@ import urllib.error
 LOG = logging.getLogger("fpf_anthropic_main")
 
 ALLOWED_PREFIXES = ("claude-",)
-DEFAULT_MODEL = "claude-3-5-sonnet-20241022"
+# NO DEFAULT_MODEL - GUI is the only source of truth
 DEFAULT_VERSION = "2023-06-01"
 WEB_SEARCH_TOOL = "web_search_20250305"
 
@@ -28,13 +28,6 @@ WEB_SEARCH_TOOL = "web_search_20250305"
 def _normalize_model(model: str) -> str:
     raw = model or ""
     return raw.split(":", 1)[0]
-
-
-def validate_model(model_id: str) -> bool:
-    base = _normalize_model(model_id)
-    if not base:
-        return False
-    return any(base.startswith(prefix) for prefix in ALLOWED_PREFIXES)
 
 
 def _translate_sampling(cfg: Dict) -> Dict[str, Any]:
@@ -88,13 +81,10 @@ def _build_thinking(cfg: Dict, max_tokens: int) -> Dict[str, Any]:
 
 
 def build_payload(prompt: str, cfg: Dict) -> Tuple[Dict, Optional[Dict]]:
-    model_cfg = cfg.get("model") or DEFAULT_MODEL
+    model_cfg = cfg.get("model")
+    if not model_cfg:
+        raise RuntimeError("Anthropic provider requires 'model' in config - no fallback defaults allowed")
     model_to_use = _normalize_model(model_cfg)
-
-    if not validate_model(model_to_use):
-        raise RuntimeError(
-            f"Model '{model_to_use}' is not allowed by the Anthropic provider whitelist."
-        )
 
     request_json = bool(cfg.get("json")) if cfg.get("json") is not None else False
     if request_json:
@@ -293,11 +283,32 @@ def list_available_models(api_key: str, api_base: str = "https://api.anthropic.c
 if __name__ == "__main__":
     import argparse
     import os
+    
+    # --- EXTREME LOGGING: ARGPARSE DEBUG START ---
+    try:
+        import sys
+        print(f"[FPF ANTHROPIC DEBUG] PID={os.getpid()} sys.argv: {sys.argv}", file=sys.stderr, flush=True)
+    except Exception:
+        pass
+    # ---------------------------------------------
+
     parser = argparse.ArgumentParser(description="Anthropic provider utilities for FPF")
     parser.add_argument("--list-models", action="store_true", help="List available models using ANTHROPIC_API_KEY")
     parser.add_argument("--api-base", default="https://api.anthropic.com", help="Override API base URL")
     parser.add_argument("--version", default=DEFAULT_VERSION, help="Anthropic API version header")
-    args = parser.parse_args()
+    
+    # --- EXTREME LOGGING: ARGPARSE TRAP ---
+    try:
+        args = parser.parse_args()
+    except SystemExit as e:
+        print(f"[FPF ANTHROPIC DEBUG] PID={os.getpid()} argparse raised SystemExit: {e}", file=sys.stderr, flush=True)
+        if str(e) == "2":
+            print(f"[FPF ANTHROPIC DEBUG] PID={os.getpid()} EXIT CODE 2 DETECTED FROM ARGPARSE! Missing arguments or invalid flags.", file=sys.stderr, flush=True)
+        raise
+    except Exception as e:
+        print(f"[FPF ANTHROPIC DEBUG] PID={os.getpid()} argparse raised Exception: {e}", file=sys.stderr, flush=True)
+        raise
+    # --------------------------------------
 
     if args.list_models:
         api_key = os.getenv("ANTHROPIC_API_KEY")

@@ -68,8 +68,11 @@ class GptrSettings(BaseModel):
 
 
 class FpfSettings(BaseModel):
-    """FPF (FilePromptForge) specific settings."""
-    prompt_template: str = Field("", description="Instructions/prompt to use - required from preset")
+    """FPF (FilePromptForge) specific settings.
+    
+    NOTE: prompt_template is REMOVED - generation instructions are now
+    fetched from Content Library via generation_instructions_id.
+    """
 
 
 class EvaluationSettings(BaseModel):
@@ -100,7 +103,11 @@ class CombineSettings(BaseModel):
 # ============================================================================
 
 class FpfConfigComplete(BaseModel):
-    """Complete FPF configuration for preset persistence."""
+    """Complete FPF configuration for preset persistence.
+    
+    NOTE: prompt_template is REMOVED - generation instructions are now
+    fetched from Content Library via generation_instructions_id.
+    """
     enabled: bool = True
     selected_models: list[str] = Field(default_factory=list, description="REQUIRED from preset")
     grounding_level: int = Field(5, ge=0, le=100)
@@ -114,7 +121,6 @@ class FpfConfigComplete(BaseModel):
     use_grounding: bool = True
     include_metadata: bool = True
     save_prompt_history: bool = True
-    prompt_template: str = ""  # Must be provided from preset/DB
 
 
 class GptrConfigComplete(BaseModel):

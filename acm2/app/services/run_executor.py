@@ -1002,8 +1002,9 @@ class RunExecutor:
                     log_dir.mkdir(parents=True, exist_ok=True)
                     run_log_file = str(log_dir / "run.log")
                     if not fpf_log_file:
-                        # Default file path if not specified
-                        fpf_log_file = str(log_dir / "fpf_output.log")
+                        # Default file path if not specified - make unique per task to avoid file locking
+                        safe_task_id = task_id.replace(":", "_")
+                        fpf_log_file = str(log_dir / f"fpf_{safe_task_id}.log")
                 
                 gen_result = await adapter.generate(
                     query=instructions,  # No fallback - already validated

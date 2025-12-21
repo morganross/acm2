@@ -22,34 +22,10 @@ Key guarantees implemented here:
 from __future__ import annotations
 from typing import Dict, Tuple, Optional, Any, List
 
-# Whitelist of models allowed for enforced web_search + reasoning.
-# Only these models will be accepted by the OpenAI provider adapter.
-ALLOWED_MODELS = {
-    "gpt-5",
-    "gpt-5-mini",
-    "gpt-5-nano",
-    "gpt-5.1",
-    "gpt-5.1-mini",
-    "gpt-5.1-preview",
-    "o4-mini",
-    "o3",
-}
-
-
 def _normalize_model(model: str) -> str:
     if not model:
         return ""
     return model.split(":")[0]
-
-
-def validate_model(model_id: str) -> bool:
-    m = _normalize_model(model_id or "")
-    if m in ALLOWED_MODELS:
-        return True
-    for allowed in ALLOWED_MODELS:
-        if m.startswith(allowed):
-            return True
-    return False
 
 
 def _translate_sampling(cfg: Dict, model: str) -> Dict:
@@ -115,12 +91,10 @@ def build_payload(prompt: str, cfg: Dict) -> Tuple[Dict, Optional[Dict]]:
 
     Returns (payload, optional_provider_headers)
     """
-    model = cfg.get("model") or "gpt-4o-mini"
+    model = cfg.get("model")
+    if not model:
+        raise RuntimeError("OpenAI provider requires 'model' in config - no fallback defaults allowed")
     model_to_use = model.split(":")[0] if ":" in model else model
-
-    # Enforce provider whitelist: fail fast if the configured model is not allowed.
-    if not validate_model(model_to_use):
-        raise RuntimeError(f"Model '{model_to_use}' is not allowed by the OpenAI provider whitelist. Allowed models: {sorted(ALLOWED_MODELS)}")
 
     payload: Dict[str, Any] = {
         "model": model_to_use,
@@ -415,6 +389,7 @@ def execute_and_verify(provider_url: str, payload: Dict, headers: Optional[Dict]
         req = urllib.request.Request(provider_url, data=data, headers=hdrs, method="POST")
         try:
             log.debug("OpenAI request attempt %d/%d to %s", attempt, max_retries, provider_url)
+            log.debug("Payload: %s", _json.dumps(payload, indent=2, ensure_ascii=False))
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 raw = resp.read().decode("utf-8")
                 raw_json = _json.loads(raw)

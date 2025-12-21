@@ -122,12 +122,26 @@ class FpfAdapter(BaseAdapter):
                 if progress_callback:
                     await self._safe_callback(progress_callback, "preparing", 0.0, "Setting up FPF execution...")
 
+                # Construct FPF log file path if run_log_file is available
+                fpf_task_log = None
+                if run_log_file:
+                    try:
+                        run_log_path = Path(run_log_file)
+                        # Create a unique log file for this task in the same directory
+                        # Sanitize task_id to remove invalid characters (like colons on Windows)
+                        safe_task_id = task_id.replace(":", "_").replace("/", "_").replace("\\", "_")
+                        logger.info(f"FPF adapter: task_id='{task_id}' safe_task_id='{safe_task_id}'")
+                        fpf_task_log = run_log_path.parent / f"fpf_{safe_task_id}.log"
+                    except Exception:
+                        pass
+
                 # Build FPF command
                 fpf_cmd = self._build_fpf_command(
                     file_a=str(file_a_path),
                     file_b=str(file_b_path),
                     output=str(output_path),
                     config=config,
+                    log_file=str(fpf_task_log) if fpf_task_log else None
                 )
 
                 if progress_callback:
@@ -140,19 +154,21 @@ class FpfAdapter(BaseAdapter):
                     async def cb(stage: str, progress: float, message: Optional[str]):
                         await self._safe_callback(progress_callback, stage, progress, message)
 
+                timeout_val = float(config.extra.get("timeout", 600)) if config.extra else 600.0
                 returncode, stdout, stderr = await run_fpf_subprocess(
                     fpf_cmd,
                     self._get_fpf_directory(),
-                    timeout=float(config.extra.get("timeout", 600)) if config.extra else 600.0,  # Use timeout from config, no fallback to 24hr
+                    timeout=timeout_val,  # Use timeout from config, no fallback to 24hr
                     progress_callback=cb,
                     fpf_log_output=fpf_log_output,
                     fpf_log_file=fpf_log_file,
                     run_log_file=run_log_file,
+                    idle_no_output_kill=timeout_val,  # Match idle kill to timeout to prevent premature kills on long generations
                 )
 
                 # Check return code
                 if returncode != 0:
-                    error_msg = stderr or stdout or "Unknown error"
+                    error_msg = stderr or stdout or f"Return code {returncode} with no output (possible validation failure/no-output kill)"
                     logger.error(f"FPF failed with return code {returncode}: {error_msg}")
                     raise FpfExecutionError(f"FPF execution failed: {error_msg}")
 
@@ -217,6 +233,7 @@ class FpfAdapter(BaseAdapter):
         file_b: str,
         output: str,
         config: GenerationConfig,
+        log_file: Optional[str] = None,
     ) -> list[str]:
         """Build the FPF command line arguments."""
         # Parse model string which may include provider prefix (e.g., "google:gemini-2.5-flash")
@@ -264,6 +281,10 @@ class FpfAdapter(BaseAdapter):
 
         # Add verbose logging
         cmd.append("--verbose")
+        
+        # Add log file if provided
+        if log_file:
+            cmd.extend(["--log-file", log_file])
 
         return cmd
 

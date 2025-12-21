@@ -363,6 +363,10 @@ export const runsApi = {
     return apiClient.delete<void>(`/runs/${id}`)
   },
 
+  async bulkDelete(target: 'failed' | 'completed_failed'): Promise<{ deleted: number; target: string }> {
+    return apiClient.delete<{ deleted: number; target: string }>(`/runs/bulk`, { target })
+  },
+
   async progress(id: string): Promise<Run['progress']> {
     const run = await this.get(id)
     return run.progress

@@ -72,15 +72,26 @@ async def execute_run_background(run_id: str, config: RunConfig):
             run_repo = RunRepository(session)
             
             if result.status.value == "completed":
+                def make_serializable(obj):
+                    if isinstance(obj, dict):
+                        return {k: make_serializable(v) for k, v in obj.items()}
+                    elif isinstance(obj, list):
+                        return [make_serializable(v) for v in obj]
+                    elif isinstance(obj, datetime):
+                        return obj.isoformat()
+                    return obj
+
+                results_summary = {
+                    "winner": result.winner_doc_id,
+                    "generated_count": len(result.generated_docs),
+                    "eval_count": len(result.single_eval_results or {}),
+                    "combined_doc_id": result.combined_docs[0].doc_id if result.combined_docs else None,
+                    "post_combine_eval": asdict(result.post_combine_eval_results) if result.post_combine_eval_results else None,
+                }
+
                 await run_repo.complete(
                     run_id, 
-                    results_summary={
-                        "winner": result.winner_doc_id,
-                        "generated_count": len(result.generated_docs),
-                        "eval_count": len(result.single_eval_results or {}),
-                        "combined_doc_id": result.combined_docs[0].doc_id if result.combined_docs else None,
-                        "post_combine_eval": asdict(result.post_combine_eval_results) if result.post_combine_eval_results else None,
-                    },
+                    results_summary=make_serializable(results_summary),
                     total_cost_usd=result.total_cost_usd
                 )
                 logger.info(f"Run {run_id} completed successfully")
@@ -112,12 +123,12 @@ def _get_runs_safely(preset):
         return []
 
 def _derive_iterations(preset) -> int:
-    """Derive iterations from config_overrides.general or fall back to 1."""
-    try:
-        general_cfg = (preset.config_overrides or {}).get("general") or {}
-        return general_cfg.get("iterations") or 1
-    except Exception:
-        return 1
+    """Get iterations from config_overrides.general - NO FALLBACKS."""
+    general_cfg = (preset.config_overrides or {}).get("general") or {}
+    iterations = general_cfg.get("iterations")
+    if iterations is None:
+        raise ValueError(f"Preset {preset.name} ({preset.id}) has no iterations configured - set this in the GUI")
+    return iterations
 
 
 def _preset_to_response(preset) -> PresetResponse:
@@ -268,12 +279,28 @@ async def create_preset(
     if data.combine and "combine" not in config_overrides:
         config_overrides["combine"] = data.combine.model_dump()
     
-    # Extract values for DB columns (use new config if available, fall back to legacy)
-    evaluation_enabled = data.eval_config.enabled if data.eval_config else (data.evaluation.enabled if data.evaluation else True)
-    pairwise_enabled = data.pairwise_config.enabled if data.pairwise_config else (data.pairwise.enabled if data.pairwise else False)
+    # Extract values for DB columns - NO FALLBACKS, values MUST be set
+    if data.eval_config:
+        evaluation_enabled = data.eval_config.enabled
+    elif data.evaluation:
+        evaluation_enabled = data.evaluation.enabled
+    else:
+        raise ValueError("evaluation_enabled must be set in preset")
     
-    # Extract log_level from general_config or top-level field
-    log_level = data.log_level or (data.general_config.log_level if data.general_config and hasattr(data.general_config, 'log_level') else "INFO")
+    if data.pairwise_config:
+        pairwise_enabled = data.pairwise_config.enabled
+    elif data.pairwise:
+        pairwise_enabled = data.pairwise.enabled
+    else:
+        raise ValueError("pairwise_enabled must be set in preset")
+    
+    # Extract log_level - MUST be set, no fallback
+    if data.log_level:
+        log_level = data.log_level
+    elif data.general_config and hasattr(data.general_config, 'log_level') and data.general_config.log_level:
+        log_level = data.general_config.log_level
+    else:
+        raise ValueError("log_level must be set in preset")
     
     # Get generators from fpf/gptr enabled flags or legacy
     generators = []
@@ -596,85 +623,170 @@ async def execute_preset(
         
     # Fetch document contents for execution
     doc_repo = DocumentRepository(db)
+    content_repo = ContentRepository(db)
     document_contents = {}
     
-    # preset.documents is a list of paths or IDs? 
-    # Based on PresetCreate schema, it's List[str].
-    # Let's assume they are paths for now, as per ACM 1.0 legacy, 
-    # but ideally they should be IDs.
-    # If they are paths, we need to find the document by path.
+    # preset.documents is a list of IDs that can reference either:
+    # 1. The 'documents' table (legacy files)
+    # 2. The 'contents' table with content_type='input_document'
     
     for doc_ref in (preset.documents or []):
-        # Try to find by ID first (if it's a UUID)
+        # Try to find by ID in documents table first
         doc = await doc_repo.get_by_id(doc_ref)
         if not doc:
-            # Try by path
+            # Try by path in documents table
             doc = await doc_repo.get_by_path(doc_ref)
-            
+        
         if doc and doc.content:
             document_contents[doc.id] = doc.content
+        elif doc and doc.file_path:
+            # Read content from file if not in DB
+            from pathlib import Path
+            file_path = Path(doc.file_path)
+            # Try relative to acm2/acm2 directory
+            base_paths = [
+                Path(__file__).parent.parent.parent.parent / doc.file_path,  # acm2/acm2/data/...
+                Path(doc.file_path),  # absolute path
+            ]
+            content_loaded = False
+            for try_path in base_paths:
+                if try_path.exists():
+                    try:
+                        document_contents[doc.id] = try_path.read_text(encoding="utf-8")
+                        content_loaded = True
+                        logger.info(f"Loaded document content from file: {try_path}")
+                        break
+                    except Exception as e:
+                        logger.error(f"Failed to read document file {try_path}: {e}")
+            if not content_loaded:
+                raise ValueError(f"Document content missing and file not found for {doc.name} ({doc.id}), file_path={doc.file_path}")
         elif doc:
-            # If content is missing in DB, maybe read from file?
-            # For now, we'll use a placeholder if content is missing
-            document_contents[doc.id] = f"Content for {doc.name}"
-            logger.warning(f"Document content missing for {doc.name} ({doc.id})")
+            raise ValueError(f"Document {doc.name} ({doc.id}) has no content and no file_path - cannot execute")
         else:
-            logger.warning(f"Document reference not found: {doc_ref}")
+            # Not found in documents table - try contents table (input_document type)
+            content_item = await content_repo.get_by_id(doc_ref)
+            if content_item and content_item.body:
+                document_contents[content_item.id] = content_item.body
+                logger.info(f"Loaded document from contents table: {content_item.name} ({content_item.id})")
+            elif content_item:
+                raise ValueError(f"Content item {content_item.name} ({content_item.id}) has no body - cannot execute")
+            else:
+                raise ValueError(f"Document reference not found in documents or contents table: {doc_ref}")
 
-    # Load instruction contents
-    content_repo = ContentRepository(db)
+    # Load instruction contents - NO fallbacks, explicit errors if content missing
     single_eval_instructions = ""
     if preset.single_eval_instructions_id:
         content = await content_repo.get_by_id(preset.single_eval_instructions_id)
-        if content:
-            single_eval_instructions = content.content or ""
+        if content and content.body:
+            single_eval_instructions = content.body
+        elif content:
+            raise ValueError(f"Single eval instructions content exists but body is empty (id={preset.single_eval_instructions_id})")
+        else:
+            raise ValueError(f"Single eval instructions content not found (id={preset.single_eval_instructions_id})")
     pairwise_eval_instructions = ""
     if preset.pairwise_eval_instructions_id:
         content = await content_repo.get_by_id(preset.pairwise_eval_instructions_id)
-        if content:
-            pairwise_eval_instructions = content.content or ""
+        if content and content.body:
+            pairwise_eval_instructions = content.body
+        elif content:
+            raise ValueError(f"Pairwise eval instructions content exists but body is empty (id={preset.pairwise_eval_instructions_id})")
+        else:
+            raise ValueError(f"Pairwise eval instructions content not found (id={preset.pairwise_eval_instructions_id})")
     eval_criteria = ""
     if preset.eval_criteria_id:
         content = await content_repo.get_by_id(preset.eval_criteria_id)
-        if content:
-            eval_criteria = content.content or ""
+        if content and content.body:
+            eval_criteria = content.body
+        elif content:
+            raise ValueError(f"Eval criteria content exists but body is empty (id={preset.eval_criteria_id})")
+        else:
+            raise ValueError(f"Eval criteria content not found (id={preset.eval_criteria_id})")
     combine_instructions = ""
     if preset.combine_instructions_id:
         content = await content_repo.get_by_id(preset.combine_instructions_id)
-        if content:
-            combine_instructions = content.content or ""
+        if content and content.body:
+            combine_instructions = content.body
+        elif content:
+            raise ValueError(f"Combine instructions content exists but body is empty (id={preset.combine_instructions_id})")
+        else:
+            raise ValueError(f"Combine instructions content not found (id={preset.combine_instructions_id})")
 
     # Build execution config
     combine_config = preset.config_overrides.get("combine", {}) if preset.config_overrides else {}
     
-    # Get FPF instructions from preset's fpf_config
-    fpf_config = preset.fpf_config or {}
-    instructions = fpf_config.get("prompt_template", "") if isinstance(fpf_config, dict) else ""
+    # Get generation instructions from Content Library - NO FALLBACKS
+    if not preset.generation_instructions_id:
+        raise ValueError(f"Preset {preset.name} ({preset.id}) has no generation_instructions_id - you MUST set this in the GUI")
+    gen_content = await content_repo.get_by_id(preset.generation_instructions_id)
+    if not gen_content or not gen_content.body:
+        raise ValueError(f"Generation instructions content not found or empty (id={preset.generation_instructions_id})")
+    instructions = gen_content.body
+    logger.info(f"Loaded generation instructions from Content Library: {gen_content.name}")
+    
+    # ALL VALUES MUST COME FROM DB - NO FALLBACKS
+    if not preset.generators:
+        raise ValueError(f"Preset {preset.name} has no generators - set this in the GUI")
+    if not preset.models:
+        raise ValueError(f"Preset {preset.name} has no models - set this in the GUI")
+    if preset.evaluation_enabled is None:
+        raise ValueError(f"Preset {preset.name} has no evaluation_enabled - set this in the GUI")
+    if preset.pairwise_enabled is None:
+        raise ValueError(f"Preset {preset.name} has no pairwise_enabled - set this in the GUI")
+    
+    # Get eval config - REQUIRED
+    eval_cfg = preset.config_overrides.get("eval", {}) if preset.config_overrides else {}
+    eval_iterations = eval_cfg.get("iterations")
+    if eval_iterations is None:
+        raise ValueError(f"Preset {preset.name} has no eval_config.iterations - set this in the GUI")
+    judge_models = eval_cfg.get("judge_models")
+    if not judge_models:
+        raise ValueError(f"Preset {preset.name} has no eval_config.judge_models - set this in the GUI")
+    
+    # Get combine config - REQUIRED
+    combine_enabled = combine_config.get("enabled")
+    if combine_enabled is None:
+        raise ValueError(f"Preset {preset.name} has no combine_config.enabled - set this in the GUI")
+    combine_strategy = combine_config.get("strategy")
+    if combine_enabled and not combine_strategy:
+        raise ValueError(f"Preset {preset.name} has combine enabled but no strategy - set this in the GUI")
+    combine_models_list = combine_config.get("selected_models")
+    if not combine_models_list and combine_config.get("model"):
+        combine_models_list = [combine_config.get("model")]
+    if combine_enabled and not combine_models_list:
+        raise ValueError(f"Preset {preset.name} has combine enabled but no models - set this in the GUI")
+    
+    # Get log_level - REQUIRED
+    if not preset.log_level:
+        raise ValueError(f"Preset {preset.name} has no log_level - set this in the GUI")
     
     config = RunConfig(
         document_ids=list(document_contents.keys()),
         document_contents=document_contents,
         instructions=instructions,
-        generators=[AdapterGeneratorType(g) for g in (preset.generators or [])],
-        models=[m["model"] for m in (preset.models or [])],
+        generators=[AdapterGeneratorType(g) for g in preset.generators],
+        models=[
+            (f"{m['provider']}:{m['model']}" if isinstance(m, dict) and "provider" in m else m["model"])
+            if isinstance(m, dict) else m
+            for m in preset.models
+        ],
         iterations=_derive_iterations(preset),
         enable_single_eval=preset.evaluation_enabled,
         enable_pairwise=preset.pairwise_enabled,
-        eval_iterations=1,  # Default
-        eval_judge_models=[preset.config_overrides.get("evaluation", {}).get("eval_model")] if preset.config_overrides and preset.config_overrides.get("evaluation", {}).get("eval_model") else [],
-        pairwise_top_n=None,
-        enable_combine=combine_config.get("enabled", False),
-        combine_strategy=combine_config.get("strategy", ""),
-        combine_models=[combine_config.get("model", "")] if combine_config.get("enabled", False) else [],
-        log_level=getattr(preset, 'log_level', 'INFO') or 'INFO',
+        eval_iterations=eval_iterations,
+        eval_judge_models=judge_models,
+        pairwise_top_n=eval_cfg.get("pairwise_top_n"),
+        enable_combine=combine_enabled,
+        combine_strategy=combine_strategy or "",
+        combine_models=combine_models_list if combine_enabled else [],
+        log_level=preset.log_level,
         max_retries=preset.max_retries,
         retry_delay=preset.retry_delay,
         request_timeout=preset.request_timeout,
         eval_timeout=preset.eval_timeout,
         generation_concurrency=preset.generation_concurrency,
         eval_concurrency=preset.eval_concurrency,
-        fpf_log_output=preset.fpf_log_output,
-        fpf_log_file_path=preset.fpf_log_file_path or "logs/fpf_output.log",
+        fpf_log_output=preset.fpf_log_output or "file",
+        fpf_log_file_path=preset.fpf_log_file_path or f"logs/{run.id}/fpf_output.log",
         post_combine_top_n=preset.post_combine_top_n,
         single_eval_instructions=single_eval_instructions,
         pairwise_eval_instructions=pairwise_eval_instructions,

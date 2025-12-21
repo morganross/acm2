@@ -26,6 +26,49 @@ import sys
 import os
 from pathlib import Path
 from typing import Optional
+import traceback
+import time
+
+# --- EXTREME LOGGING: TRACE LEVEL SETUP ---
+TRACE_LEVEL_NUM = 5
+logging.addLevelName(TRACE_LEVEL_NUM, "TRACE")
+def trace(self, message, *args, **kws):
+    if self.isEnabledFor(TRACE_LEVEL_NUM):
+        # Include timestamp with high precision
+        ts = time.time()
+        self._log(TRACE_LEVEL_NUM, f"[{ts:.4f}] {message}", args, **kws)
+logging.Logger.trace = trace
+# ------------------------------------------
+
+# --- EXIT TRAP (Step 1.6 Idea 3) ---
+# Monkey-patch sys.exit to catch unexpected exit codes and log the stack trace.
+_original_exit = sys.exit
+
+def _trapped_exit(code=0):
+    if code != 0:
+        try:
+            # Create a trap log file
+            trap_file = SCRIPT_DIR / "logs" / f"EXIT_TRAP_{os.getpid()}.txt"
+            trap_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(trap_file, "w", encoding="utf-8") as f:
+                f.write(f"Process {os.getpid()} exiting with code {code}\n")
+                f.write("Stack trace:\n")
+                traceback.print_stack(file=f)
+            
+            # Also print to stderr for immediate visibility
+            print(f"[FPF EXIT TRAP] Process exiting with code {code}. Trace saved to {trap_file}", file=sys.stderr, flush=True)
+        except Exception as e:
+            print(f"[FPF EXIT TRAP] Failed to log exit trap: {e}", file=sys.stderr, flush=True)
+    
+    _original_exit(code)
+
+sys.exit = _trapped_exit
+# -----------------------------------
+
+# Force UTF-8 for stdout/stderr to prevent encoding issues on Windows
+# if sys.platform == "win32":
+#     sys.stdout.reconfigure(encoding='utf-8')
+#     sys.stderr.reconfigure(encoding='utf-8')
 
 # Ensure imports find the package when called from other directories.
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -35,6 +78,7 @@ if str(PROJECT_ROOT.parent) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT.parent))
 
 from file_handler import run as run_handler  # use local module in same directory
+from grounding_enforcer import ValidationError
 
 try:
     from .helpers import load_config, load_env_file
@@ -52,19 +96,34 @@ import yaml
 import json
 
 
-def setup_logging(level: int = logging.INFO) -> None:
+def setup_logging(level: int = logging.INFO, log_file: Optional[Path] = None) -> None:
+    # FORCE TRACE LEVEL as per user request for extreme diagnostics
+    level = TRACE_LEVEL_NUM
+    
     logger = logging.getLogger()
     logger.setLevel(level)
 
+    # Clear existing handlers to allow reconfiguration
+    for h in list(logger.handlers):
+        logger.removeHandler(h)
+
     # Console handler
-    ch = logging.StreamHandler()
-    ch.setLevel(level)
-    ch_formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
-    ch.setFormatter(ch_formatter)
+    if os.getenv("FPF_LOG_OUTPUT", "console").lower() != "file":
+        ch = logging.StreamHandler()
+        ch.setLevel(level)
+        ch_formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+        ch.setFormatter(ch_formatter)
+        logger.addHandler(ch)
 
     # File handler (rotating)
+    target_log_file = log_file or LOG_FILENAME
+    
+    # Ensure directory exists
+    if not target_log_file.parent.exists():
+        target_log_file.parent.mkdir(parents=True, exist_ok=True)
+
     fh = logging.handlers.RotatingFileHandler(
-        filename=str(LOG_FILENAME),
+        filename=str(target_log_file),
         maxBytes=5 * 1024 * 1024,
         backupCount=3,
         encoding="utf-8",
@@ -73,11 +132,7 @@ def setup_logging(level: int = logging.INFO) -> None:
     fh_formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
     fh.setFormatter(fh_formatter)
 
-    # Avoid duplicate handlers if setup_logging called multiple times
-    if not any(isinstance(h, logging.StreamHandler) for h in logger.handlers):
-        logger.addHandler(ch)
-    if not any(isinstance(h, logging.handlers.RotatingFileHandler) for h in logger.handlers):
-        logger.addHandler(fh)
+    logger.addHandler(fh)
 
 def resolve_path_candidate(candidate: Optional[str]) -> Optional[str]:
     """
@@ -112,8 +167,29 @@ def load_config(path: str) -> dict:
         return yaml.safe_load(f)
 
 def main(argv: Optional[list[str]] = None) -> int:
+    # --- FIX: Global Socket Timeout ---
+    import socket
+    socket.setdefaulttimeout(600) # Hard global fallback
+    
+    # --- FIX: Signal Handling ---
+    import signal
+    def handle_sigterm(signum, frame):
+        print(f"[FPF SIGNAL] Received signal {signum}, exiting...", file=sys.stderr, flush=True)
+        sys.exit(128 + signum)
+    signal.signal(signal.SIGTERM, handle_sigterm)
+    signal.signal(signal.SIGINT, handle_sigterm)
+
     setup_logging(logging.INFO)
     log = logging.getLogger("fpf_main")
+
+    # --- EXTREME LOGGING: ARGPARSE DEBUG START ---
+    try:
+        print(f"[FPF ARGPARSE DEBUG] PID={os.getpid()} sys.argv: {sys.argv}", file=sys.stderr, flush=True)
+        print(f"[FPF ARGPARSE DEBUG] PID={os.getpid()} passed argv: {argv}", file=sys.stderr, flush=True)
+    except Exception:
+        pass
+    # ---------------------------------------------
+
     parser = argparse.ArgumentParser(prog="fpf_main", description="File Prompt Forge runner")
     parser.add_argument("--file-a", help="First input file (left side).", dest="file_a")
     parser.add_argument("--file-b", help="Second input file (right side).", dest="file_b")
@@ -130,17 +206,54 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--batch-output", choices=["lines", "json"], default="lines", help="Batch output format: 'lines' (one path per success) or 'json' (results array)")
     parser.add_argument("--json", action="store_true", help="Enable JSON output mode (bypasses minimum content size check)")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose logging")
-    args = parser.parse_args(argv)
+    parser.add_argument("--log-file", help="Path to log file", dest="log_file")
+    
+    # --- EXTREME LOGGING: ARGPARSE TRAP ---
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as e:
+        print(f"[FPF ARGPARSE DEBUG] PID={os.getpid()} argparse raised SystemExit: {e}", file=sys.stderr, flush=True)
+        if str(e) == "2":
+            print(f"[FPF ARGPARSE DEBUG] PID={os.getpid()} EXIT CODE 2 DETECTED FROM ARGPARSE! Missing arguments or invalid flags.", file=sys.stderr, flush=True)
+        raise
+    except Exception as e:
+        print(f"[FPF ARGPARSE DEBUG] PID={os.getpid()} argparse raised Exception: {e}", file=sys.stderr, flush=True)
+        raise
+    
+    try:
+        print(f"[FPF ARGPARSE DEBUG] PID={os.getpid()} args parsed successfully: {vars(args)}", file=sys.stderr, flush=True)
+    except Exception:
+        pass
+    # --------------------------------------
+
     try:
         # Early stderr debug to ensure visibility even if logging handlers are odd
+        print(f"[FPF DEBUG] Process ID: {os.getpid()}", file=sys.stderr, flush=True)
         print(f"[FPF DEBUG] argv parsed: runs_stdin={getattr(args, 'runs_stdin', False)} batch_output={getattr(args, 'batch_output', 'lines')} config={args.config} env={args.env}", file=sys.stderr, flush=True)
     except Exception:
         pass
 
+    # Re-setup logging with configured file and level
+    log_level = logging.DEBUG if args.verbose else logging.INFO
+    log_file_path = Path(args.log_file) if args.log_file else None
+    setup_logging(log_level, log_file_path)
+    
     if args.verbose:
-        setup_logging(logging.DEBUG)
         log.setLevel(logging.DEBUG)
         log.debug("Verbose logging enabled")
+
+    # --- EXTREME LOGGING: ENV DEBUG ---
+    # try:
+    #     safe_env = {}
+    #     for k, v in os.environ.items():
+    #         if "KEY" in k or "TOKEN" in k or "SECRET" in k or "PASSWORD" in k:
+    #             safe_env[k] = "***REDACTED***"
+    #         else:
+    #             safe_env[k] = v
+    #     print(f"[FPF ENV DEBUG] PID={os.getpid()} Environment: {json.dumps(safe_env, indent=2)}", file=sys.stderr, flush=True)
+    # except Exception:
+    #     pass
+    # ----------------------------------
 
     log.info("Starting FPF runner")
     log.debug("Script dir: %s", SCRIPT_DIR)
@@ -256,12 +369,23 @@ def main(argv: Optional[list[str]] = None) -> int:
     file_b_path = args.file_b or cfg.get("test", {}).get("file_b")
     out_path = args.out or cfg.get("test", {}).get("out")
 
+    # --- EXTREME LOGGING: FILE LOOKUP DEBUG ---
+    log.debug(f"[FPF FILE DEBUG] Resolving file_a: {file_a_path}")
     file_a = resolve_path_candidate(file_a_path)
+    log.debug(f"[FPF FILE DEBUG] Resolved file_a: {file_a}")
+    
     if not file_a:
+        log.error(f"[FPF FILE DEBUG] file_a not found! path={file_a_path} cwd={os.getcwd()}")
         raise FileNotFoundError(f"Input file not found: {file_a_path}")
+        
+    log.debug(f"[FPF FILE DEBUG] Resolving file_b: {file_b_path}")
     file_b = resolve_path_candidate(file_b_path)
+    log.debug(f"[FPF FILE DEBUG] Resolved file_b: {file_b}")
+    
     if not file_b:
+        log.error(f"[FPF FILE DEBUG] file_b not found! path={file_b_path} cwd={os.getcwd()}")
         raise FileNotFoundError(f"Input file not found: {file_b_path}")
+    # ------------------------------------------
 
     config = config_path
     env = resolve_path_candidate(args.env) or str(PROJECT_ROOT / ".env")
@@ -282,41 +406,79 @@ def main(argv: Optional[list[str]] = None) -> int:
     log.debug("Resolved paths - file_a=%s, file_b=%s, config=%s, env=%s, out=%s, provider=%s, model=%s, json=%s, timeout=%s",
               file_a, file_b, config, env, out, provider, model, request_json, timeout)
 
-    try:
-        result_path = run_handler(
-            file_a=file_a,
-            file_b=file_b,
-            out_path=out,
-            config_path=config,
-            env_path=env,
-            provider=provider,
-            model=model,
-            reasoning_effort=reasoning_effort,
-            max_completion_tokens=max_completion_tokens,
-            timeout=timeout,
-            request_json=request_json,
-        )
-        log.info("Run completed. Output written to %s", result_path)
-        print(result_path)
-        return 0
-    except Exception as exc:
-        log.exception("FPF run failed: %s", exc)
-        # Emit a uniform RUN_COMPLETE failure record for single-run mode
+    # Retry loop for generation
+    max_retries = 3
+    for attempt in range(1, max_retries + 1):
         try:
-            prov = (args.provider or cfg.get("provider") or "na")
-            model = (args.model or cfg.get("model") or "na")
-            _prov_norm = str(prov).strip().lower()
-            _model_norm = str(model).strip().lower()
-            kind = "deep" if (_prov_norm == "openaidp" or ("deep-research" in _model_norm)) else "rest"
-            # id is unknown at this layer; elapsed/status may be unknown; include out if resolved
-            log.info(
-                "[FPF RUN_COMPLETE] id=%s kind=%s provider=%s model=%s ok=false elapsed=%s status=%s path=%s error=%s",
-                "na", kind, prov, model, "na", "na", (out or "na"), str(exc)
+            log.info(f"Starting FPF execution (Attempt {attempt}/{max_retries})...")
+            
+            result_path = run_handler(
+                file_a=file_a,
+                file_b=file_b,
+                out_path=out,
+                config_path=config,
+                env_path=env,
+                provider=provider,
+                model=model,
+                reasoning_effort=reasoning_effort,
+                max_completion_tokens=max_completion_tokens,
+                timeout=timeout,
+                request_json=request_json,
             )
-        except Exception:
-            pass
-        print(f"FPF run failed: {exc}", file=sys.stderr)
-        return 2
+            
+            # Check output size (1024 bytes minimum)
+            if Path(result_path).exists():
+                size = Path(result_path).stat().st_size
+                if size < 1024 and not request_json:
+                    msg = f"FPF output too small ({size} bytes), minimum is 1024 bytes"
+                    if attempt < max_retries:
+                        log.warning(f"{msg}. Retrying...")
+                        continue
+                    else:
+                        raise RuntimeError(msg)
+
+            log.info("Run completed. Output written to %s", result_path)
+            print(result_path)
+            # Explicit exit (Fix #3) to guarantee subprocess termination and prevent stdout pipe deadlock
+            log.info("[FPF EXIT] Initiating sys.exit(0) - Run completed successfully")
+            sys.stdout.flush()
+            sys.stderr.flush()
+            raise SystemExit(0)
+            
+        except ValidationError as val_err:
+            # Fail fast on grounding/reasoning failures so the adapter can retry instead of timing out.
+            err_summary = (
+                f"Validation failed: missing_grounding={val_err.missing_grounding} "
+                f"missing_reasoning={val_err.missing_reasoning}; {val_err}"
+            )
+            log.error(err_summary)
+            print(err_summary, file=sys.stderr)
+            raise SystemExit(3)
+        except SystemExit:
+            raise
+        except Exception as exc:
+            log.exception("FPF run failed on attempt %d: %s", attempt, exc)
+            
+            if attempt < max_retries:
+                log.warning("Retrying due to error...")
+                continue
+                
+            # Emit a uniform RUN_COMPLETE failure record for single-run mode
+            try:
+                prov = (args.provider or cfg.get("provider") or "na")
+                model = (args.model or cfg.get("model") or "na")
+                _prov_norm = str(prov).strip().lower()
+                _model_norm = str(model).strip().lower()
+                kind = "deep" if (_prov_norm == "openaidp" or ("deep-research" in _model_norm)) else "rest"
+                # id is unknown at this layer; elapsed/status may be unknown; include out if resolved
+                log.info(
+                    "[FPF RUN_COMPLETE] id=%s kind=%s provider=%s model=%s ok=false elapsed=%s status=%s path=%s error=%s",
+                    "na", kind, prov, model, "na", "na", (out or "na"), str(exc)
+                )
+            except Exception:
+                pass
+            print(f"FPF run failed: {exc}", file=sys.stderr)
+            return 2
 
 
 if __name__ == "__main__":

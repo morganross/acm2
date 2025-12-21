@@ -17,29 +17,11 @@ Guarantees:
 from __future__ import annotations
 from typing import Dict, Tuple, Optional, Any, List
 
-# Whitelist of deep-research models
-ALLOWED_MODELS = {
-    "o3-deep-research",
-    "o4-mini-deep-research",
-}
-
-
 def _normalize_model(model: str) -> str:
     if not model:
         return ""
     # Drop any suffix after ":" if present, keep base id for request compatibility
     return model.split(":", 1)[0]
-
-
-def validate_model(model_id: str) -> bool:
-    m = _normalize_model(model_id or "")
-    if m in ALLOWED_MODELS:
-        return True
-    # Allow simple prefix tolerance for revisions, e.g., "o3-deep-research-2025-09-01"
-    for allowed in ALLOWED_MODELS:
-        if m.startswith(allowed):
-            return True
-    return False
 
 
 def _translate_sampling(cfg: Dict, model: str) -> Dict:
@@ -78,14 +60,10 @@ def build_payload(prompt: str, cfg: Dict) -> Tuple[Dict, Optional[Dict]]:
     - Use a Responses-API-compatible shape with a minimal search tool (web_search_preview)
       and tool_choice='auto'. If the deep-research API diverges, adapt this function only.
     """
-    model_cfg = cfg.get("model") or "o3-deep-research"
+    model_cfg = cfg.get("model")
+    if not model_cfg:
+        raise RuntimeError("OpenAI Deep Research provider requires 'model' in config - no fallback defaults allowed")
     model_to_use = _normalize_model(model_cfg)
-
-    if not validate_model(model_to_use):
-        raise RuntimeError(
-            f"Model '{model_to_use}' is not allowed by the OpenAI Deep Research provider whitelist. "
-            f"Allowed models: {sorted(ALLOWED_MODELS)}"
-        )
 
     # When JSON is requested, prepend a strict JSON instruction to the prompt (avoid deprecated response_format/json_object).
     request_json = bool(cfg.get("json")) if cfg.get("json") is not None else False

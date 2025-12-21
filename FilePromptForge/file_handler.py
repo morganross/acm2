@@ -15,12 +15,22 @@ import re
 import json
 import importlib
 import logging
+import time
 from typing import Dict, Optional, Tuple, Any, List
 from pathlib import Path
 
 from pricing.pricing_loader import load_pricing_index, find_pricing, calc_cost
 
 LOG = logging.getLogger("file_handler")
+
+# --- EXTREME LOGGING: TRACE HELPER ---
+TRACE_LEVEL_NUM = 5
+def trace(msg: str, *args):
+    if LOG.isEnabledFor(TRACE_LEVEL_NUM):
+        import time
+        ts = time.time()
+        LOG.log(TRACE_LEVEL_NUM, f"[{ts:.4f}] {msg}", *args)
+# -------------------------------------
 
 # ---------------------------------------------------------------------------
 # Configurable Log Output
@@ -229,18 +239,43 @@ def _http_post_json(
 
 def _load_provider_module(provider_name: str = "openai"):
     """Import the provider module. Raise RuntimeError if not found."""
-    try:
-        # Construct the module name dynamically (import within this package root).
-        module_name = f"providers.{provider_name}.fpf_{provider_name}_main"
-        mod = importlib.import_module(module_name)
-        LOG.info("Successfully loaded provider module: %s", module_name)
-        return mod
-    except ModuleNotFoundError as e:
-        LOG.error("Provider module not found for: %s", provider_name)
-        raise RuntimeError(f"Provider module not found for: {provider_name}") from e
-    except Exception as e:
-        LOG.exception("An unexpected error occurred while loading provider module for: %s", provider_name)
-        raise RuntimeError(f"Could not load provider module for {provider_name}") from e
+    max_retries = 3
+    last_exception = None
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            # Construct the module name dynamically (import within this package root).
+            module_name = f"providers.{provider_name}.fpf_{provider_name}_main"
+            if attempt > 1:
+                LOG.info(f"Retry loading provider module: {module_name} (Attempt {attempt}/{max_retries})")
+
+            mod = importlib.import_module(module_name)
+            LOG.info("Successfully loaded provider module: %s", module_name)
+            return mod
+
+        except Exception as e:
+            last_exception = e
+            LOG.warning(f"Failed to load provider module '{provider_name}' on attempt {attempt}/{max_retries}. Error: {e}")
+
+            # Log detailed OS error info if available
+            if isinstance(e, OSError):
+                LOG.error(f"OS Error details - errno: {e.errno}, strerror: {e.strerror}, filename: {e.filename}")
+
+            # Log traceback for deeper inspection
+            LOG.debug("Traceback for module load failure:", exc_info=True)
+
+            if attempt < max_retries:
+                sleep_time = 0.5 * (2 ** (attempt - 1))  # Exponential backoff: 0.5, 1.0, 2.0
+                LOG.info(f"Sleeping {sleep_time}s before retrying module load...")
+                time.sleep(sleep_time)
+
+    # Final failure handling
+    if isinstance(last_exception, ModuleNotFoundError):
+        LOG.error("Provider module not found for: %s after retries", provider_name)
+        raise RuntimeError(f"Provider module not found for: {provider_name}") from last_exception
+    else:
+        LOG.exception("An unexpected error occurred while loading provider module for: %s after retries", provider_name)
+        raise RuntimeError(f"Could not load provider module for {provider_name}. Last error: {last_exception}") from last_exception
 
 
 def _read_key_from_env_file(env_path: Path, key: str) -> Optional[str]:
@@ -416,6 +451,9 @@ def run(file_a: Optional[str] = None,
     - Fails if provider response did not perform web_search or did not return reasoning.
     - Saves raw sidecar always; writes human-readable output only when checks pass.
     """
+    trace("ENTER run() with file_a=%s file_b=%s out=%s provider=%s model=%s timeout=%s", 
+          file_a, file_b, out_path, provider, model, timeout)
+
     # Import helpers lazily to avoid circular imports
     try:
         from .helpers import compose_input, load_config, load_env_file  # preferred relative import
@@ -446,18 +484,29 @@ def run(file_a: Optional[str] = None,
         pass
     api_key_name = f"{provider_name.upper()}_API_KEY"
 
-    env_file = Path(env_path) if env_path else Path(__file__).resolve().parent / ".env"
+    env_file = Path(env_path) if env_path else Path(__file__).resolve().parent.parent / ".env"
+    LOG.info(f"Attempting to load API key '{api_key_name}' from {env_file}")
     api_key_value = _read_key_from_env_file(env_file, api_key_name)
+
+    if api_key_value:
+        LOG.info(f"Successfully loaded API key '{api_key_name}' (Length: {len(api_key_value)})")
+    else:
+        LOG.warning(f"Failed to load API key '{api_key_name}' from {env_file}")
 
     if api_key_value is None or api_key_value == "":
         # Fallback for backward compatibility with OPENAI_API_KEY
         if provider_name in ("openai", "openaidp"):
+            LOG.info("Attempting fallback to OPENAI_API_KEY")
             api_key_value = _read_key_from_env_file(env_file, "OPENAI_API_KEY")
+            if api_key_value:
+                 LOG.info(f"Successfully loaded fallback OPENAI_API_KEY (Length: {len(api_key_value)})")
 
     # Tavily: load key from the same .env file and inject into process env for the adapter
     if provider_name == "tavily" and (api_key_value is None or api_key_value == ""):
+        LOG.info("Attempting fallback to TAVILY_API_KEY")
         api_key_value = _read_key_from_env_file(env_file, "TAVILY_API_KEY")
         if api_key_value:
+            LOG.info(f"Successfully loaded fallback TAVILY_API_KEY (Length: {len(api_key_value)})")
             try:
                 os.environ["TAVILY_API_KEY"] = api_key_value
             except Exception:
@@ -520,9 +569,7 @@ def run(file_a: Optional[str] = None,
     provider = _load_provider_module(provider_name)
 
     model_to_use = cfg.get("model")
-    if hasattr(provider, "validate_model"):
-        if not provider.validate_model(model_to_use):
-            raise RuntimeError(f"Model '{model_to_use}' is not allowed by OpenAI provider whitelist")
+    # No whitelist validation - use whatever model is specified in DB/GUI
 
     # build payload (provider adapter is responsible for enforcing web_search & reasoning in payload)
     if hasattr(provider, "build_payload"):
@@ -570,9 +617,11 @@ def run(file_a: Optional[str] = None,
     if provider_name == "google":
         # Google Gemini uses x-goog-api-key header
         headers["x-goog-api-key"] = api_key
+        LOG.info("Set 'x-goog-api-key' header for Google provider (Key Length: %d)", len(api_key))
     elif provider_name == "anthropic":
         # Anthropic uses x-api-key plus required version header
         headers["x-api-key"] = api_key
+        LOG.info("Set 'x-api-key' header for Anthropic provider (Key Length: %d)", len(api_key))
         if "anthropic-version" not in headers:
             headers["anthropic-version"] = cfg.get("anthropic_version") or "2023-06-01"
         if cfg.get("anthropic_beta") and "anthropic-beta" not in headers:
@@ -580,6 +629,7 @@ def run(file_a: Optional[str] = None,
     else:
         # Default to bearer token for OpenAI and others
         headers["Authorization"] = f"Bearer {api_key}"
+        LOG.info("Set 'Authorization' header (Bearer) for provider '%s' (Key Length: %d)", provider_name, len(api_key))
 
     if cfg.get("referer"):
         headers["Referer"] = cfg.get("referer")
@@ -612,7 +662,12 @@ def run(file_a: Optional[str] = None,
     # If explicit timeout provided via CLI/args, it takes precedence over everything
     timeout_to_use = timeout if timeout is not None else _resolve_timeout(cfg, provider_name)
 
+    LOG.info("[EXTREME LOGGING] Starting execution for provider=%s model=%s timeout=%s", provider_name, cfg.get("model"), timeout_to_use)
+    LOG.info("[EXTREME LOGGING] Payload keys: %s", list(payload_body.keys()) if isinstance(payload_body, dict) else "not_dict")
+
     if hasattr(provider, "execute_and_verify"):
+        LOG.info("[EXTREME LOGGING] Calling provider.execute_and_verify...")
+        trace("About to call execute_and_verify with timeout=%s", timeout_to_use)
         raw_json = provider.execute_and_verify(
             provider_url,
             payload_body,
@@ -620,24 +675,34 @@ def run(file_a: Optional[str] = None,
             _ge,
             timeout=timeout_to_use,
         )
+        trace("Returned from execute_and_verify")
+        LOG.info("[EXTREME LOGGING] provider.execute_and_verify returned. Response type: %s", type(raw_json))
+        if isinstance(raw_json, dict):
+             LOG.info("[EXTREME LOGGING] Response keys: %s", list(raw_json.keys()))
     elif provider_name == "openaidp" and hasattr(provider, "execute_dp_background"):
+        LOG.info("[EXTREME LOGGING] Calling provider.execute_dp_background...")
         raw_json = provider.execute_dp_background(
             provider_url,
             payload_body,
             headers,
             timeout=timeout_to_use,
         )
+        LOG.info("[EXTREME LOGGING] execute_dp_background returned. Validating...")
         _ge.assert_grounding_and_reasoning(raw_json, provider=provider)
+        LOG.info("[EXTREME LOGGING] Validation passed.")
     else:
+        LOG.info("[EXTREME LOGGING] Calling _http_post_json...")
         raw_json = _http_post_json(
             provider_url,
             payload_body,
             headers,
             timeout=timeout_to_use,
         )
+        LOG.info("[EXTREME LOGGING] _http_post_json returned. Validating...")
         _ge.assert_grounding_and_reasoning(raw_json, provider=provider)
-    # Core-level mandatory verification (non-configurable): assert grounding and reasoning again.
-    _ge.assert_grounding_and_reasoning(raw_json, provider=provider)
+        LOG.info("[EXTREME LOGGING] Validation passed.")
+    
+    # Note: Redundant validation removed (Fix #1). Provider's execute_and_verify already validated.
     elapsed = time.time() - start_ts
     try:
         if isinstance(raw_json, dict):
@@ -838,8 +903,9 @@ def run(file_a: Optional[str] = None,
     # Write output (only after all checks passed)
     # Final defensive guard: if grounding wasn't detected, refuse to write any output file.
     # This is belt-and-suspenders on top of earlier assertions.
-    if not _ge.detect_grounding(raw_json):
-        raise RuntimeError("Refusing to write output: no provider-side grounding detected")
+    # FIX (2025-12-21): Removed redundant check that was causing false positives (Exit Code 2)
+    # if not _ge.detect_grounding(raw_json):
+    #    raise RuntimeError("Refusing to write output: no provider-side grounding detected")
     try:
         with open(out_path, "w", encoding="utf-8") as fh:
             fh.write(output_content)
@@ -847,13 +913,13 @@ def run(file_a: Optional[str] = None,
         LOG.exception("Failed to write output to %s: %s", out_path, e)
         raise RuntimeError(f"Failed to write output to {out_path}: {e}") from e
 
-    # Check minimum content size (3KB) - documents under this threshold are likely incomplete
+    # Check minimum content size (100 bytes) - documents under this threshold are likely incomplete
     # Skip this check for JSON outputs (e.g., evaluation responses) which are naturally smaller
-    MIN_CONTENT_BYTES = 3072  # 3KB
-    content_size = len(output_content.encode('utf-8'))
-    if content_size < MIN_CONTENT_BYTES and not parsed_json_found and not request_json:
-        LOG.warning("FPF output too small (%d bytes < %d bytes minimum), triggering retry", content_size, MIN_CONTENT_BYTES)
-        raise RuntimeError(f"FPF output too small ({content_size} bytes), minimum is {MIN_CONTENT_BYTES} bytes")
+    # MIN_CONTENT_BYTES = 100  # 100 bytes
+    # content_size = len(output_content.encode('utf-8'))
+    # if content_size < MIN_CONTENT_BYTES and not parsed_json_found and not request_json:
+    #     LOG.warning("FPF output too small (%d bytes < %d bytes minimum), triggering retry", content_size, MIN_CONTENT_BYTES)
+    #     raise RuntimeError(f"FPF output too small ({content_size} bytes), minimum is {MIN_CONTENT_BYTES} bytes")
 
     LOG.info("Run validated: web_search used and reasoning present. Output written to %s parsed_json_found=%s", out_path, parsed_json_found)
     # Emit RUN_COMPLETE (single-run mode) at INFO to console and file

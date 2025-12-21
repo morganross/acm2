@@ -9,8 +9,6 @@ import logging
 
 LOG = logging.getLogger("fpf_tavily_main")
 
-ALLOWED_MODELS = {"mini", "pro", "auto"}
-
 
 def _is_transient_error(exc: Exception) -> bool:
     """Check if an error is transient and should be retried."""
@@ -35,17 +33,11 @@ def _normalize_model(model_id: str) -> str:
     return base or "auto"
 
 
-def validate_model(model_id: str) -> bool:
-    normalized = _normalize_model(model_id)
-    return normalized in ALLOWED_MODELS
-
-
 def build_payload(prompt: str, cfg: dict):
-    model = cfg.get("model") or "auto"
+    model = cfg.get("model")
+    if not model:
+        raise RuntimeError("Tavily provider requires 'model' in config - no fallback defaults allowed")
     normalized_model = _normalize_model(model)
-    if not validate_model(model):
-        allowed = ", ".join(sorted(ALLOWED_MODELS))
-        raise RuntimeError(f"model '{model}' is not allowed for Tavily provider; allowed: {allowed}")
     stream = bool(cfg.get("stream", False))
     citation_format = cfg.get("citation_format", "numbered")
     output_schema = cfg.get("output_schema")

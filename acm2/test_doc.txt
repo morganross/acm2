@@ -1,1 +1,0 @@
-This is a simple test document to verify the ACM2 system is working correctly with all the new configuration fields. The fallback elimination work should ensure that all required parameters are properly validated and no hardcoded defaults are used.

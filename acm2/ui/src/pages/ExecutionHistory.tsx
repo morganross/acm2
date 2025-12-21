@@ -30,10 +30,12 @@ export default function ExecutionHistory() {
   const [deleting, setDeleting] = useState<string | null>(null)
   const [bulkDeleteTarget, setBulkDeleteTarget] = useState<null | 'completedFailed' | 'failed'>(null)
 
-  // Fetch runs from API
+  // Fetch runs from API on interval
   useEffect(() => {
-    const fetchRuns = async () => {
-      setLoading(true)
+    let intervalId: number | null = null
+
+    const fetchRuns = async (showLoader = false) => {
+      if (showLoader) setLoading(true)
       setError(null)
       try {
         const data = await runsApi.list({ limit: 100 })
@@ -41,10 +43,18 @@ export default function ExecutionHistory() {
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load runs')
       } finally {
-        setLoading(false)
+        if (showLoader) setLoading(false)
       }
     }
-    fetchRuns()
+
+    fetchRuns(true)
+    intervalId = window.setInterval(() => fetchRuns(false), 10_000)
+
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId)
+      }
+    }
   }, [])
 
   const handleDeleteClick = (e: React.MouseEvent, runId: string) => {
@@ -100,32 +110,22 @@ export default function ExecutionHistory() {
     setBulkDeleteTarget(target)
     setError(null)
 
-    const deletedIds: string[] = []
-    const errors: string[] = []
-
     try {
-      // Keep it simple: delete sequentially using existing DELETE /runs/{id} endpoint.
-      for (const runId of runIdsToDelete) {
-        try {
-          await runsApi.delete(runId)
-          deletedIds.push(runId)
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err)
-          errors.push(`${runId}: ${msg}`)
-        }
-      }
+      const apiTarget = target === 'failed' ? 'failed' : 'completed_failed'
+      const result = await runsApi.bulkDelete(apiTarget)
+      const deletedCount = result?.deleted ?? 0
 
-      if (deletedIds.length > 0) {
-        setRuns((prev) => prev.filter((r) => !deletedIds.includes(r.id)))
+      if (deletedCount > 0) {
+        setRuns((prev) => prev.filter((r) => !statuses.includes(r.status)))
         const label = target === 'failed' ? 'failed run(s)' : 'completed/failed run(s)'
-        notify.success(`Deleted ${deletedIds.length} ${label}`) 
+        notify.success(`Deleted ${deletedCount} ${label}`)
+      } else {
+        notify.info('No runs were deleted (they may have been removed already)')
       }
-
-      if (errors.length > 0) {
-        setError(`Some runs failed to delete (${errors.length}). See console for details.`)
-        // Avoid spamming UI; log details for diagnosis.
-        console.error('Bulk delete errors:', errors)
-      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Bulk delete failed'
+      setError(message)
+      notify.error(message)
     } finally {
       setBulkDeleteTarget(null)
     }

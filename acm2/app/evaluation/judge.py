@@ -147,9 +147,21 @@ def _parse_json_response(text: str) -> Dict[str, Any]:
     # Try to find JSON object in text
     match = re.search(r"\{.*\}", text, flags=re.DOTALL)
     if match:
+        json_str = match.group(0)
         try:
-            return json.loads(match.group(0))
+            return json.loads(json_str)
         except json.JSONDecodeError as e:
+            # Handle double curly braces (common LLM error when prompt uses {{ }})
+            # e.g. {{ "key": "value" }} -> { "key": "value" }
+            if json_str.startswith("{{") and "Expecting property name enclosed in double quotes" in str(e):
+                try:
+                    # Naive fix: replace double braces with single braces
+                    # This is safe enough for the expected schema
+                    fixed_str = json_str.replace("{{", "{").replace("}}", "}")
+                    return json.loads(fixed_str)
+                except json.JSONDecodeError:
+                    pass
+            
             raise ValueError(f"Found JSON-like content but failed to parse: {e}")
     
     raise ValueError(f"No valid JSON found in response: {text[:200]}...")

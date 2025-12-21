@@ -10,7 +10,7 @@ from uuid import uuid4
 from pathlib import Path
 
 from dataclasses import asdict, fields, is_dataclass
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, WebSocket, WebSocketDisconnect, Depends
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, WebSocket, WebSocketDisconnect, Depends, Body
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -911,30 +911,21 @@ async def list_runs(
     )
 
 
-@router.get("/{run_id}")
+@router.get("/{run_id}", response_model=RunDetail)
 async def get_run(
     run_id: str,
     db: AsyncSession = Depends(get_db)
-) -> dict:
+) -> Any:
     """
     Get detailed information about a specific run.
     """
-    logger.info(f"Getting run {run_id}")
+    logger.debug(f"Getting run {run_id}")
     repo = RunRepository(db)
     run = await repo.get_with_tasks(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
     try:
-        detail = _to_detail(run)
-        return {
-            "id": run.id,
-            "status": run.status,
-            "progress": _calculate_progress(run),
-            "error": run.error_message,
-            "created_at": run.created_at.isoformat() if run.created_at else None,
-            "started_at": run.started_at.isoformat() if run.started_at else None,
-            "completed_at": run.completed_at.isoformat() if run.completed_at else None,
-        }
+        return _to_detail(run)
     except Exception as e:
         logger.exception(f"Error serializing run {run_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Error retrieving run: {str(e)}")
@@ -963,6 +954,21 @@ async def delete_run(
     
     await repo.delete(run_id)
     return {"status": "deleted", "run_id": run_id}
+
+
+@router.delete("/bulk")
+async def bulk_delete_runs(
+    target: str = Query(..., regex="^(failed|completed_failed)$", description="failed or completed_failed"),
+    db: AsyncSession = Depends(get_db)
+) -> dict:
+    """Bulk delete runs by status groups."""
+    repo = RunRepository(db)
+    if target == "failed":
+        statuses = [RunStatus.FAILED.value]
+    else:
+        statuses = [RunStatus.FAILED.value, RunStatus.COMPLETED.value]
+    deleted = await repo.bulk_delete_by_status(statuses)
+    return {"status": "ok", "deleted": deleted, "target": target}
 
 
 @router.post("/{run_id}/start")
@@ -1023,22 +1029,15 @@ async def start_run(
     pairwise_config = run_config.get("pairwise_config", {}) or run_config.get("config_overrides", {}).get("pairwise", {})
     concurrency_config = run_config.get("concurrency_config", {}) or run_config.get("config_overrides", {}).get("concurrency", {})
     
-    # Get FPF instructions - prefer generation_instructions_id from Content Library
-    # Fall back to fpf_config.prompt_template if no Content Library item specified
+    # Get generation instructions from Content Library - NO FALLBACKS
     generation_instructions_id = run_config.get("generation_instructions_id")
-    instructions = ""
-    if generation_instructions_id:
-        content = await content_repo.get_by_id(generation_instructions_id)
-        if content:
-            instructions = content.body
-            logger.info(f"Loaded generation instructions from Content Library: {content.name}")
-    
-    # Fall back to prompt_template if no Content Library instructions
-    if not instructions:
-        fpf_config = run_config.get("fpf_config") or run_config.get("config_overrides", {}).get("fpf", {})
-        instructions = fpf_config.get("prompt_template", "") if fpf_config else ""
-        if instructions:
-            logger.info("Using prompt_template from fpf_config as generation instructions")
+    if not generation_instructions_id:
+        raise ValueError("No generation_instructions_id in run_config - you MUST set this in the GUI")
+    content = await content_repo.get_by_id(generation_instructions_id)
+    if not content or not content.body:
+        raise ValueError(f"Generation instructions content not found or empty (id={generation_instructions_id})")
+    instructions = content.body
+    logger.info(f"Loaded generation instructions from Content Library: {content.name}")
     
     # Fetch custom instruction content from Content Library if IDs are provided
     single_eval_instructions = None
@@ -1074,45 +1073,92 @@ async def start_run(
             combine_instructions = content.body
             logger.info(f"Loaded combine instructions from Content Library: {content.name}")
     
+    # ALL VALUES MUST COME FROM DB - NO FALLBACKS
+    generators = run_config.get("generators")
+    if not generators:
+        raise ValueError("generators must be set in preset")
+    models = run_config.get("models")
+    if not models:
+        raise ValueError("models must be set in preset")
+    iterations = run_config.get("iterations")
+    if iterations is None:
+        raise ValueError("iterations must be set in preset")
+    eval_enabled = eval_config.get("enabled")
+    if eval_enabled is None:
+        eval_enabled = run_config.get("evaluation_enabled")
+    if eval_enabled is None:
+        raise ValueError("evaluation_enabled must be set in preset")
+    pairwise_enabled = pairwise_config.get("enabled")
+    if pairwise_enabled is None:
+        pairwise_enabled = run_config.get("pairwise_enabled")
+    if pairwise_enabled is None:
+        raise ValueError("pairwise_enabled must be set in preset")
+    eval_iterations = eval_config.get("iterations")
+    if eval_iterations is None:
+        raise ValueError("eval_iterations must be set in preset")
+    judge_models = eval_config.get("judge_models")
+    if not judge_models:
+        raise ValueError("eval_config.judge_models must be set in preset")
+    eval_timeout = eval_config.get("timeout_seconds")
+    if eval_timeout is None:
+        raise ValueError("eval_config.timeout_seconds must be set in preset")
+    combine_enabled = combine_config.get("enabled")
+    if combine_enabled is None:
+        raise ValueError("combine_config.enabled must be set in preset")
+    combine_strategy = combine_config.get("strategy")
+    if combine_enabled and not combine_strategy:
+        raise ValueError("combine_config.strategy must be set when combine is enabled")
+    combine_models_list = combine_config.get("selected_models")
+    if combine_enabled and not combine_models_list:
+        raise ValueError("combine_config.selected_models must be set when combine is enabled")
+    log_level = run_config.get("log_level")
+    if not log_level:
+        raise ValueError("log_level must be set in preset")
+    gen_concurrency = concurrency_config.get("max_concurrent") or concurrency_config.get("generation_concurrency")
+    if gen_concurrency is None:
+        raise ValueError("concurrency_config.generation_concurrency must be set in preset")
+    eval_concurrency_val = concurrency_config.get("eval_concurrency")
+    if eval_concurrency_val is None:
+        raise ValueError("concurrency_config.eval_concurrency must be set in preset")
+    request_timeout = concurrency_config.get("request_timeout")
+    if request_timeout is None:
+        raise ValueError("concurrency_config.request_timeout must be set in preset")
+    max_retries = concurrency_config.get("max_retries")
+    if max_retries is None:
+        raise ValueError("concurrency_config.max_retries must be set in preset")
+    retry_delay = concurrency_config.get("retry_delay")
+    if retry_delay is None:
+        raise ValueError("concurrency_config.retry_delay must be set in preset")
+    
     executor_config = RunConfig(
         document_ids=list(document_contents.keys()),
         document_contents=document_contents,
         instructions=instructions,
-        generators=[AdapterGeneratorType(g) for g in (run_config.get("generators") or ["gptr"])],
-        # Format models as "provider:model" strings for proper routing
-        models=[f"{m['provider']}:{m['model']}" for m in (run_config.get("models") or [])],
-        iterations=run_config.get("iterations", 1),
-        enable_single_eval=eval_config.get("enabled", run_config.get("evaluation_enabled", True)),
-        enable_pairwise=pairwise_config.get("enabled", run_config.get("pairwise_enabled", False)),
-        eval_iterations=eval_config.get("iterations", 1),
-        # Get judge models from eval_config.judge_models (already formatted as "provider:model" strings)
-        # NO FALLBACK - must be configured in preset's eval_config.judge_models
-        eval_judge_models=eval_config.get("judge_models") or [],
-        # Per-call eval timeout from GUI eval panel
-        eval_timeout=eval_config.get("timeout_seconds", 600),
-        # pairwise_top_n is in eval_config, not pairwise_config
+        generators=[AdapterGeneratorType(g) for g in generators],
+        models=[f"{m['provider']}:{m['model']}" for m in models],
+        iterations=iterations,
+        enable_single_eval=eval_enabled,
+        enable_pairwise=pairwise_enabled,
+        eval_iterations=eval_iterations,
+        eval_judge_models=judge_models,
+        eval_timeout=eval_timeout,
         pairwise_top_n=eval_config.get("pairwise_top_n"),
-        # Custom evaluation instructions from Content Library
         single_eval_instructions=single_eval_instructions,
         pairwise_eval_instructions=pairwise_eval_instructions,
         eval_criteria=eval_criteria,
-        enable_combine=combine_config.get("enabled", False),
-        combine_strategy=combine_config.get("strategy", "intelligent_merge"),
-        # Get combine models from combine_config.selected_models (already formatted as "provider:model" strings)
-        # NO FALLBACK - must be configured in preset's combine_config.selected_models
-        combine_models=combine_config.get("selected_models") or [],
+        enable_combine=combine_enabled,
+        combine_strategy=combine_strategy or "",
+        combine_models=combine_models_list or [],
         combine_instructions=combine_instructions,
         post_combine_top_n=run_config.get("post_combine_top_n"),
-        log_level=run_config.get("log_level", "INFO"),
+        log_level=log_level,
         fpf_log_output="file",
         fpf_log_file_path=str(Path("logs") / run_id / "fpf_output.log"),
-        # Concurrency settings (from GUI Settings page via concurrency_config)
-        # REQUIRED from preset - no fallback defaults
-        generation_concurrency=concurrency_config.get("max_concurrent", concurrency_config.get("generation_concurrency")) or 5,
-        eval_concurrency=concurrency_config.get("eval_concurrency") or 5,
-        request_timeout=concurrency_config.get("request_timeout") or 600,
-        max_retries=concurrency_config.get("max_retries") or 3,
-        retry_delay=concurrency_config.get("retry_delay") or 2.0,
+        generation_concurrency=gen_concurrency,
+        eval_concurrency=eval_concurrency_val,
+        request_timeout=request_timeout,
+        max_retries=max_retries,
+        retry_delay=retry_delay,
     )
     
     background_tasks.add_task(execute_run_background, run_id, executor_config)

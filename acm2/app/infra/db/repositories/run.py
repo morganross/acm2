@@ -4,7 +4,7 @@ Run repository for CRUD operations on runs.
 from datetime import datetime
 from typing import Optional, Sequence
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -65,6 +65,15 @@ class RunRepository(BaseRepository[Run]):
             stmt = stmt.where(Run.status == status)
         result = await self.session.execute(stmt)
         return result.scalar_one()
+
+    async def bulk_delete_by_status(self, statuses: list[str]) -> int:
+        """Delete all runs whose status is in the provided list."""
+        if not statuses:
+            return 0
+        stmt = delete(Run).where(Run.status.in_(statuses))
+        result = await self.session.execute(stmt)
+        await self.session.commit()
+        return result.rowcount or 0
     
     async def get_active_runs(self) -> Sequence[Run]:
         """Get all runs that are currently in progress."""

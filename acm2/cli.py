@@ -91,6 +91,17 @@ def create_run(
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
 
+@runs_app.command("cancel")
+def cancel_run(run_id: str = typer.Option(..., help="ID of the run to cancel")):
+    """Cancel a running run."""
+    try:
+        with httpx.Client() as client:
+            response = client.put(f"{API_URL}/runs/{run_id}/status", json={"status": "cancelled"})
+            response.raise_for_status()
+            console.print(f"[green]Run {run_id} cancelled successfully![/green]")
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+
 # Presets group
 presets_app = typer.Typer()
 app.add_typer(presets_app, name="presets", help="Manage configuration presets")
@@ -115,7 +126,7 @@ def list_presets(
             
             for preset in data["items"]:
                 table.add_row(
-                    preset["id"][:8],
+                    preset["id"],
                     preset["name"],
                     str(preset["document_count"]),
                     str(preset["model_count"])
