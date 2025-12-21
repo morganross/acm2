@@ -41,7 +41,8 @@ try:
 except ImportError:
     from helpers import load_config, load_env_file  # type: ignore
 
-LOG_FILENAME = SCRIPT_DIR / "logs" / "fpf_run.log"
+# Use PID in log filename to prevent contention on Windows during concurrent runs
+LOG_FILENAME = SCRIPT_DIR / "logs" / f"fpf_run_{os.getpid()}.log"
 # Ensure logs directory exists so the rotating file handler can write there
 if not LOG_FILENAME.parent.exists():
     LOG_FILENAME.parent.mkdir(parents=True, exist_ok=True)
