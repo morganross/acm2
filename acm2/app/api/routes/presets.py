@@ -3,6 +3,7 @@ Presets API Routes.
 
 Endpoints for managing saved preset configurations.
 """
+import json
 import logging
 from datetime import datetime
 from typing import Optional
@@ -63,69 +64,46 @@ async def execute_run_background(run_id: str, config: RunConfig):
     
     logger.info(f"Starting background execution for run {run_id}")
     
-    try:
-        executor = get_executor()
-        result = await executor.execute(run_id, config)
+    executor = get_executor()
+    result = await executor.execute(run_id, config)
+    
+    # Update run in DB
+    async with async_session_factory() as session:
+        run_repo = RunRepository(session)
         
-        # Update run in DB
-        async with async_session_factory() as session:
-            run_repo = RunRepository(session)
-            
-            if result.status.value == "completed":
-                def make_serializable(obj):
-                    if isinstance(obj, dict):
-                        return {k: make_serializable(v) for k, v in obj.items()}
-                    elif isinstance(obj, list):
-                        return [make_serializable(v) for v in obj]
-                    elif isinstance(obj, datetime):
-                        return obj.isoformat()
-                    return obj
+        if result.status.value == "completed":
+            results_summary = {
+                "winner": result.winner_doc_id,
+                "generated_count": len(result.generated_docs),
+                "eval_count": len(result.single_eval_results or {}),
+                "combined_doc_id": result.combined_docs[0].doc_id if result.combined_docs else None,
+                "post_combine_eval": asdict(result.post_combine_eval_results) if result.post_combine_eval_results else None,
+            }
 
-                results_summary = {
-                    "winner": result.winner_doc_id,
-                    "generated_count": len(result.generated_docs),
-                    "eval_count": len(result.single_eval_results or {}),
-                    "combined_doc_id": result.combined_docs[0].doc_id if result.combined_docs else None,
-                    "post_combine_eval": asdict(result.post_combine_eval_results) if result.post_combine_eval_results else None,
-                }
-
-                await run_repo.complete(
-                    run_id, 
-                    results_summary=make_serializable(results_summary),
-                    total_cost_usd=result.total_cost_usd
-                )
-                logger.info(f"Run {run_id} completed successfully")
-            else:
-                error_msg = "; ".join(result.errors) if result.errors else "Unknown error"
-                await run_repo.fail(run_id, error_message=error_msg)
-                logger.error(f"Run {run_id} failed: {error_msg}")
-                
-    except Exception as e:
-        logger.exception(f"Unexpected error executing run {run_id}")
-        async with async_session_factory() as session:
-            run_repo = RunRepository(session)
-            await run_repo.fail(run_id, error_message=str(e))
-    finally:
-        # Clean up: remove file handler and flush
-        file_handler.flush()
-        file_handler.close()
-        root_logger.removeHandler(file_handler)
+            # json.dumps will fail if datetime objects are present - fail fast
+            await run_repo.complete(
+                run_id, 
+                results_summary=json.loads(json.dumps(results_summary)),
+                total_cost_usd=result.total_cost_usd
+            )
+            logger.info(f"Run {run_id} completed successfully")
+        else:
+            error_msg = "; ".join(result.errors) if result.errors else "Unknown error"
+            await run_repo.fail(run_id, error_message=error_msg)
+            logger.error(f"Run {run_id} failed: {error_msg}")
 
 
 def _get_runs_safely(preset):
     """Safely get runs if loaded, else return empty list."""
-    try:
-        ins = inspect(preset)
-        if ins and 'runs' in ins.unloaded:
-            return []
-        return preset.runs or []
-    except Exception:
+    ins = inspect(preset)
+    if ins and 'runs' in ins.unloaded:
         return []
+    return preset.runs or []
 
 def _derive_iterations(preset) -> int:
     """Get iterations from config_overrides.general - NO FALLBACKS."""
-    general_cfg = (preset.config_overrides or {}).get("general") or {}
-    iterations = general_cfg.get("iterations")
+    general_cfg = preset.config_overrides["general"]
+    iterations = general_cfg["iterations"]
     if iterations is None:
         raise ValueError(f"Preset {preset.name} ({preset.id}) has no iterations configured - set this in the GUI")
     return iterations

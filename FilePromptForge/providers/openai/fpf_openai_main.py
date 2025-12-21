@@ -91,9 +91,7 @@ def build_payload(prompt: str, cfg: Dict) -> Tuple[Dict, Optional[Dict]]:
 
     Returns (payload, optional_provider_headers)
     """
-    model = cfg.get("model")
-    if not model:
-        raise RuntimeError("OpenAI provider requires 'model' in config - no fallback defaults allowed")
+    model = cfg["model"]  # No fallback - fail fast
     model_to_use = model.split(":")[0] if ":" in model else model
 
     payload: Dict[str, Any] = {
@@ -110,16 +108,10 @@ def build_payload(prompt: str, cfg: Dict) -> Tuple[Dict, Optional[Dict]]:
     sampling = _translate_sampling(cfg, model_to_use)
     payload.update(sampling)
 
-    # Enforce provider-side web_search (always on for supported models).
-    # NOTE: Keep the tools block minimal to avoid passing provider-specific unknown params.
-    # Tuning parameters (max_results, search_prompt, filters) may be accepted by some providers,
-    # but including them inside the `tools` block has caused API errors (unknown_parameter).
-    # Keep the tools block minimal and let provider adapters map tuning into supported fields.
+    # Enforce provider-side web_search
     web_search_cfg = cfg.get("web_search", {}) or {}
-    # NOTE: The web_search tool in the Responses API uses "web_search_preview"
     ws_tool: Dict[str, Any] = {"type": "web_search"}
 
-    # As of Sept 2025, the web_search tool only supports `search_context_size` for certain models.
     if model_to_use.startswith("gpt-5"):
         if "search_context_size" in web_search_cfg:
             ws_tool["search_context_size"] = web_search_cfg["search_context_size"]
@@ -127,12 +119,10 @@ def build_payload(prompt: str, cfg: Dict) -> Tuple[Dict, Optional[Dict]]:
     if "user_location" in web_search_cfg:
         ws_tool["user_location"] = web_search_cfg["user_location"]
 
-    # Always attach the tools array and allow the model to choose tool usage.
     payload["tools"] = [ws_tool]
     payload["tool_choice"] = "auto"
 
-    # Enforce reasoning in request via per-model mapping. This will raise a RuntimeError
-    # if the selected model does not have a supported reasoning parameter mapping.
+    # Enforce reasoning
     _attach_reasoning_for_model(payload, cfg, model_to_use)
 
     include = cfg.get("include")
@@ -143,10 +133,7 @@ def build_payload(prompt: str, cfg: Dict) -> Tuple[Dict, Optional[Dict]]:
     if instructions:
         payload["instructions"] = instructions
 
-    # Enforce JSON-only responses when configured
     if cfg.get("json") is True:
-        # Use Structured Outputs (json_schema) compatible with tools/web_search.
-        # Schema allows either single-doc or pairwise shapes; downstream consumers will validate precisely.
         payload["text"] = {
             "format": {
                 "type": "json_schema",
