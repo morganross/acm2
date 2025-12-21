@@ -87,9 +87,9 @@ class PresetRepository(BaseRepository[Preset]):
             documents=original.documents,
             models=original.models,
             generators=original.generators,
-            iterations=original.iterations,
             evaluation_enabled=original.evaluation_enabled,
             pairwise_enabled=original.pairwise_enabled,
             gptr_config=original.gptr_config,
             fpf_config=original.fpf_config,
+            config_overrides=original.config_overrides,
         )

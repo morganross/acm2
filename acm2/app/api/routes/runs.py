@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.infra.db.session import get_db, async_session_factory
 from app.infra.db.repositories import RunRepository, ContentRepository
 from app.services.run_executor import RunConfig, RunExecutor
+from app.utils.logging_utils import get_run_logger
 
 # Track active executors for cancellation support
 _active_executors: Dict[str, RunExecutor] = {}
@@ -67,33 +68,20 @@ async def execute_run_background(run_id: str, config: RunConfig):
     
     # Set up file logging for this run
     log_dir = Path("logs") / run_id
-    log_dir.mkdir(parents=True, exist_ok=True)
     run_log_file = log_dir / "run.log"
     
-    # Create a file handler for this run
-    file_handler = logging.FileHandler(run_log_file, encoding="utf-8")
-    file_handler.setLevel(logging.DEBUG)
-    file_handler.setFormatter(logging.Formatter(
-        "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-    ))
+    # Create private run logger
+    # Use the log level from config if available, else default to INFO
+    log_level = config.log_level if hasattr(config, 'log_level') else "INFO"
+    run_logger = get_run_logger(run_id, run_log_file, log_level)
     
-    # Add handler to root logger to capture all app logs
-    root_logger = logging.getLogger()
-    root_logger.addHandler(file_handler)
-    try:
-        root_logger.debug(f"Added file handler for run {run_id} -> {run_log_file}")
-        # Emit a quick test message to ensure handler is writable
-        logger.debug(f"RUN_LOG_TEST start for run {run_id}")
-    except Exception:
-        logger.exception("Failed to write initial run log test entry")
-    
-    logger.info(f"Starting background execution for run {run_id}")
+    run_logger.info(f"Starting background execution for run {run_id} with level {log_level}")
     
     try:
         # Create a fresh executor instance for this run so state (eg. cancel)
         # does not leak between runs.
         # Inject ws_manager to avoid circular import issues in stats broadcasting
-        executor = RunExecutor(ws_manager=run_ws_manager)
+        executor = RunExecutor(ws_manager=run_ws_manager, run_logger=run_logger)
         # Register executor for cancellation support (log previous value)
         prev_executor = _active_executors.get(run_id)
         _active_executors[run_id] = executor
@@ -204,48 +192,49 @@ async def execute_run_background(run_id: str, config: RunConfig):
                 # Build post-combine evaluation scores (if combine was enabled)
                 post_combine_evals = {}
                 post_combine_evals_detailed = {}
-                if result.combined_doc and result.single_eval_results:
-                    combined_id = result.combined_doc.doc_id
-                    if combined_id in result.single_eval_results:
-                        summary = result.single_eval_results[combined_id]
-                        evaluations = []
-                        judge_scores = {}
-                        for eval_result in summary.results:
-                            judge_model = eval_result.model
-                            all_evaluators.add(judge_model)
-                            
-                            if judge_model not in judge_scores:
-                                judge_scores[judge_model] = []
-                            judge_scores[judge_model].append(eval_result.average_score)
-                            
-                            # Build detailed scores with criteria
-                            criteria_scores = []
-                            for cs in eval_result.scores:
-                                all_criteria.add(cs.criterion)
-                                criteria_scores.append({
-                                    "criterion": cs.criterion,
-                                    "score": cs.score,
-                                    "reason": cs.reason,
+                if result.combined_docs and result.single_eval_results:
+                    for combined_doc in result.combined_docs:
+                        combined_id = combined_doc.doc_id
+                        if combined_id in result.single_eval_results:
+                            summary = result.single_eval_results[combined_id]
+                            evaluations = []
+                            judge_scores = {}
+                            for eval_result in summary.results:
+                                judge_model = eval_result.model
+                                all_evaluators.add(judge_model)
+                                
+                                if judge_model not in judge_scores:
+                                    judge_scores[judge_model] = []
+                                judge_scores[judge_model].append(eval_result.average_score)
+                                
+                                # Build detailed scores with criteria
+                                criteria_scores = []
+                                for cs in eval_result.scores:
+                                    all_criteria.add(cs.criterion)
+                                    criteria_scores.append({
+                                        "criterion": cs.criterion,
+                                        "score": cs.score,
+                                        "reason": cs.reason,
+                                    })
+                                
+                                evaluations.append({
+                                    "judge_model": judge_model,
+                                    "trial": eval_result.trial,
+                                    "scores": criteria_scores,
+                                    "average_score": eval_result.average_score,
+                                    "started_at": eval_result.started_at.isoformat() if hasattr(eval_result, 'started_at') and eval_result.started_at else None,
+                                    "completed_at": eval_result.completed_at.isoformat() if hasattr(eval_result, 'completed_at') and eval_result.completed_at else None,
+                                    "duration_seconds": eval_result.duration_seconds if hasattr(eval_result, 'duration_seconds') else None,
                                 })
                             
-                            evaluations.append({
-                                "judge_model": judge_model,
-                                "trial": eval_result.trial,
-                                "scores": criteria_scores,
-                                "average_score": eval_result.average_score,
-                                "started_at": eval_result.started_at.isoformat() if hasattr(eval_result, 'started_at') and eval_result.started_at else None,
-                                "completed_at": eval_result.completed_at.isoformat() if hasattr(eval_result, 'completed_at') and eval_result.completed_at else None,
-                                "duration_seconds": eval_result.duration_seconds if hasattr(eval_result, 'duration_seconds') else None,
-                            })
-                        
-                        post_combine_evals_detailed[combined_id] = {
-                            "evaluations": evaluations,
-                            "overall_average": summary.avg_score,
-                        }
-                        post_combine_evals[combined_id] = {
-                            judge: sum(scores) / len(scores)
-                            for judge, scores in judge_scores.items()
-                        }
+                            post_combine_evals_detailed[combined_id] = {
+                                "evaluations": evaluations,
+                                "overall_average": summary.avg_score,
+                            }
+                            post_combine_evals[combined_id] = {
+                                judge: sum(scores) / len(scores)
+                                for judge, scores in judge_scores.items()
+                            }
                 
                 # Build pairwise results if available
                 pairwise_data = None
@@ -368,19 +357,6 @@ async def execute_run_background(run_id: str, config: RunConfig):
                             "success": True,
                             "details": {"combined_doc_id": combined_doc.doc_id},
                         })
-                elif result.combined_doc:
-                    # Legacy fallback for single combined doc
-                    timeline_events.append({
-                        "phase": "combination",
-                        "event_type": "combine",
-                        "description": "Combined documents into final output",
-                        "model": result.combined_doc.model,
-                        "timestamp": result.combined_doc.started_at.isoformat() if hasattr(result.combined_doc, 'started_at') and result.combined_doc.started_at else None,
-                        "completed_at": result.combined_doc.completed_at.isoformat() if hasattr(result.combined_doc, 'completed_at') and result.combined_doc.completed_at else None,
-                        "duration_seconds": result.combined_doc.duration_seconds,
-                        "success": True,
-                        "details": {"combined_doc_id": result.combined_doc.doc_id},
-                    })
                 
                 # Add run completion event
                 if result.completed_at:
@@ -406,7 +382,7 @@ async def execute_run_background(run_id: str, config: RunConfig):
                         "eval_count": len(result.single_eval_results or {}),
                         "fpf_stats": result.fpf_stats,
                         # Legacy: first combined doc for backwards compat
-                        "combined_doc_id": result.combined_doc.doc_id if result.combined_doc else None,
+                        "combined_doc_id": result.combined_docs[0].doc_id if result.combined_docs else None,
                         # New: all combined doc IDs
                         "combined_doc_ids": [cd.doc_id for cd in result.combined_docs] if result.combined_docs else [],
                         "post_combine_eval": _serialize_dataclass(result.post_combine_eval_results) if result.post_combine_eval_results else None,
@@ -446,19 +422,14 @@ async def execute_run_background(run_id: str, config: RunConfig):
             logger.debug(f"Executor cleanup for run {run_id}; popped={bool(popped)}")
         except Exception:
             logger.exception("Failed to pop active executor")
-        # Clean up: remove file handler and flush/close safely
-        try:
-            file_handler.flush()
-        except Exception:
-            logger.exception("Failed to flush run file handler")
-        try:
-            file_handler.close()
-        except Exception:
-            logger.exception("Failed to close run file handler")
-        try:
-            root_logger.removeHandler(file_handler)
-        except Exception:
-            logger.exception("Failed to remove run file handler from root logger")
+        # Clean up: close run logger handlers
+        if run_logger:
+            for handler in run_logger.handlers:
+                try:
+                    handler.flush()
+                    handler.close()
+                except Exception:
+                    logger.exception("Failed to close run logger handler")
 
 
 def _calculate_progress(run) -> RunProgress:
@@ -860,7 +831,7 @@ async def create_run(
         "document_ids": document_ids,
         "generators": generators,
         "models": models,
-        "iterations": general_cfg.get("iterations") or (preset.iterations if preset else data.iterations),
+        "iterations": general_cfg.get("iterations") or data.iterations,
         "log_level": resolved_log_level,
         "post_combine_top_n": general_cfg.get("post_combine_top_n") or (preset.post_combine_top_n if preset else None),
         "evaluation_enabled": eval_cfg.get("enabled") if eval_cfg.get("enabled") is not None else (preset.evaluation_enabled if preset else data.evaluation.enabled),

@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import time
+import contextvars
 from pathlib import Path
 from typing import List, Optional, Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -69,8 +70,14 @@ def _run_subprocess_streaming(
             bufsize=1,  # Line buffered
         )
         
+        # Capture current context to propagate to threads
+        ctx = contextvars.copy_context()
+
         # Read stdout and stderr in separate threads
         def read_stdout():
+            ctx.run(_read_stdout_impl)
+
+        def _read_stdout_impl():
             nonlocal last_heartbeat
             for line in iter(process.stdout.readline, ''):
                 if line:
@@ -81,6 +88,9 @@ def _run_subprocess_streaming(
             process.stdout.close()
         
         def read_stderr():
+            ctx.run(_read_stderr_impl)
+
+        def _read_stderr_impl():
             nonlocal last_heartbeat
             for line in iter(process.stderr.readline, ''):
                 if line:

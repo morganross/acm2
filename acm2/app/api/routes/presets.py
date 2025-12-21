@@ -12,9 +12,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infra.db.session import get_db, async_session_factory
-from app.infra.db.repositories import PresetRepository, RunRepository, DocumentRepository
+from app.infra.db.repositories import PresetRepository, RunRepository, DocumentRepository, ContentRepository
 from app.infra.db.models.run import RunStatus
-from app.services.run_executor import get_executor, RunConfig
+from app.services.run_executor import get_executor, RunConfig, RunExecutor
+from app.utils.logging_utils import get_run_logger
 from app.adapters.base import GeneratorType as AdapterGeneratorType
 from ..schemas.presets import (
     PresetCreate,
@@ -77,7 +78,7 @@ async def execute_run_background(run_id: str, config: RunConfig):
                         "winner": result.winner_doc_id,
                         "generated_count": len(result.generated_docs),
                         "eval_count": len(result.single_eval_results or {}),
-                        "combined_doc_id": result.combined_doc.doc_id if result.combined_doc else None,
+                        "combined_doc_id": result.combined_docs[0].doc_id if result.combined_docs else None,
                         "post_combine_eval": asdict(result.post_combine_eval_results) if result.post_combine_eval_results else None,
                     },
                     total_cost_usd=result.total_cost_usd
@@ -268,7 +269,6 @@ async def create_preset(
         config_overrides["combine"] = data.combine.model_dump()
     
     # Extract values for DB columns (use new config if available, fall back to legacy)
-    iterations = data.general_config.iterations if data.general_config else (data.iterations or 1)
     evaluation_enabled = data.eval_config.enabled if data.eval_config else (data.evaluation.enabled if data.evaluation else True)
     pairwise_enabled = data.pairwise_config.enabled if data.pairwise_config else (data.pairwise.enabled if data.pairwise else False)
     
@@ -404,7 +404,6 @@ async def update_preset(
     
     if data.general_config is not None:
         overrides["general"] = data.general_config.model_dump()
-        update_data["iterations"] = data.general_config.iterations
         # Extract log_level from general_config
         if hasattr(data.general_config, 'log_level') and data.general_config.log_level:
             update_data["log_level"] = data.general_config.log_level
@@ -465,9 +464,6 @@ async def update_preset(
     # Legacy field handling
     if data.models is not None:
         update_data["models"] = [m.model_dump() for m in data.models]
-    
-    if data.iterations is not None and "iterations" not in update_data:
-        update_data["iterations"] = data.iterations
     
     if data.generators is not None and "generators" not in update_data:
         update_data["generators"] = [g.value for g in data.generators]
@@ -625,6 +621,29 @@ async def execute_preset(
         else:
             logger.warning(f"Document reference not found: {doc_ref}")
 
+    # Load instruction contents
+    content_repo = ContentRepository(db)
+    single_eval_instructions = ""
+    if preset.single_eval_instructions_id:
+        content = await content_repo.get_by_id(preset.single_eval_instructions_id)
+        if content:
+            single_eval_instructions = content.content or ""
+    pairwise_eval_instructions = ""
+    if preset.pairwise_eval_instructions_id:
+        content = await content_repo.get_by_id(preset.pairwise_eval_instructions_id)
+        if content:
+            pairwise_eval_instructions = content.content or ""
+    eval_criteria = ""
+    if preset.eval_criteria_id:
+        content = await content_repo.get_by_id(preset.eval_criteria_id)
+        if content:
+            eval_criteria = content.content or ""
+    combine_instructions = ""
+    if preset.combine_instructions_id:
+        content = await content_repo.get_by_id(preset.combine_instructions_id)
+        if content:
+            combine_instructions = content.content or ""
+
     # Build execution config
     combine_config = preset.config_overrides.get("combine", {}) if preset.config_overrides else {}
     
@@ -638,17 +657,29 @@ async def execute_preset(
         instructions=instructions,
         generators=[AdapterGeneratorType(g) for g in (preset.generators or [])],
         models=[m["model"] for m in (preset.models or [])],
-        iterations=preset.iterations,
+        iterations=_derive_iterations(preset),
         enable_single_eval=preset.evaluation_enabled,
         enable_pairwise=preset.pairwise_enabled,
-        # Map other settings...
-        eval_iterations=1, # Default
+        eval_iterations=1,  # Default
         eval_judge_models=[preset.config_overrides.get("evaluation", {}).get("eval_model")] if preset.config_overrides and preset.config_overrides.get("evaluation", {}).get("eval_model") else [],
         pairwise_top_n=None,
         enable_combine=combine_config.get("enabled", False),
         combine_strategy=combine_config.get("strategy", ""),
         combine_models=[combine_config.get("model", "")] if combine_config.get("enabled", False) else [],
         log_level=getattr(preset, 'log_level', 'INFO') or 'INFO',
+        max_retries=preset.max_retries,
+        retry_delay=preset.retry_delay,
+        request_timeout=preset.request_timeout,
+        eval_timeout=preset.eval_timeout,
+        generation_concurrency=preset.generation_concurrency,
+        eval_concurrency=preset.eval_concurrency,
+        fpf_log_output=preset.fpf_log_output,
+        fpf_log_file_path=preset.fpf_log_file_path or "logs/fpf_output.log",
+        post_combine_top_n=preset.post_combine_top_n,
+        single_eval_instructions=single_eval_instructions,
+        pairwise_eval_instructions=pairwise_eval_instructions,
+        eval_criteria=eval_criteria,
+        combine_instructions=combine_instructions,
     )
     
     # Launch background task

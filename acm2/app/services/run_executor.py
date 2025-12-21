@@ -37,8 +37,6 @@ from ..evaluation import (
     FpfStatsTracker,
 )
 
-logger = logging.getLogger(__name__)
-
 
 class RunPhase(str, Enum):
     """Current phase of run execution."""
@@ -148,8 +146,8 @@ class RunConfig:
             raise ValueError("eval_concurrency must be 1-50 and is required")
         
         # Validate log_level
-        if self.log_level not in ['DEBUG', 'INFO', 'WARNING', 'ERROR']:
-            raise ValueError(f"log_level must be DEBUG/INFO/WARNING/ERROR, got {self.log_level}")
+        if self.log_level not in ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'VERBOSE']:
+            raise ValueError(f"log_level must be DEBUG/INFO/WARNING/ERROR/VERBOSE, got {self.log_level}")
         
         # Validate fpf_log_output
         if self.fpf_log_output not in ['stream', 'file', 'none']:
@@ -305,12 +303,15 @@ class RunExecutor:
     ```
     """
     
-    def __init__(self, ws_manager=None):
+    def __init__(self, ws_manager=None, run_logger: Optional[logging.Logger] = None):
         self._fpf_adapter = FpfAdapter()
         self._gptr_adapter = GptrAdapter()
         self._cancelled = False
         self._fpf_stats = FpfStatsTracker()  # Track FPF stats across the run
         # NOTE: Callback is set in execute() with run_id closure, not here
+        
+        # Use injected logger or fallback to module logger (legacy/test support)
+        self.logger = run_logger or logging.getLogger(__name__)
         
         # Use injected WebSocket manager or try to import if not provided (legacy fallback)
         if ws_manager:
@@ -324,7 +325,7 @@ class RunExecutor:
             
         # Debug: surface executor creation info
         try:
-            logger.debug(
+            self.logger.debug(
                 "RunExecutor.__init__ created fpf_adapter=%r gptr_adapter=%r cancelled=%s ws_manager=%s",
                 type(self._fpf_adapter).__name__,
                 type(self._gptr_adapter).__name__,
@@ -332,7 +333,7 @@ class RunExecutor:
                 "INJECTED" if ws_manager else ("IMPORTED" if self._run_ws_manager else "NONE")
             )
         except Exception:
-            logger.debug("RunExecutor.__init__ debug log failed", exc_info=True)
+            self.logger.debug("RunExecutor.__init__ debug log failed", exc_info=True)
             
     def _broadcast_stats(self, stats: FpfStatsTracker, run_id: str):
         """Broadcast updated FPF stats via WebSocket.
@@ -342,23 +343,23 @@ class RunExecutor:
             run_id: The run ID to broadcast to (captured in closure at execute() start)
         """
         # CRITICAL DEBUG: This should appear in logs!
-        logger.info(f"[STATS] _broadcast_stats ENTERED! run_id={run_id}")
+        self.logger.info(f"[STATS] _broadcast_stats ENTERED! run_id={run_id}")
         
         # Fix #8: Validate run_id matches current active run
         current_run = getattr(self, '_current_run_id', None)
         if current_run and current_run != run_id:
-            logger.warning(f"[STATS] RUN ID MISMATCH! Broadcast target={run_id}, but current executor run={current_run}. Skipping stale broadcast.")
+            self.logger.warning(f"[STATS] RUN ID MISMATCH! Broadcast target={run_id}, but current executor run={current_run}. Skipping stale broadcast.")
             return
             
-        logger.info(f"[STATS] Checking ws_manager: {self._run_ws_manager is not None}")
+        self.logger.info(f"[STATS] Checking ws_manager: {self._run_ws_manager is not None}")
         if not self._run_ws_manager:
-            logger.warning(f"[STATS] Cannot broadcast for run {run_id}: WebSocket manager not initialized")
+            self.logger.warning(f"[STATS] Cannot broadcast for run {run_id}: WebSocket manager not initialized")
             return
         
         try:
             # Serialize stats with validation
             stats_dict = stats.to_dict()
-            logger.info(f"[STATS] Broadcasting stats for run {run_id}: {stats_dict}")
+            self.logger.info(f"[STATS] Broadcasting stats for run {run_id}: {stats_dict}")
             
             # Create stats payload
             payload = {
@@ -369,13 +370,13 @@ class RunExecutor:
             # Try to broadcast via event loop
             try:
                 loop = asyncio.get_running_loop()
-                logger.info(f"[STATS] Got running loop, creating task")
+                self.logger.info(f"[STATS] Got running loop, creating task")
                 task = loop.create_task(self._run_ws_manager.broadcast(run_id, payload))
-                logger.info(f"[STATS] WebSocket broadcast task created for run {run_id}")
+                self.logger.info(f"[STATS] WebSocket broadcast task created for run {run_id}")
             except RuntimeError as e:
-                logger.warning(f"[STATS] No running event loop for run {run_id}: {e}")
+                self.logger.warning(f"[STATS] No running event loop for run {run_id}: {e}")
         except Exception as e:
-            logger.error(f"[STATS] Failed to broadcast stats for run {run_id}: {e}", exc_info=True)
+            self.logger.error(f"[STATS] Failed to broadcast stats for run {run_id}: {e}", exc_info=True)
     
     async def _emit_timeline_event(
         self,
@@ -414,9 +415,9 @@ class RunExecutor:
             async with async_session_factory() as session:
                 run_repo = RunRepository(session)
                 await run_repo.append_timeline_event(run_id, event)
-                logger.debug(f"Emitted timeline event: {phase}/{event_type} for run {run_id}")
+                self.logger.debug(f"Emitted timeline event: {phase}/{event_type} for run {run_id}")
         except Exception as e:
-            logger.warning(f"Failed to emit timeline event for run {run_id}: {e}")
+            self.logger.warning(f"Failed to emit timeline event for run {run_id}: {e}")
     
     def _get_adapter(self, generator: GeneratorType):
         """Get adapter for generator type."""
@@ -455,12 +456,12 @@ class RunExecutor:
             async with aiofiles.open(file_path, 'w', encoding='utf-8') as f:
                 await f.write(gen_doc.content)
             
-            logger.debug(f"Saved generated content to {file_path}")
+            self.logger.debug(f"Saved generated content to {file_path}")
         except Exception as e:
             # Re-raise to fail the run - empty content is a critical error
-            logger.error(f"Failed to save generated content for {gen_doc.doc_id}: {e}")
+            self.logger.error(f"Failed to save generated content for {gen_doc.doc_id}: {e}")
             raise RuntimeError(f"Failed to save {gen_doc.doc_id}: {e}") from e
-            logger.exception(f"Failed to save generated content for {gen_doc.doc_id}: {e}")
+            self.logger.exception(f"Failed to save generated content for {gen_doc.doc_id}: {e}")
     
     async def execute(self, run_id: str, config: RunConfig) -> RunResult:
         """
@@ -475,14 +476,15 @@ class RunExecutor:
         """
         # CRITICAL: Set run_id FIRST before any other operations
         self._current_run_id = run_id
-        logger.info(f"[STATS] Initializing executor for run {run_id}")
+        self.config = config  # Store config for access in other methods
+        self.logger.info(f"[STATS] Initializing executor for run {run_id}")
         
         # Fix #5: Reset stats for new run
         # Fix #3: Create closure that captures run_id to prevent stale ID issues
         self._fpf_stats = FpfStatsTracker()
         captured_run_id = run_id  # Capture in local variable for closure
         self._fpf_stats._on_update = lambda stats: self._broadcast_stats(stats, captured_run_id)
-        logger.info(f"[STATS] FpfStatsTracker initialized with broadcast callback bound to run_id={captured_run_id}")
+        self.logger.info(f"[STATS] FpfStatsTracker initialized with broadcast callback bound to run_id={captured_run_id}")
         
         started_at = datetime.utcnow()
         result = RunResult(
@@ -494,7 +496,7 @@ class RunExecutor:
         
         # Debug: log a concise run config summary (no secrets)
         try:
-            logger.debug(
+            self.logger.debug(
                 "Run %s config summary: documents=%d models=%r generators=%r iterations=%d enable_single_eval=%s enable_pairwise=%s log_level=%s",
                 run_id,
                 len(config.document_ids or []),
@@ -506,7 +508,7 @@ class RunExecutor:
                 config.log_level,
             )
         except Exception:
-            logger.debug("Failed to log run config summary", exc_info=True)
+            self.logger.debug("Failed to log run config summary", exc_info=True)
 
         # Emit run start timeline event
         await self._emit_timeline_event(
@@ -520,7 +522,7 @@ class RunExecutor:
         
         try:
             # Phase 1: Generation + Streaming Single Eval
-            logger.info(f"Run {run_id}: Starting generation phase")
+            self.logger.info(f"Run {run_id}: Starting generation phase")
             await self._run_generation_with_eval(run_id, config, result)
             
             if self._cancelled:
@@ -534,7 +536,7 @@ class RunExecutor:
             
             # Phase 2: Pairwise Evaluation (batch, after all single evals)
             if config.enable_pairwise and len(result.generated_docs) >= 2:
-                logger.info(f"Run {run_id}: Starting pairwise phase")
+                self.logger.info(f"Run {run_id}: Starting pairwise phase")
                 result.status = RunPhase.PAIRWISE_EVAL
                 if getattr(self, '_run_store', None):
                     try:
@@ -569,7 +571,7 @@ class RunExecutor:
                 
                 if doc_scores:
                     result.winner_doc_id = max(doc_scores, key=doc_scores.get)
-                    logger.info(f"Run {run_id}: Winner determined from single eval scores: {result.winner_doc_id} (score: {doc_scores[result.winner_doc_id]:.2f})")
+                    self.logger.info(f"Run {run_id}: Winner determined from single eval scores: {result.winner_doc_id} (score: {doc_scores[result.winner_doc_id]:.2f})")
                     if getattr(self, '_run_store', None):
                         try:
                             self._run_store.update(run_id, winner_doc_id=result.winner_doc_id)
@@ -578,7 +580,7 @@ class RunExecutor:
             
             # Phase 3: Combine (optional)
             if config.enable_combine and result.winner_doc_id:
-                logger.info(f"Run {run_id}: Starting combine phase")
+                self.logger.info(f"Run {run_id}: Starting combine phase")
                 result.status = RunPhase.COMBINING
                 if getattr(self, '_run_store', None):
                     try:
@@ -593,9 +595,9 @@ class RunExecutor:
                 await self._run_combine(config, result)
             
             # Phase 4: Post-Combine Eval (optional)
-            logger.debug(f"Post-combine eval check: enable_combine={config.enable_combine}, combined_docs={len(result.combined_docs)}, enable_pairwise={config.enable_pairwise}")
+            self.logger.debug(f"Post-combine eval check: enable_combine={config.enable_combine}, combined_docs={len(result.combined_docs)}, enable_pairwise={config.enable_pairwise}")
             if config.enable_combine and result.combined_docs and config.enable_pairwise:
-                logger.info(f"Run {run_id}: Starting post-combine eval phase")
+                self.logger.info(f"Run {run_id}: Starting post-combine eval phase")
                 result.status = RunPhase.POST_COMBINE_EVAL
                 if getattr(self, '_run_store', None):
                     try:
@@ -617,9 +619,9 @@ class RunExecutor:
             # Include FPF stats in result
             try:
                 result.fpf_stats = self._fpf_stats.to_dict()
-                logger.info(f"[STATS] Stored final stats in result for run {run_id}: {result.fpf_stats}")
+                self.logger.info(f"[STATS] Stored final stats in result for run {run_id}: {result.fpf_stats}")
             except Exception as e:
-                logger.error(f"[STATS] Failed to serialize stats for run {run_id}: {e}", exc_info=True)
+                self.logger.error(f"[STATS] Failed to serialize stats for run {run_id}: {e}", exc_info=True)
                 result.fpf_stats = None
             
             # Emit run completion timeline event
@@ -633,7 +635,7 @@ class RunExecutor:
                 success=True,
             )
             
-            logger.info(
+            self.logger.info(
                 f"Run {run_id}: Completed | "
                 f"docs={len(result.generated_docs)} "
                 f"winner={result.winner_doc_id} "
@@ -642,7 +644,7 @@ class RunExecutor:
             
         except Exception as e:
             tb = traceback.format_exc()
-            logger.error(f"Run {run_id} failed: {e}\n{tb}")
+            self.logger.error(f"Run {run_id} failed: {e}\n{tb}")
             result.status = RunPhase.FAILED
             # Store both message and full traceback for diagnostics
             result.errors.append(str(e))
@@ -652,9 +654,9 @@ class RunExecutor:
             # Include FPF stats even on failure
             try:
                 result.fpf_stats = self._fpf_stats.to_dict()
-                logger.info(f"[STATS] Stored stats from failed run {run_id}: {result.fpf_stats}")
+                self.logger.info(f"[STATS] Stored stats from failed run {run_id}: {result.fpf_stats}")
             except Exception as stats_err:
-                logger.error(f"[STATS] Failed to serialize stats for failed run {run_id}: {stats_err}", exc_info=True)
+                self.logger.error(f"[STATS] Failed to serialize stats for failed run {run_id}: {stats_err}", exc_info=True)
                 result.fpf_stats = None
             
             # Emit run failure timeline event
@@ -750,7 +752,7 @@ class RunExecutor:
                 concurrent_limit=config.eval_concurrency,
                 timeout_seconds=config.eval_timeout,
             )
-            logger.info(f"[STATS-DEBUG] Creating SingleDocEvaluator with stats_tracker={self._fpf_stats is not None}")
+            self.logger.info(f"[STATS-DEBUG] Creating SingleDocEvaluator with stats_tracker={self._fpf_stats is not None}")
             single_evaluator = SingleDocEvaluator(eval_config, stats_tracker=self._fpf_stats)
             result.single_eval_results = {}
         
@@ -772,7 +774,7 @@ class RunExecutor:
                     run = self._run_store.get(run_id)
                     if run:
                         if 'tasks' not in run:
-                            logger.error(f"Run {run_id} missing 'tasks' field")
+                            self.logger.error(f"Run {run_id} missing 'tasks' field")
                             tasks_list = []
                         else:
                             tasks_list = run['tasks']
@@ -797,7 +799,7 @@ class RunExecutor:
                         run = self._run_store.get(run_id)
                         if run:
                             if 'tasks' not in run:
-                                logger.warning(f"Run {run_id} missing 'tasks' field in progress callback")
+                                self.logger.warning(f"Run {run_id} missing 'tasks' field in progress callback")
                                 return
                             tasks_list = run['tasks']
                             for tt in tasks_list:
@@ -897,19 +899,19 @@ class RunExecutor:
                                 except Exception:
                                     pass
                             
-                            logger.info(
+                            self.logger.info(
                                 f"Single eval complete: {gen_result.doc_id} | "
                                 f"avg={summary.avg_score:.2f}"
                             )
                         except Exception as e:
-                            logger.error(f"Single eval failed for {gen_result.doc_id}: {e}")
+                            self.logger.error(f"Single eval failed for {gen_result.doc_id}: {e}")
                             result.errors.append(f"Single eval failed: {gen_result.doc_id}")
                     # Update run_store: mark task completed
                     if getattr(self, '_run_store', None):
                         run = self._run_store.get(run_id)
                         if run:
                             if 'tasks' not in run:
-                                logger.error(f"Run {run_id} missing 'tasks' field on completion")
+                                self.logger.error(f"Run {run_id} missing 'tasks' field on completion")
                                 tasks_list = []
                             else:
                                 tasks_list = run['tasks']
@@ -989,8 +991,8 @@ class RunExecutor:
                     )
                 
                 # Use configured FPF log settings from preset
-                fpf_log_output = config.fpf_log_output
-                fpf_log_file = config.fpf_log_file_path
+                fpf_log_output = self.config.fpf_log_output
+                fpf_log_file = self.config.fpf_log_file_path
                 run_log_file = None
                 
                 # If file output, ensure log directory exists and set paths
@@ -1045,7 +1047,7 @@ class RunExecutor:
             )
             
         except Exception as e:
-            logger.exception(f"Generation failed: {doc_id} {generator} {model}: {e}")
+            self.logger.exception(f"Generation failed: {doc_id} {generator} {model}: {e}")
             # Track generation failure
             if self._fpf_stats:
                 self._fpf_stats.record_failure(str(e))
@@ -1093,7 +1095,7 @@ class RunExecutor:
         ]
         if len(valid_docs) < len(result.generated_docs):
             failed_count = len(result.generated_docs) - len(valid_docs)
-            logger.warning(f"Excluding {failed_count} failed/empty documents from pairwise evaluation")
+            self.logger.warning(f"Excluding {failed_count} failed/empty documents from pairwise evaluation")
         
         doc_ids = [doc.doc_id for doc in valid_docs]
         contents = {doc.doc_id: doc.content for doc in valid_docs}
@@ -1108,7 +1110,7 @@ class RunExecutor:
             doc_ids = evaluator.filter_top_n(doc_ids, scores, config.pairwise_top_n)
 
         contents = {d: contents[d] for d in doc_ids}
-        logger.info(f"Filtered to top {len(doc_ids)} docs for pairwise")
+        self.logger.info(f"Filtered to top {len(doc_ids)} docs for pairwise")
 
         # Run pairwise
         pairwise_started_at = datetime.utcnow()
@@ -1134,7 +1136,7 @@ class RunExecutor:
             },
         )
         
-        logger.info(
+        self.logger.info(
             f"Pairwise complete | "
             f"comparisons={summary.total_comparisons} "
             f"winner={summary.winner_doc_id}"
@@ -1158,7 +1160,7 @@ class RunExecutor:
     ) -> None:
         """Run combine phase with multiple combine models."""
         if not result.winner_doc_id:
-            logger.warning("Combine skipped: No winner document found")
+            self.logger.warning("Combine skipped: No winner document found")
             return
         
         # VALIDATE: combine_models MUST be provided from preset
@@ -1185,7 +1187,7 @@ class RunExecutor:
                 ]
             
             if len(top_docs) < 2:
-                logger.warning("Combine skipped: Need at least 2 top documents")
+                self.logger.warning("Combine skipped: Need at least 2 top documents")
                 return
 
             # Combine instructions already validated in __post_init__
@@ -1229,14 +1231,14 @@ class RunExecutor:
                     model=model_name,
                 )
                 
-                logger.info(f"Combining with model {combine_model} ({model_idx + 1}/{len(config.combine_models)})")
+                self.logger.info(f"Combining with model {combine_model} ({model_idx + 1}/{len(config.combine_models)})")
                 model_succeeded = False
                 
                 # Retry logic for this specific model
                 for attempt in range(1, max_retries + 1):
                     combine_started_at = datetime.utcnow()
                     try:
-                        logger.info(f"Combine attempt {attempt}/{max_retries} for {combine_model}")
+                        self.logger.info(f"Combine attempt {attempt}/{max_retries} for {combine_model}")
                         
                         combine_result = await combine_adapter.combine(
                             reports=top_docs,
@@ -1289,13 +1291,13 @@ class RunExecutor:
                             details={"combined_doc_id": combined_doc_id, "attempt": attempt, "model_index": model_idx},
                         )
                         
-                        logger.info(f"Combine with {combine_model} succeeded on attempt {attempt}. Cost: ${combine_result.cost_usd:.4f}")
+                        self.logger.info(f"Combine with {combine_model} succeeded on attempt {attempt}. Cost: ${combine_result.cost_usd:.4f}")
                         model_succeeded = True
                         all_models_failed = False
                         break  # Success for this model, move to next model
                         
                     except Exception as e:
-                        logger.error(f"Combine attempt {attempt}/{max_retries} for {combine_model} failed: {e}")
+                        self.logger.error(f"Combine attempt {attempt}/{max_retries} for {combine_model} failed: {e}")
                         
                         if attempt < max_retries:
                             # Wait before retry with same model
@@ -1304,20 +1306,20 @@ class RunExecutor:
                             # All retries exhausted for this model
                             error_msg = f"Combine with {combine_model} failed after {max_retries} attempts: {str(e)}"
                             result.errors.append(error_msg)
-                            logger.warning(f"{error_msg} - will try next model if available")
+                            self.logger.warning(f"{error_msg} - will try next model if available")
                 
                 # Continue to next model to get multiple combined docs for comparison
                 if model_succeeded:
-                    logger.info(f"Combine with {combine_model} succeeded, continuing to next model")
+                    self.logger.info(f"Combine with {combine_model} succeeded, continuing to next model")
             
             # Check if all models failed
             if all_models_failed:
                 raise RuntimeError(f"All {len(config.combine_models)} combine models failed after {max_retries} retries each")
             
-            logger.info(f"Combine phase complete. Total combined docs: {len(result.combined_docs)}")
+            self.logger.info(f"Combine phase complete. Total combined docs: {len(result.combined_docs)}")
             
         except Exception as e:
-            logger.error(f"Combine failed: {e}", exc_info=True)
+            self.logger.error(f"Combine failed: {e}", exc_info=True)
             result.errors.append(f"Combine failed: {str(e)}")
 
     async def _run_post_combine_eval(
@@ -1332,15 +1334,15 @@ class RunExecutor:
         This validates whether combining improved quality vs individual winners.
         """
         if not result.combined_docs:
-            logger.warning("Post-combine eval skipped: No combined documents produced")
+            self.logger.warning("Post-combine eval skipped: No combined documents produced")
             return
 
         if not config.enable_pairwise:
-            logger.info("Post-combine eval skipped: Pairwise evaluation disabled in config")
+            self.logger.info("Post-combine eval skipped: Pairwise evaluation disabled in config")
             return
 
         if config.post_combine_top_n is None:
-            logger.info("Post-combine eval skipped: post_combine_top_n not configured")
+            self.logger.info("Post-combine eval skipped: post_combine_top_n not configured")
             return
 
         try:
@@ -1384,14 +1386,14 @@ class RunExecutor:
             
             # Validate we have enough documents
             if len(all_doc_ids) < 2:
-                logger.error(
+                self.logger.error(
                     f"Post-combine eval failed: Need at least 2 documents for comparison, "
                     f"but only have {len(all_doc_ids)} (originals: {len(docs_sent_to_combiner)}, "
                     f"combined: {len(result.combined_docs)})"
                 )
                 return
             
-            logger.info(
+            self.logger.info(
                 f"Post-combine pairwise starting: {len(all_doc_ids)} documents total "
                 f"({len(docs_sent_to_combiner)} originals + {len(result.combined_docs)} combined)"
             )
@@ -1400,7 +1402,7 @@ class RunExecutor:
             summary = await evaluator.evaluate_all_pairs(all_doc_ids, all_contents)
             result.post_combine_eval_results = summary
             
-            logger.info(
+            self.logger.info(
                 f"Post-combine pairwise complete | "
                 f"winner={summary.winner_doc_id} | "
                 f"comparisons={summary.total_comparisons} | "
@@ -1417,10 +1419,10 @@ class RunExecutor:
                             "total_comparisons": summary.total_comparisons,
                         })
                 except Exception as e:
-                    logger.warning(f"Failed to broadcast post-combine eval results: {e}")
+                    self.logger.warning(f"Failed to broadcast post-combine eval results: {e}")
 
         except Exception as e:
-            logger.error(f"Post-combine eval failed: {e}", exc_info=True)
+            self.logger.error(f"Post-combine eval failed: {e}", exc_info=True)
             result.errors.append(f"Post-combine eval failed: {str(e)}")
     
     def cancel(self) -> None:
@@ -1439,5 +1441,5 @@ def get_executor() -> RunExecutor:
     a new instance to preserve per-run isolation while keeping imports
     working for older modules.
     """
-    logger.debug("get_executor() called - returning new RunExecutor instance")
+    logging.getLogger(__name__).debug("get_executor() called - returning new RunExecutor instance")
     return RunExecutor()
