@@ -70,9 +70,10 @@ async def execute_run_background(run_id: str, config: RunConfig):
     log_dir = Path("logs") / run_id
     run_log_file = log_dir / "run.log"
     
-    # Create private run logger
-    # Use the log level from config if available, else default to INFO
-    log_level = config.log_level if hasattr(config, 'log_level') else "INFO"
+    # Create private run logger using the preset-provided log level only
+    if not hasattr(config, "log_level") or config.log_level is None:
+        raise ValueError("log_level missing from run config; must be set by preset")
+    log_level = config.log_level
     run_logger = get_run_logger(run_id, run_log_file, log_level)
     
     run_logger.info(f"Starting background execution for run {run_id} with level {log_level}")
@@ -373,6 +374,8 @@ async def execute_run_background(run_id: str, config: RunConfig):
                 
                 # Log stats before persisting
                 logger.info(f"[STATS] Persisting stats to database for run {run_id}: {result.fpf_stats}")
+
+                # Timeline-derived backfills were removed per no-fallback policy
                 
                 await run_repo.complete(
                     run_id, 
@@ -783,8 +786,7 @@ async def create_run(
                 if len(parts) == 2:
                     models.append({"provider": parts[0], "model": parts[1]})
                 else:
-                    # Handle models without provider prefix (assume openai)
-                    models.append({"provider": "openai", "model": model_str})
+                    raise HTTPException(status_code=400, detail="Model entries must include provider prefix (provider:model)")
         # Check GPTR config for models
         gptr_cfg = config_overrides.get("gptr", {})
         if gptr_cfg.get("enabled") and gptr_cfg.get("selected_models"):
@@ -793,7 +795,7 @@ async def create_run(
                 if len(parts) == 2:
                     models.append({"provider": parts[0], "model": parts[1]})
                 else:
-                    models.append({"provider": "openai", "model": model_str})
+                    raise HTTPException(status_code=400, detail="Model entries must include provider prefix (provider:model)")
     if not models:
         models = [m.model_dump() for m in data.models]
     
@@ -825,8 +827,10 @@ async def create_run(
     if preset:
         logger.info(f"DEBUG: Preset post_combine_top_n: {preset.post_combine_top_n}")
     
-    # log_level priority: preset's general_config.log_level > preset.log_level > request override > fallback INFO
-    resolved_log_level = general_cfg.get("log_level") or (preset.log_level if preset else None) or data.log_level or "INFO"
+    # log_level priority: preset's general_config.log_level > preset.log_level > request override (no defaults allowed)
+    resolved_log_level = general_cfg.get("log_level") or (preset.log_level if preset else None) or data.log_level
+    if not resolved_log_level:
+        raise HTTPException(status_code=400, detail="log_level must be set in preset or request; defaults are disallowed")
     config = {
         "document_ids": document_ids,
         "generators": generators,

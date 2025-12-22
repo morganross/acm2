@@ -63,11 +63,33 @@ export default function Execute() {
     setCurrentRun(prev => (prev ? { ...prev, fpf_stats: stats } : prev));
   }, []);
 
-  const handleEvalComplete = useCallback((evalResult: any) => {
+  const handleGenComplete = useCallback((genDoc: any) => {
+    // Add generated doc to local state for immediate heatmap row display
     setCurrentRun(prev => {
       if (!prev) return prev;
-      const preCombineEvals = prev.pre_combine_evals || [];
-      return { ...prev, pre_combine_evals: [...preCombineEvals, evalResult] };
+      const generatedDocs = prev.generated_docs || [];
+      // Avoid duplicates
+      if (generatedDocs.some((d: any) => d.id === genDoc.id)) {
+        return prev;
+      }
+      return { ...prev, generated_docs: [...generatedDocs, genDoc] };
+    });
+  }, []);
+
+  const handleEvalComplete = useCallback((evalResult: any) => {
+    // The useRunSocket hook already updates the React Query cache with the correct object format
+    // This handler is for any additional side effects (logging, notifications, etc.)
+    // The pre_combine_evals is an object keyed by doc_id, not an array
+    setCurrentRun(prev => {
+      if (!prev) return prev;
+      const preCombineEvals = prev.pre_combine_evals || {};
+      return { 
+        ...prev, 
+        pre_combine_evals: {
+          ...preCombineEvals,
+          [evalResult.doc_id]: evalResult.scores_by_model || {},
+        }
+      };
     });
   }, []);
 
@@ -89,6 +111,7 @@ export default function Execute() {
     onTaskUpdate: handleTaskUpdate,
     onTasksInit: handleTasksInit,
     onStatsUpdate: handleStatsUpdate,
+    onGenComplete: handleGenComplete,
     onEvalComplete: handleEvalComplete,
   });
 

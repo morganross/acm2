@@ -6,13 +6,14 @@ type RunSocketHandlers = {
   onTaskUpdate?: (task: any) => void
   onTasksInit?: (tasks: any[]) => void
   onStatsUpdate?: (stats: any) => void
+  onGenComplete?: (genDoc: { id: string; model: string; generator: string; source_doc_id: string; iteration: number }) => void
   onEvalComplete?: (evalResult: { doc_id: string; average_score: number; scores_by_model: Record<string, number>; duration_seconds: number }) => void
 }
 
 export function useRunSocket(runId?: string, handlers: RunSocketHandlers = {}) {
   const wsRef = useRef<WebSocket | null>(null)
   const queryClient = useQueryClient()
-  const { onRunUpdate, onTaskUpdate, onTasksInit, onStatsUpdate, onEvalComplete } = handlers
+  const { onRunUpdate, onTaskUpdate, onTasksInit, onStatsUpdate, onGenComplete, onEvalComplete } = handlers
 
   useEffect(() => {
     if (!runId) return
@@ -80,6 +81,27 @@ export function useRunSocket(runId?: string, handlers: RunSocketHandlers = {}) {
           onStatsUpdate?.(msg.stats)
         }
 
+        // Handle generation completions - add doc to generated_docs for live heatmap rows
+        if (msg.event === 'gen_complete') {
+          const genDoc = {
+            id: msg.doc_id,
+            model: msg.model,
+            generator: msg.generator,
+            source_doc_id: msg.source_doc_id,
+            iteration: msg.iteration,
+          }
+          queryClient.setQueryData(['runs', runId], (oldRun: any) => {
+            if (!oldRun) return oldRun
+            const generatedDocs = oldRun.generated_docs || []
+            // Avoid duplicates
+            if (generatedDocs.some((d: any) => d.id === msg.doc_id)) {
+              return oldRun
+            }
+            return { ...oldRun, generated_docs: [...generatedDocs, genDoc] }
+          })
+          onGenComplete?.(genDoc)
+        }
+
         // Handle individual eval completions
         if (msg.event === 'eval_complete') {
           const evalResult = {
@@ -90,8 +112,13 @@ export function useRunSocket(runId?: string, handlers: RunSocketHandlers = {}) {
           }
           queryClient.setQueryData(['runs', runId], (oldRun: any) => {
             if (!oldRun) return oldRun
-            const preCombineEvals = oldRun.pre_combine_evals || []
-            const updatedEvals = [...preCombineEvals, evalResult]
+            // pre_combine_evals is an object keyed by doc_id, not an array
+            // Each value is an object with judge model names as keys and scores as values
+            const preCombineEvals = oldRun.pre_combine_evals || {}
+            const updatedEvals = {
+              ...preCombineEvals,
+              [msg.doc_id]: msg.scores_by_model || {},
+            }
             return { ...oldRun, pre_combine_evals: updatedEvals }
           })
           onEvalComplete?.(evalResult)

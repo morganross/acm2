@@ -253,6 +253,7 @@ class FpfAdapter(BaseAdapter):
 
     def _get_fpf_directory(self) -> str:
         """Get the FilePromptForge directory path."""
+        # Path: adapter.py -> fpf -> adapters -> app -> acm2 (inner) -> FilePromptForge (sibling)
         current_dir = Path(__file__).resolve().parent
         fpf_dir = current_dir.parent.parent.parent.parent / "FilePromptForge"
         return str(fpf_dir)

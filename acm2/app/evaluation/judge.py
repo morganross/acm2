@@ -4,6 +4,7 @@ LLM Judge for document evaluation.
 Uses FPF adapter to call LLMs for single-doc and pairwise evaluation.
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -248,6 +249,7 @@ class Judge:
                     self.stats.record_call_start("single_eval", f"Evaluating {doc_id} (attempt {attempt + 1})")
                 
                 # Build config for FPF adapter
+                eval_task_id = f"{doc_id}.single_eval.{trial}.{self.config.model}.{uuid4().hex[:6]}"
                 gen_config = GenerationConfig(
                     provider="openai",
                     model=self.config.model,
@@ -256,15 +258,27 @@ class Judge:
                         "temperature": self.config.temperature,
                         "json_output": True,  # Eval responses are JSON, skip 3KB minimum check
                         "timeout": self.config.timeout_seconds,
-                        "task_id": f"{doc_id}.single_eval.{trial}.{self.config.model}.{uuid4().hex[:6]}",
+                        "task_id": eval_task_id,
                     },
                 )
                 
-                # Call FPF for evaluation
-                result = await self.fpf.generate(
-                    query=prompt,
-                    config=gen_config,
-                )
+                # INSTRUMENTATION: Log before FPF dispatch
+                logger.info(f"[EVAL-DISPATCH] About to call FPF for single_eval: task_id={eval_task_id}, model={self.config.model}, timeout={self.config.timeout_seconds}s")
+                
+                # Call FPF for evaluation with hard timeout to prevent indefinite hangs
+                try:
+                    result = await asyncio.wait_for(
+                        self.fpf.generate(
+                            query=prompt,
+                            config=gen_config,
+                        ),
+                        timeout=float(self.config.timeout_seconds + 30),  # Add buffer over FPF's internal timeout
+                    )
+                except asyncio.TimeoutError:
+                    logger.error(f"[EVAL-DISPATCH] HARD TIMEOUT: FPF single_eval call for {eval_task_id} exceeded {self.config.timeout_seconds + 30}s")
+                    raise RuntimeError(f"Single eval call timed out after {self.config.timeout_seconds + 30}s for {eval_task_id}")
+                
+                logger.info(f"[EVAL-DISPATCH] FPF single_eval completed for {eval_task_id}")
                 
                 raw_response = result.content
                 
@@ -385,6 +399,7 @@ class Judge:
                     self.stats.record_call_start("pairwise_eval", f"Comparing {doc_id_1} vs {doc_id_2} (attempt {attempt + 1})")
                 
                 # Build config for FPF adapter
+                pairwise_task_id = f"{doc_id_1}.vs.{doc_id_2}.pairwise.{trial}.{self.config.model}.{uuid4().hex[:6]}"
                 gen_config = GenerationConfig(
                     provider="openai",
                     model=self.config.model,
@@ -393,14 +408,27 @@ class Judge:
                         "temperature": self.config.temperature,
                         "json_output": True,  # Eval responses are JSON, skip 3KB minimum check
                         "timeout": self.config.timeout_seconds,
-                        "task_id": f"{doc_id_1}.vs.{doc_id_2}.pairwise.{trial}.{self.config.model}.{uuid4().hex[:6]}",
+                        "task_id": pairwise_task_id,
                     },
                 )
                 
-                result = await self.fpf.generate(
-                    query=prompt,
-                    config=gen_config,
-                )
+                # INSTRUMENTATION: Log before FPF dispatch
+                logger.info(f"[EVAL-DISPATCH] About to call FPF for pairwise_eval: task_id={pairwise_task_id}, model={self.config.model}, timeout={self.config.timeout_seconds}s")
+                
+                # Call FPF for pairwise evaluation with hard timeout
+                try:
+                    result = await asyncio.wait_for(
+                        self.fpf.generate(
+                            query=prompt,
+                            config=gen_config,
+                        ),
+                        timeout=float(self.config.timeout_seconds + 30),
+                    )
+                except asyncio.TimeoutError:
+                    logger.error(f"[EVAL-DISPATCH] HARD TIMEOUT: FPF pairwise_eval call for {pairwise_task_id} exceeded {self.config.timeout_seconds + 30}s")
+                    raise RuntimeError(f"Pairwise eval call timed out after {self.config.timeout_seconds + 30}s for {pairwise_task_id}")
+                
+                logger.info(f"[EVAL-DISPATCH] FPF pairwise_eval completed for {pairwise_task_id}")
                 
                 raw_response = result.content
                 

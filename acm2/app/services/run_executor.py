@@ -887,6 +887,21 @@ class RunExecutor:
                     # Save generated content to file for later retrieval
                     await self._save_generated_content(run_id, gen_result)
                     
+                    # Broadcast gen_complete via WebSocket for live UI updates
+                    if getattr(self, '_run_ws_manager', None):
+                        try:
+                            await self._run_ws_manager.broadcast(run_id, {
+                                "event": "gen_complete",
+                                "doc_id": gen_result.doc_id,
+                                "model": model,
+                                "generator": generator.value,
+                                "source_doc_id": doc_id,
+                                "iteration": iteration,
+                                "duration_seconds": gen_result.duration_seconds,
+                            })
+                        except Exception:
+                            pass
+                    
                     # Emit generation timeline event
                     gen_completed_at = gen_result.completed_at if hasattr(gen_result, 'completed_at') and gen_result.completed_at else datetime.utcnow()
                     await self._emit_timeline_event(
