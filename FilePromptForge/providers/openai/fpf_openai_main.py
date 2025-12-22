@@ -20,11 +20,13 @@ Key guarantees implemented here:
 """
 
 from __future__ import annotations
-from typing import Dict, Tuple, Optional, Any, List
+from typing import Dict, Tuple, Optional, Any, List, Callable
+import threading
+import time
 
 def _normalize_model(model: str) -> str:
     if not model:
-        return ""
+        raise RuntimeError("OpenAI provider requires 'model' and will not fallback")
     return model.split(":")[0]
 
 
@@ -91,6 +93,8 @@ def build_payload(prompt: str, cfg: Dict) -> Tuple[Dict, Optional[Dict]]:
 
     Returns (payload, optional_provider_headers)
     """
+    if "model" not in cfg or not cfg.get("model"):
+        raise RuntimeError("OpenAI provider requires 'model' in config - no fallbacks")
     model = cfg["model"]  # No fallback - fail fast
     model_to_use = model.split(":")[0] if ":" in model else model
 
@@ -345,7 +349,32 @@ def _is_transient_error(exc: Exception) -> bool:
     return any(tok in msg for tok in transient_indicators)
 
 
-def execute_and_verify(provider_url: str, payload: Dict, headers: Optional[Dict], verify_helpers, timeout: int = 600, max_retries: int = 3) -> Dict:
+def _start_heartbeat(log, fpf_log: Optional[Callable[[str], None]], label: str, interval: float = 15.0):
+    stop_event = threading.Event()
+
+    def _emit(msg: str):
+        try:
+            log.info(msg)
+        except Exception:
+            pass
+        if fpf_log:
+            try:
+                fpf_log(msg)
+            except Exception:
+                pass
+
+    def _beat():
+        tick = 0
+        while not stop_event.wait(interval):
+            tick += 1
+            _emit(f"{label} still waiting ({tick * interval:.0f}s elapsed)")
+
+    thread = threading.Thread(target=_beat, name=f"fpf-openai-heartbeat-{int(time.time())}", daemon=True)
+    thread.start()
+    return stop_event, thread, _emit
+
+
+def execute_and_verify(provider_url: str, payload: Dict, headers: Optional[Dict], verify_helpers, timeout: Optional[int] = None, max_retries: int = 3) -> Dict:
     """
     Execute the OpenAI request and verify both grounding and reasoning are present.
     This is a lowest-level enforcement hook that ensures FPF only succeeds when
@@ -362,6 +391,12 @@ def execute_and_verify(provider_url: str, payload: Dict, headers: Optional[Dict]
 
     log = logging.getLogger("fpf_openai_main")
 
+    # Best-effort import of FPF file logger for heartbeat visibility in per-run logs
+    try:
+        from file_handler import _fpf_log as fpf_log_sink  # type: ignore
+    except Exception:
+        fpf_log_sink = None
+
     data = _json.dumps(payload).encode("utf-8")
     hdrs = {"Content-Type": "application/json"}
     if headers:
@@ -372,15 +407,30 @@ def execute_and_verify(provider_url: str, payload: Dict, headers: Optional[Dict]
     max_delay_ms = 30000
     
     for attempt in range(1, max_retries + 1):
-        # Perform HTTP POST
         req = urllib.request.Request(provider_url, data=data, headers=hdrs, method="POST")
+        heartbeat_label = f"OpenAI attempt {attempt}/{max_retries}"
+        hb_stop, hb_thread, hb_emit = _start_heartbeat(log, fpf_log_sink, heartbeat_label)
+        attempt_start = time.time()
+        attempt_status = "inflight"
         try:
-            log.debug("OpenAI request attempt %d/%d to %s", attempt, max_retries, provider_url)
+            log.debug("OpenAI request attempt %d/%d to %s with timeout=%s", attempt, max_retries, provider_url, timeout)
             log.debug("Payload: %s", _json.dumps(payload, indent=2, ensure_ascii=False))
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            if timeout is None:
+                resp_ctx = urllib.request.urlopen(req)
+            else:
+                resp_ctx = urllib.request.urlopen(req, timeout=timeout)
+            with resp_ctx as resp:
                 raw = resp.read().decode("utf-8")
+                elapsed = time.time() - attempt_start
+                if not raw:
+                    attempt_status = "empty_response"
+                    raise RuntimeError(f"Empty HTTP response from OpenAI on attempt {attempt}/{max_retries}")
                 raw_json = _json.loads(raw)
-                # Enforce grounding + reasoning using shared helpers; pass this module for provider-specific extraction
+                if not isinstance(raw_json, dict):
+                    attempt_status = "non_dict"
+                    raise RuntimeError(f"Non-dict JSON returned from OpenAI on attempt {attempt}/{max_retries}")
+                log.info("OpenAI response attempt %d/%d completed in %.2fs", attempt, max_retries, elapsed)
+                attempt_status = "ok"
                 verify_helpers.assert_grounding_and_reasoning(raw_json, provider=__import__(__name__))
                 return raw_json
         except urllib.error.HTTPError as he:
@@ -388,33 +438,42 @@ def execute_and_verify(provider_url: str, payload: Dict, headers: Optional[Dict]
                 msg = he.read().decode("utf-8", errors="ignore")
             except Exception:
                 msg = ""
+            attempt_status = f"http_error_{getattr(he, 'code', '?')}"
             last_error = RuntimeError(f"HTTP error {getattr(he, 'code', '?')}: {getattr(he, 'reason', '?')} - {msg}")
-            
-            # Check if we should retry
             if attempt < max_retries and _is_transient_error(last_error):
                 delay_ms = min(base_delay_ms * (2 ** (attempt - 1)), max_delay_ms)
-                delay_ms = random.uniform(0, delay_ms)  # Full jitter
+                delay_ms = random.uniform(0, delay_ms)
                 delay_s = delay_ms / 1000.0
-                log.warning("Transient error on attempt %d/%d, retrying in %.2fs: %s", attempt, max_retries, delay_s, he)
+                log.warning("Transient OpenAI error on attempt %d/%d, retrying in %.2fs: %s", attempt, max_retries, delay_s, he)
                 time.sleep(delay_s)
                 continue
-            
+            log.exception("HTTPError during OpenAI POST %s: %s %s", provider_url, he, msg)
             raise last_error from he
         except Exception as e:
-            last_error = RuntimeError(f"HTTP request failed: {e}")
-            
-            # Check if we should retry
+            attempt_status = f"error_{type(e).__name__}"
+            last_error = RuntimeError(f"OpenAI request failed: {e}")
             if attempt < max_retries and _is_transient_error(e):
                 delay_ms = min(base_delay_ms * (2 ** (attempt - 1)), max_delay_ms)
-                delay_ms = random.uniform(0, delay_ms)  # Full jitter
+                delay_ms = random.uniform(0, delay_ms)
                 delay_s = delay_ms / 1000.0
-                log.warning("Transient error on attempt %d/%d, retrying in %.2fs: %s", attempt, max_retries, delay_s, e)
+                log.warning("Transient OpenAI failure on attempt %d/%d, retrying in %.2fs: %s", attempt, max_retries, delay_s, e)
                 time.sleep(delay_s)
                 continue
-            
+            log.exception("OpenAI request failed during POST to %s: %s", provider_url, e)
             raise last_error from e
-    
-    # Should not reach here, but just in case
-    if last_error:
-        raise last_error
-    raise RuntimeError("HTTP request failed after all retries")
+        finally:
+            hb_stop.set()
+            hb_thread.join(timeout=1.0)
+            elapsed = time.time() - attempt_start
+            msg = f"{heartbeat_label} finished state={attempt_status} elapsed={elapsed:.2f}s"
+            try:
+                log.info(msg)
+            except Exception:
+                pass
+            if fpf_log_sink:
+                try:
+                    fpf_log_sink(msg)
+                except Exception:
+                    pass
+
+    raise RuntimeError(f"OpenAI request failed after {max_retries} attempts: {last_error}")

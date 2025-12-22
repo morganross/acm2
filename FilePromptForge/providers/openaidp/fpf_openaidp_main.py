@@ -266,7 +266,7 @@ def parse_response(raw_json: Dict) -> str:
 
 from typing import Dict
 
-def execute_dp_background(provider_url: str, payload: Dict, headers: Dict, timeout: int = 7200) -> Dict:
+def execute_dp_background(provider_url: str, payload: Dict, headers: Dict, timeout: Optional[int] = None) -> Dict:
     """
     Submit a deep-research request with background=True and poll the Responses API
     until completion. Returns the final response JSON dict.
@@ -290,9 +290,9 @@ def execute_dp_background(provider_url: str, payload: Dict, headers: Dict, timeo
             return red
         except Exception:
             return {}
-
-    def _truncate(s: str, n: int = 2000) -> str:
-        try:
+                poll_count += 1
+                if max_polls is not None and poll_count >= max_polls:
+                    raise RuntimeError(f"Background DP task timed out after {int(elapsed)}s (id={response_id})")
             if s is None:
                 return ""
             s = str(s)
@@ -315,7 +315,11 @@ def execute_dp_background(provider_url: str, payload: Dict, headers: Dict, timeo
 
     req = urllib.request.Request(provider_url, data=data, headers=hdrs, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        if timeout is None:
+            resp_ctx = urllib.request.urlopen(req)
+        else:
+            resp_ctx = urllib.request.urlopen(req, timeout=timeout)
+        with resp_ctx as resp:
             raw = resp.read().decode("utf-8")
             status_code = getattr(resp, "status", resp.getcode() if hasattr(resp, "getcode") else "unknown")
             try:
@@ -345,15 +349,25 @@ def execute_dp_background(provider_url: str, payload: Dict, headers: Dict, timeo
     poll_url = provider_url.rstrip("/") + "/" + response_id
     start_ts = _time.time()
     polling_interval = 15
-    max_polls = int((timeout // polling_interval) if timeout and timeout > 0 else 120)
+    if timeout is None:
+        max_polls = None
+    else:
+        max_polls = int((timeout // polling_interval) if timeout and timeout > 0 else 120)
 
-    for i in range(max_polls):
+    poll_count = 0
+    while True:
+        if max_polls is not None and poll_count >= max_polls:
+            raise RuntimeError(f"Background DP task timed out after {int(elapsed)}s (id={response_id})")
         try:
             get_req = urllib.request.Request(poll_url, headers=_redact_headers(hdrs), method="GET")
             # Re-apply Authorization header (redacted above for print, but real header must be present)
             # Use original hdrs for the actual request
             get_req = urllib.request.Request(poll_url, headers=hdrs, method="GET")
-            with urllib.request.urlopen(get_req, timeout=polling_interval + 10) as r:
+            if timeout is None:
+                resp_ctx = urllib.request.urlopen(get_req)
+            else:
+                resp_ctx = urllib.request.urlopen(get_req, timeout=polling_interval + 10)
+            with resp_ctx as r:
                 raw_status = r.read().decode("utf-8")
                 status_json = _json.loads(raw_status)
         except urllib.error.HTTPError as he:
@@ -377,11 +391,10 @@ def execute_dp_background(provider_url: str, payload: Dict, headers: Dict, timeo
         if status in ("failed", "cancelled", "canceled"):
             raise RuntimeError(f"Background DP task {status} (id={response_id})")
 
+        poll_count += 1
         _time.sleep(polling_interval)
 
-    raise RuntimeError(f"Background DP task timed out after {int(elapsed)}s (id={response_id})")
-
-def execute_and_verify(provider_url: str, payload: Dict, headers: Dict, verify_helpers, timeout: int = 7200) -> Dict:
+def execute_and_verify(provider_url: str, payload: Dict, headers: Dict, verify_helpers, timeout: Optional[int] = None) -> Dict:
     """
     Execute the OpenAI Deep Research request (background mode) and enforce mandatory
     grounding and reasoning verification (non-configurable).

@@ -4,8 +4,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 export interface ConcurrencySettings {
   generationConcurrency: number
   evalConcurrency: number
-  requestTimeout: number
-  evalTimeout: number
+  requestTimeout: number | null
+  evalTimeout: number | null
   maxRetries: number
   retryDelay: number
   iterations: number
@@ -37,8 +37,8 @@ interface Settings {
 const defaultConcurrency: ConcurrencySettings = {
   generationConcurrency: 5,
   evalConcurrency: 5,
-  requestTimeout: 600,
-  evalTimeout: 600,
+  requestTimeout: null,
+  evalTimeout: null,
   maxRetries: 3,
   retryDelay: 2.0,
   iterations: 1,

@@ -89,7 +89,7 @@ export interface DrConfigComplete {
   concurrency_limit: number;
   temperature: number;
   max_tokens: number;
-  timeout: number;
+  timeout: number | null;
   search_provider: string;
   enable_caching: boolean;
   follow_links: boolean;
@@ -116,7 +116,7 @@ export interface EvalConfigComplete {
   iterations: number;
   pairwise_top_n: number;
   judge_models: string[];
-  timeout_seconds: number;  // Per-call timeout for judge LLM
+  timeout_seconds: number | null;  // Per-call timeout for judge LLM
   retries: number;  // Retry count for transient failures
   enable_semantic_similarity: boolean;
   enable_factual_accuracy: boolean;
@@ -157,8 +157,8 @@ export interface ConcurrencyConfigComplete {
   retry_delay: number;
   generation_concurrency: number;
   eval_concurrency: number;
-  request_timeout: number;
-  eval_timeout: number;
+  request_timeout: number | null;
+  eval_timeout: number | null;
 }
 
 // ============================================================================

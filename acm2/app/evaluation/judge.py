@@ -9,6 +9,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
+from uuid import uuid4
 
 from ..adapters.fpf.adapter import FpfAdapter
 from ..adapters.base import GenerationConfig
@@ -102,7 +103,7 @@ class JudgeConfig:
     
     model: str = ""  # REQUIRED - must be set by caller
     temperature: float = 0.0
-    max_tokens: int = 4096
+    max_tokens: int = 16384
     timeout_seconds: int = 600  # Increased from 120s to handle slow models
     retries: int = 3  # Increased from 2 for better resilience
     
@@ -251,9 +252,11 @@ class Judge:
                     provider="openai",
                     model=self.config.model,
                     extra={
-                        "max_tokens": self.config.max_tokens,
+                        "max_completion_tokens": self.config.max_tokens,
                         "temperature": self.config.temperature,
                         "json_output": True,  # Eval responses are JSON, skip 3KB minimum check
+                        "timeout": self.config.timeout_seconds,
+                        "task_id": f"{doc_id}.single_eval.{trial}.{self.config.model}.{uuid4().hex[:6]}",
                     },
                 )
                 
@@ -386,9 +389,11 @@ class Judge:
                     provider="openai",
                     model=self.config.model,
                     extra={
-                        "max_tokens": self.config.max_tokens,
+                        "max_completion_tokens": self.config.max_tokens,
                         "temperature": self.config.temperature,
                         "json_output": True,  # Eval responses are JSON, skip 3KB minimum check
+                        "timeout": self.config.timeout_seconds,
+                        "task_id": f"{doc_id_1}.vs.{doc_id_2}.pairwise.{trial}.{self.config.model}.{uuid4().hex[:6]}",
                     },
                 )
                 

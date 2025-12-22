@@ -1130,17 +1130,59 @@ async def start_run(
     if retry_delay is None:
         raise ValueError("concurrency_config.retry_delay must be set in preset")
     
+    model_settings = {}
+    model_names: list[str] = []
+    for model_entry in models:
+        provider = model_entry.get("provider")
+        base_model = model_entry.get("model")
+        temperature = model_entry.get("temperature") or fpf_cfg.get("temperature") or gptr_cfg.get("temperature")
+        max_tokens = model_entry.get("max_tokens") or fpf_cfg.get("max_tokens") or gptr_cfg.get("max_tokens")
+
+        if not provider or not base_model:
+            raise ValueError(f"Model entry missing provider/model: {model_entry}")
+        if temperature is None:
+            raise ValueError(f"Model {provider}:{base_model} missing temperature in preset")
+        if max_tokens is None:
+            raise ValueError(f"Model {provider}:{base_model} missing max_tokens in preset")
+
+        key = f"{provider}:{base_model}"
+        model_settings[key] = {
+            "provider": provider,
+            "model": base_model,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        model_names.append(key)
+
+    eval_temperature = eval_config.get("temperature") or fpf_cfg.get("temperature")
+    eval_max_tokens = eval_config.get("max_tokens") or fpf_cfg.get("max_tokens")
+    eval_retries = eval_config.get("retries")
+    if eval_retries is None:
+        raise ValueError("eval_config.retries must be set in preset")
+    if eval_temperature is None:
+        raise ValueError("eval_config.temperature must be set in preset")
+    if eval_max_tokens is None:
+        raise ValueError("eval_config.max_tokens must be set in preset")
+    eval_strict_json = eval_config.get("strict_json", True)
+    eval_enable_grounding = eval_config.get("enable_grounding", True)
+
     executor_config = RunConfig(
         document_ids=list(document_contents.keys()),
         document_contents=document_contents,
         instructions=instructions,
         generators=[AdapterGeneratorType(g) for g in generators],
-        models=[f"{m['provider']}:{m['model']}" for m in models],
+        models=model_names,
+        model_settings=model_settings,
         iterations=iterations,
         enable_single_eval=eval_enabled,
         enable_pairwise=pairwise_enabled,
         eval_iterations=eval_iterations,
         eval_judge_models=judge_models,
+        eval_retries=eval_retries,
+        eval_temperature=eval_temperature,
+        eval_max_tokens=eval_max_tokens,
+        eval_strict_json=eval_strict_json,
+        eval_enable_grounding=eval_enable_grounding,
         eval_timeout=eval_timeout,
         pairwise_top_n=eval_config.get("pairwise_top_n"),
         single_eval_instructions=single_eval_instructions,

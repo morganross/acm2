@@ -17,12 +17,23 @@ class TestRunConfigValidation:
             document_contents={"doc1": "test content"},
             generators=[GeneratorType.FPF],
             models=["openai:gpt-4"],
+            model_settings={
+                "openai:gpt-4": {
+                    "provider": "openai",
+                    "model": "gpt-4",
+                    "temperature": 0.1,
+                    "max_tokens": 256,
+                }
+            },
             instructions="test instructions",
             iterations=1,
             enable_single_eval=False,
             enable_pairwise=False,
             eval_iterations=1,
             eval_judge_models=[],
+            eval_retries=1,
+            eval_temperature=0.1,
+            eval_max_tokens=256,
             max_retries=3,
             retry_delay=2.0,
             request_timeout=600,
@@ -84,18 +95,6 @@ class TestRunConfigValidation:
         
         config.retry_delay = 31.0
         with pytest.raises(ValueError, match="retry_delay must be 0.5-30.0"):
-            config.__post_init__()
-    
-    def test_request_timeout_range(self):
-        """Test request_timeout must be 60-3600."""
-        config = self.get_valid_config()
-        config.request_timeout = 59
-        
-        with pytest.raises(ValueError, match="request_timeout must be 60-3600"):
-            config.__post_init__()
-        
-        config.request_timeout = 3601
-        with pytest.raises(ValueError, match="request_timeout must be 60-3600"):
             config.__post_init__()
     
     def test_concurrency_ranges(self):
@@ -205,6 +204,7 @@ class TestRunConfigValidation:
         """Test single eval requires instructions and judge models."""
         config = self.get_valid_config()
         config.enable_single_eval = True
+        config.eval_judge_models = ["openai:gpt-4"]
         config.single_eval_instructions = None
         
         with pytest.raises(ValueError, match="Single evaluation enabled but no instructions"):
@@ -219,6 +219,7 @@ class TestRunConfigValidation:
         """Test pairwise requires instructions."""
         config = self.get_valid_config()
         config.enable_pairwise = True
+        config.eval_judge_models = ["openai:gpt-4"]
         config.pairwise_eval_instructions = None
         
         with pytest.raises(ValueError, match="Pairwise evaluation enabled but no instructions"):

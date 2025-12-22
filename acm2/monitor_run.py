@@ -44,8 +44,6 @@ while True:
         print(f"Run finished with status: {status}")
         break
     
-    if time.time() - start_time > 600: # 10 minutes timeout
-        print("Timeout waiting for run to complete.")
-        break
+    # No timeout; wait until completion
         
     time.sleep(10)

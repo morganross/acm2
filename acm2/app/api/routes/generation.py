@@ -4,6 +4,7 @@ Generation API Routes.
 Endpoints for triggering and monitoring content generation.
 """
 import asyncio
+import inspect
 import logging
 from datetime import datetime
 from typing import Optional
@@ -114,6 +115,8 @@ class TaskStore:
 
 
 task_store = TaskStore()
+# Track running background tasks and their adapters for cancellation.
+generation_tasks: dict[str, dict] = {}
 
 
 # ============================================================================
@@ -148,6 +151,10 @@ async def run_generation_task(
             adapter = FpfAdapter()
         else:
             raise ValueError(f"Unsupported generator: {request.generator}")
+
+        # Register adapter for cancellation
+        if task_id in generation_tasks:
+            generation_tasks[task_id]["adapter"] = adapter
         
         # Build config with generator-specific options
         extra_config = {}
@@ -160,6 +167,7 @@ async def run_generation_task(
             })
         elif request.generator == GeneratorType.FPF:
             extra_config.update({
+                "task_id": task_id,
                 "reasoning_effort": request.reasoning_effort,
                 "max_completion_tokens": request.max_completion_tokens,
             })
@@ -199,6 +207,17 @@ async def run_generation_task(
                 completed_at=datetime.utcnow(),
             )
             
+    except asyncio.CancelledError:
+        try:
+            task_store.update(
+                task_id,
+                status="cancelled",
+                completed_at=datetime.utcnow(),
+            )
+            await ws_manager.broadcast(task_id, task_store.get(task_id))
+        except Exception:
+            pass
+        raise
     except Exception as e:
         logger.exception(f"Generation task {task_id} failed")
         task_store.update(
@@ -207,6 +226,8 @@ async def run_generation_task(
             error=str(e),
             completed_at=datetime.utcnow(),
         )
+    finally:
+        generation_tasks.pop(task_id, None)
 
 
 # ============================================================================
@@ -229,8 +250,9 @@ async def generate(
     # Create task record
     task_store.create(task_id, request.query, request.generator.value)
     
-    # Start background task
-    background_tasks.add_task(run_generation_task, task_id, request)
+    # Start background task and track handle for cancellation
+    handle = asyncio.create_task(run_generation_task(task_id, request))
+    generation_tasks[task_id] = {"task": handle, "adapter": None}
     
     return GenerateResponse(
         task_id=task_id,
@@ -272,8 +294,29 @@ async def cancel_task(task_id: str) -> dict:
         status="cancelled",
         completed_at=datetime.utcnow(),
     )
-    
-    # TODO: Actually cancel the running task (need task handle)
+
+    entry = generation_tasks.get(task_id)
+    adapter = entry.get("adapter") if entry else None
+    handle = entry.get("task") if entry else None
+
+    # Best-effort adapter cancel
+    if adapter:
+        try:
+            if inspect.iscoroutinefunction(getattr(adapter, "cancel", None)):
+                await adapter.cancel(task_id)
+            elif hasattr(adapter, "cancel"):
+                adapter.cancel(task_id)
+        except Exception:
+            logger.exception(f"Adapter cancel failed for task {task_id}")
+
+    # Cancel running task
+    if handle:
+        handle.cancel()
+        try:
+            await handle
+        except asyncio.CancelledError:
+            pass
+    generation_tasks.pop(task_id, None)
     
     return {"status": "cancelled", "task_id": task_id}
 

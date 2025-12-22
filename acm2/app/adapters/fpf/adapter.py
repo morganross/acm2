@@ -45,7 +45,7 @@ class FpfAdapter(BaseAdapter):
     """
 
     def __init__(self):
-        pass
+        self._active_tasks: dict[str, asyncio.subprocess.Process] = {}
 
     @property
     def name(self) -> GeneratorType:
@@ -81,19 +81,28 @@ class FpfAdapter(BaseAdapter):
         Returns:
             GenerationResult with report, sources, and costs
         """
-        task_id = str(config.extra["task_id"]) if config.extra else str(uuid.uuid4())
+        extra = config.extra or {}
+        missing = [key for key in ("task_id",) if key not in extra]
+        if missing:
+            raise ValueError(f"FPF config missing required fields: {', '.join(missing)}")
+
+        task_id = str(extra["task_id"])
         started_at = datetime.utcnow()
 
         # Create temporary files for FPF
+        # FPF compose_input expects: file_b (instructions) FIRST, then file_a (document)
+        # So: file_a = document content, file_b = instructions/query
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)
 
-            file_a_path = tmp_path / "instructions.txt"
-            file_a_path.write_text(query, encoding="utf-8")
+            # file_a = document content (appended after instructions in final prompt)
+            file_a_path = tmp_path / "content.txt"
+            file_a_content = document_content or ""
+            file_a_path.write_text(file_a_content, encoding="utf-8")
 
-            file_b_path = tmp_path / "content.txt"
-            file_b_content = document_content or ""
-            file_b_path.write_text(file_b_content, encoding="utf-8")
+            # file_b = instructions/query (placed first in final prompt)
+            file_b_path = tmp_path / "instructions.txt"
+            file_b_path.write_text(query, encoding="utf-8")
 
             output_path = tmp_path / "output.md"
 
@@ -111,27 +120,41 @@ class FpfAdapter(BaseAdapter):
                 file_b=str(file_b_path),
                 output=str(output_path),
                 config=config,
-                log_file=str(fpf_task_log) if fpf_task_log else None
+                extra=extra,
+                log_file=str(fpf_task_log) if fpf_task_log else None,
+            )
+            timeout_val = extra.get("timeout")
+
+            # Prepare environment - inherit current env to pass API keys
+            env = os.environ.copy()
+            
+            proc = await asyncio.create_subprocess_exec(
+                *fpf_cmd,
+                cwd=self._get_fpf_directory(),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
             )
 
-            timeout_val = config.extra["timeout"]
+            self._active_tasks[task_id] = proc
 
-            # Run FPF using subprocess.run - simple and direct
-            result = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: subprocess.run(
-                    fpf_cmd,
-                    cwd=self._get_fpf_directory(),
-                    timeout=timeout_val,
-                    capture_output=True,
-                    text=True
-                )
-            )
+            try:
+                if timeout_val:
+                    stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=timeout_val)
+                else:
+                    stdout_bytes, stderr_bytes = await proc.communicate()
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
+                raise FpfTimeoutError(f"FPF task {task_id} exceeded timeout {timeout_val}s")
+            finally:
+                self._active_tasks.pop(task_id, None)
 
-            # Check return code
-            if result.returncode != 0:
-                error_msg = result.stderr or result.stdout or f"Return code {result.returncode}"
-                logger.error(f"FPF failed with return code {result.returncode}: {error_msg}")
+            if proc.returncode != 0:
+                stdout_str = (stdout_bytes or b"").decode("utf-8", errors="replace")
+                stderr_str = (stderr_bytes or b"").decode("utf-8", errors="replace")
+                error_msg = stderr_str or stdout_str or f"Return code {proc.returncode}"
+                logger.error(f"FPF failed with return code {proc.returncode}: {error_msg}")
                 raise FpfExecutionError(f"FPF execution failed: {error_msg}")
 
             # Parse results
@@ -159,9 +182,21 @@ class FpfAdapter(BaseAdapter):
                 status=TaskStatus.COMPLETED,
             )
 
-    def cancel(self, task_id: str) -> bool:
-        """Cancel not supported in simplified version."""
-        return False
+    async def cancel(self, task_id: str) -> bool:
+        """Cancel a running FPF subprocess."""
+        proc = self._active_tasks.get(task_id)
+        if not proc:
+            return False
+        try:
+            proc.terminate()
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=2.0)
+            except asyncio.TimeoutError:
+                proc.kill()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to cancel FPF task {task_id}: {e}")
+            return False
 
     def _build_fpf_command(
         self,
@@ -169,9 +204,12 @@ class FpfAdapter(BaseAdapter):
         file_b: str,
         output: str,
         config: GenerationConfig,
+        extra: dict,
         log_file: Optional[str] = None,
     ) -> list[str]:
         """Build the FPF command line arguments."""
+        import sys
+        
         model = config.model
         provider = config.provider
         
@@ -181,22 +219,29 @@ class FpfAdapter(BaseAdapter):
             model = parts[1]
             logger.info(f"FPF adapter: parsed model string -> provider='{provider}', model='{model}'")
 
+        fpf_dir = Path(self._get_fpf_directory())
+        config_path = fpf_dir / "fpf_config.yaml"
+        env_path = fpf_dir / ".env"
+
         cmd = [
-            "python",
+            sys.executable,  # Use current Python interpreter
             "fpf_main.py",
             "--file-a", file_a,
             "--file-b", file_b,
             "--out", output,
+            "--config", str(config_path),
+            "--env", str(env_path),
             "--provider", provider,
             "--model", model,
-            "--timeout", str(config.extra["timeout"]),
             "--verbose",
         ]
+
+        if extra.get("timeout"):
+            cmd.extend(["--timeout", str(extra["timeout"])])
 
         if log_file:
             cmd.extend(["--log-file", log_file])
 
-        extra = config.extra
         if "reasoning_effort" in extra:
             cmd.extend(["--reasoning-effort", str(extra["reasoning_effort"])])
         if "max_completion_tokens" in extra:

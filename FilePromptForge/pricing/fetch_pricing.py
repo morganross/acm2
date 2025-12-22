@@ -39,7 +39,7 @@ import requests
 OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 
 
-def fetch_openrouter_models(api_key: Optional[str] = None, timeout: int = 30) -> Dict[str, Any]:
+def fetch_openrouter_models(api_key: Optional[str] = None, timeout: Optional[int] = None) -> Dict[str, Any]:
     headers: Dict[str, str] = {"Accept": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"

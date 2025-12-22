@@ -65,7 +65,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--model", required=True, dest="model")
     parser.add_argument("--reasoning-effort", dest="reasoning_effort")
     parser.add_argument("--max-completion-tokens", dest="max_completion_tokens", type=int)
-    parser.add_argument("--timeout", required=True, dest="timeout", type=int)
+    parser.add_argument("--timeout", required=False, dest="timeout", type=int)
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--verbose", "-v", action="store_true")
     parser.add_argument("--log-file", dest="log_file")

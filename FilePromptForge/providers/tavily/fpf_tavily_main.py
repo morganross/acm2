@@ -6,6 +6,7 @@ import urllib.error
 import sys
 import random
 import logging
+from typing import Optional
 
 LOG = logging.getLogger("fpf_tavily_main")
 
@@ -60,14 +61,18 @@ def build_payload(prompt: str, cfg: dict):
     return payload, headers
 
 
-def _http_get_json(url: str, headers: dict, timeout: int = 60) -> dict:
+def _http_get_json(url: str, headers: dict, timeout: Optional[int] = None) -> dict:
     req = urllib.request.Request(url, headers=headers, method="GET")
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    if timeout is None:
+        resp_ctx = urllib.request.urlopen(req)
+    else:
+        resp_ctx = urllib.request.urlopen(req, timeout=timeout)
+    with resp_ctx as resp:
         raw = resp.read().decode("utf-8")
         return json.loads(raw)
 
 
-def execute_and_verify(provider_url: str, payload: dict, headers: dict, verify_helpers, timeout: int = 300, max_retries: int = 3, verbose: bool = None) -> dict:
+def execute_and_verify(provider_url: str, payload: dict, headers: dict, verify_helpers, timeout: Optional[int] = None, max_retries: int = 3, verbose: bool = None) -> dict:
     """
     Tavily is asynchronous: POST returns {status: pending, request_id}. We must poll
     GET /research/{request_id} until status == "completed" (or timeout) and then
@@ -107,7 +112,11 @@ def execute_and_verify(provider_url: str, payload: dict, headers: dict, verify_h
             _emit_status(f"Attempt {attempt}/{max_retries}: Initiating Tavily research request...")
             LOG.debug("Tavily request attempt %d/%d to %s", attempt, max_retries, provider_url)
             req = urllib.request.Request(provider_url, data=body, headers=hdrs, method="POST")
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            if timeout is None:
+                resp_ctx = urllib.request.urlopen(req)
+            else:
+                resp_ctx = urllib.request.urlopen(req, timeout=timeout)
+            with resp_ctx as resp:
                 raw = resp.read().decode("utf-8")
                 first_json = json.loads(raw)
 
@@ -125,14 +134,14 @@ def execute_and_verify(provider_url: str, payload: dict, headers: dict, verify_h
                 raise RuntimeError("Tavily did not return request_id; cannot poll for completion")
 
             poll_interval = 3
-            deadline = time.time() + timeout
+            deadline = None if timeout is None else time.time() + timeout
             final_json = first_json
             poll_count = 0
-            while time.time() < deadline:
+            while True:
                 time.sleep(poll_interval)
                 poll_count += 1
-                elapsed = int(time.time() - (deadline - timeout))
-                remaining = int(deadline - time.time())
+                elapsed = None if deadline is None else int(time.time() - (deadline - timeout))
+                remaining = None if deadline is None else int(deadline - time.time())
                 poll_url = provider_url.rstrip("/") + f"/{request_id}"
                 final_json = _http_get_json(poll_url, hdrs, timeout=timeout)
                 status = final_json.get("status")
@@ -142,9 +151,8 @@ def execute_and_verify(provider_url: str, payload: dict, headers: dict, verify_h
                     break
                 if status in ("failed", "error"):
                     raise RuntimeError(f"Tavily research failed with status={status}")
-
-            if final_json.get("status") != "completed":
-                raise RuntimeError("Tavily research did not complete before timeout")
+                if deadline is not None and time.time() >= deadline:
+                    raise RuntimeError("Tavily research did not complete before timeout")
 
             verify_helpers.assert_grounding_and_reasoning(final_json, provider=provider_module)
             return final_json

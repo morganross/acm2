@@ -25,9 +25,12 @@ class SingleEvalConfig:
     judge_models: List[str] = field(default_factory=list)  # REQUIRED - must be set by preset
     criteria_path: Optional[str] = None
     temperature: float = 0.0
-    max_tokens: int = 4096
+    max_tokens: int = 16384
     concurrent_limit: int = 3  # Max concurrent evaluations
     timeout_seconds: int = 600  # Per-call timeout (GUI EvalPanel)
+    retries: int = 0
+    strict_json: bool = True
+    enable_grounding: bool = True
     
     # Custom instructions from Content Library
     custom_instructions: Optional[str] = None
@@ -40,6 +43,9 @@ class SingleEvalConfig:
             temperature=self.temperature,
             max_tokens=self.max_tokens,
             timeout_seconds=self.timeout_seconds,
+            retries=self.retries,
+            strict_json=self.strict_json,
+            enable_grounding=self.enable_grounding,
         )
 
 

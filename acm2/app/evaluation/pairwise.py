@@ -27,7 +27,7 @@ class PairwiseConfig:
     judge_models: List[str] = field(default_factory=list)  # REQUIRED - must be set by preset
     criteria_path: Optional[str] = None
     temperature: float = 0.0
-    max_tokens: int = 4096
+    max_tokens: int = 16384
     concurrent_limit: int = 3
     timeout_seconds: int = 600  # Per-call timeout (GUI EvalPanel)
     

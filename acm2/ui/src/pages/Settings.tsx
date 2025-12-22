@@ -7,8 +7,8 @@ import { notify } from '@/stores/notifications'
 export interface ConcurrencySettings {
   generationConcurrency: number
   evalConcurrency: number
-  requestTimeout: number
-  evalTimeout: number
+  requestTimeout: number | null
+  evalTimeout: number | null
   maxRetries: number
   retryDelay: number
   iterations: number
@@ -21,8 +21,8 @@ export interface ConcurrencySettings {
 const defaultConcurrency: ConcurrencySettings = {
   generationConcurrency: 5,
   evalConcurrency: 5,
-  requestTimeout: 600,
-  evalTimeout: 600,
+  requestTimeout: null,
+  evalTimeout: null,
   maxRetries: 3,
   retryDelay: 2.0,
   iterations: 1,
@@ -291,26 +291,31 @@ export default function Settings() {
 
           <div className="bg-card border rounded-lg p-4 space-y-4">
             <h2 className="font-semibold text-foreground">Timeout & Retry Settings</h2>
-            
+
             <div className="space-y-4">
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-sm font-medium text-foreground">
                     Request Timeout (seconds)
                   </label>
-                  <span className="text-sm font-mono bg-muted px-2 py-0.5 rounded">{concurrency.requestTimeout}s</span>
+                  <span className="text-sm font-mono bg-muted px-2 py-0.5 rounded">
+                    {concurrency.requestTimeout === null ? 'none' : `${concurrency.requestTimeout}s`}
+                  </span>
                 </div>
                 <input
-                  type="range"
-                  min="60"
-                  max="3600"
-                  step="60"
-                  value={concurrency.requestTimeout}
-                  onChange={(e) => setConcurrency(prev => ({ ...prev, requestTimeout: Number(e.target.value) }))}
-                  className="w-full"
+                  type="number"
+                  min="0"
+                  step="1"
+                  placeholder="None"
+                  value={concurrency.requestTimeout ?? ''}
+                  onChange={(e) => setConcurrency(prev => ({
+                    ...prev,
+                    requestTimeout: e.target.value === '' ? null : Number(e.target.value)
+                  }))}
+                  className="w-full px-3 py-2 border rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Maximum time to wait for a single LLM call (1800s = 30 min recommended for deep research)
+                  Leave blank for no timeout; when set, this limits a single LLM call
                 </p>
               </div>
 
@@ -356,19 +361,24 @@ export default function Settings() {
                   <label className="text-sm font-medium text-foreground">
                     Evaluation Timeout (seconds)
                   </label>
-                  <span className="text-sm font-mono bg-muted px-2 py-0.5 rounded">{concurrency.evalTimeout}s</span>
+                  <span className="text-sm font-mono bg-muted px-2 py-0.5 rounded">
+                    {concurrency.evalTimeout === null ? 'none' : `${concurrency.evalTimeout}s`}
+                  </span>
                 </div>
                 <input
-                  type="range"
-                  min="60"
-                  max="3600"
-                  step="60"
-                  value={concurrency.evalTimeout}
-                  onChange={(e) => setConcurrency(prev => ({ ...prev, evalTimeout: Number(e.target.value) }))}
-                  className="w-full"
+                  type="number"
+                  min="0"
+                  step="1"
+                  placeholder="None"
+                  value={concurrency.evalTimeout ?? ''}
+                  onChange={(e) => setConcurrency(prev => ({
+                    ...prev,
+                    evalTimeout: e.target.value === '' ? null : Number(e.target.value)
+                  }))}
+                  className="w-full px-3 py-2 border rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Maximum time for evaluation requests
+                  Leave blank for no timeout; when set, this limits evaluation requests
                 </p>
               </div>
             </div>

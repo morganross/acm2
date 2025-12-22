@@ -207,6 +207,7 @@ export default function Execute() {
               generation_concurrency: concurrencySettings.generationConcurrency,
               eval_concurrency: concurrencySettings.evalConcurrency,
               request_timeout: concurrencySettings.requestTimeout,
+              eval_timeout: concurrencySettings.evalTimeout,
               max_retries: concurrencySettings.maxRetries,
               retry_delay: concurrencySettings.retryDelay
             }

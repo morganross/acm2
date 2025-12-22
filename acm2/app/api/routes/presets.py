@@ -737,32 +737,89 @@ async def execute_preset(
     if not preset.log_level:
         raise ValueError(f"Preset {preset.name} has no log_level - set this in the GUI")
     
+    fpf_cfg = preset.config_overrides.get("fpf", {}) if preset.config_overrides else {}
+    gptr_cfg = preset.config_overrides.get("gptr", {}) if preset.config_overrides else {}
+    concurrency_cfg = preset.config_overrides.get("concurrency", {}) if preset.config_overrides else {}
+
+    model_settings = {}
+    model_names: list[str] = []
+    for model_entry in (preset.models or []):
+        if not isinstance(model_entry, dict):
+            raise ValueError(f"Preset {preset.name} has invalid model entry: {model_entry}")
+        provider = model_entry.get("provider")
+        base_model = model_entry.get("model")
+        temperature = model_entry.get("temperature")
+        max_tokens = model_entry.get("max_tokens")
+
+        if temperature is None:
+            temperature = fpf_cfg.get("temperature") or gptr_cfg.get("temperature")
+        if max_tokens is None:
+            max_tokens = fpf_cfg.get("max_tokens") or gptr_cfg.get("max_tokens")
+        if not provider or not base_model:
+            raise ValueError(f"Model entry missing provider/model in preset {preset.name}: {model_entry}")
+        if temperature is None:
+            raise ValueError(f"Model {provider}:{base_model} missing temperature in preset {preset.name}")
+        if max_tokens is None:
+            raise ValueError(f"Model {provider}:{base_model} missing max_tokens in preset {preset.name}")
+
+        key = f"{provider}:{base_model}"
+        model_settings[key] = {
+            "provider": provider,
+            "model": base_model,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        model_names.append(key)
+
+    eval_temperature = eval_cfg.get("temperature") or fpf_cfg.get("temperature")
+    eval_max_tokens = eval_cfg.get("max_tokens") or fpf_cfg.get("max_tokens")
+    eval_retries = eval_cfg.get("retries")
+    if eval_retries is None:
+        raise ValueError(f"Preset {preset.name} has no eval_config.retries - set this in the GUI")
+    if eval_temperature is None:
+        raise ValueError(f"Preset {preset.name} has no eval temperature configured")
+    if eval_max_tokens is None:
+        raise ValueError(f"Preset {preset.name} has no eval max_tokens configured")
+    eval_strict_json = eval_cfg.get("strict_json", True)
+    eval_enable_grounding = eval_cfg.get("enable_grounding", True)
+
+    gen_concurrency = concurrency_cfg.get("generation_concurrency") if concurrency_cfg else None
+    eval_concurrency_val = concurrency_cfg.get("eval_concurrency") if concurrency_cfg else None
+    request_timeout_val = concurrency_cfg.get("request_timeout") if concurrency_cfg else None
+    eval_timeout_val = eval_cfg.get("timeout_seconds")
+    if eval_timeout_val is None and concurrency_cfg:
+        eval_timeout_val = concurrency_cfg.get("eval_timeout")
+    if eval_timeout_val is None:
+        raise ValueError(f"Preset {preset.name} has no eval timeout configured")
+
     config = RunConfig(
         document_ids=list(document_contents.keys()),
         document_contents=document_contents,
         instructions=instructions,
         generators=[AdapterGeneratorType(g) for g in preset.generators],
-        models=[
-            (f"{m['provider']}:{m['model']}" if isinstance(m, dict) and "provider" in m else m["model"])
-            if isinstance(m, dict) else m
-            for m in preset.models
-        ],
+        models=model_names,
+        model_settings=model_settings,
         iterations=_derive_iterations(preset),
         enable_single_eval=preset.evaluation_enabled,
         enable_pairwise=preset.pairwise_enabled,
         eval_iterations=eval_iterations,
         eval_judge_models=judge_models,
+        eval_retries=eval_retries,
+        eval_temperature=eval_temperature,
+        eval_max_tokens=eval_max_tokens,
+        eval_strict_json=eval_strict_json,
+        eval_enable_grounding=eval_enable_grounding,
         pairwise_top_n=eval_cfg.get("pairwise_top_n"),
         enable_combine=combine_enabled,
         combine_strategy=combine_strategy or "",
         combine_models=combine_models_list if combine_enabled else [],
         log_level=preset.log_level,
-        max_retries=preset.max_retries,
-        retry_delay=preset.retry_delay,
-        request_timeout=preset.request_timeout,
-        eval_timeout=preset.eval_timeout,
-        generation_concurrency=preset.generation_concurrency,
-        eval_concurrency=preset.eval_concurrency,
+        max_retries=concurrency_cfg.get("max_retries") if concurrency_cfg else preset.max_retries,
+        retry_delay=concurrency_cfg.get("retry_delay") if concurrency_cfg else preset.retry_delay,
+        request_timeout=request_timeout_val or preset.request_timeout,
+        eval_timeout=eval_timeout_val or preset.eval_timeout,
+        generation_concurrency=gen_concurrency or preset.generation_concurrency,
+        eval_concurrency=eval_concurrency_val or preset.eval_concurrency,
         fpf_log_output=preset.fpf_log_output or "file",
         fpf_log_file_path=preset.fpf_log_file_path or f"logs/{run.id}/fpf_output.log",
         post_combine_top_n=preset.post_combine_top_n,

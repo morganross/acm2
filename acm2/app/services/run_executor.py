@@ -78,6 +78,7 @@ class RunConfig:
     # Generators - REQUIRED (no defaults)
     generators: List[GeneratorType]
     models: List[str]  # Model names to use
+    model_settings: Dict[str, Dict[str, Any]]  # REQUIRED per-model settings
     
     # Iterations - REQUIRED (no defaults)
     iterations: int
@@ -86,8 +87,8 @@ class RunConfig:
     # Concurrency settings - REQUIRED (no defaults)
     generation_concurrency: int
     eval_concurrency: int
-    request_timeout: int
-    eval_timeout: int
+    request_timeout: Optional[int]
+    eval_timeout: Optional[int]
     max_retries: int
     retry_delay: float
     
@@ -101,6 +102,11 @@ class RunConfig:
     enable_single_eval: bool = True
     enable_pairwise: bool = True
     eval_judge_models: List[str] = field(default_factory=list)  # REQUIRED when eval enabled
+    eval_retries: int = 0
+    eval_temperature: Optional[float] = None
+    eval_max_tokens: Optional[int] = None
+    eval_strict_json: bool = True
+    eval_enable_grounding: bool = True
     pairwise_top_n: Optional[int] = None  # Optional top-N filtering
     
     # Custom evaluation instructions (from Content Library) - Validated based on enabled features
@@ -136,10 +142,6 @@ class RunConfig:
             raise ValueError("max_retries must be 1-10 and is required")
         if self.retry_delay is None or not (0.5 <= self.retry_delay <= 30.0):
             raise ValueError("retry_delay must be 0.5-30.0 and is required")
-        if self.request_timeout is None or not (60 <= self.request_timeout <= 3600):
-            raise ValueError("request_timeout must be 60-3600 and is required")
-        if self.eval_timeout is None or not (60 <= self.eval_timeout <= 3600):
-            raise ValueError("eval_timeout must be 60-3600 and is required")
         if self.generation_concurrency is None or not (1 <= self.generation_concurrency <= 50):
             raise ValueError("generation_concurrency must be 1-50 and is required")
         if self.eval_concurrency is None or not (1 <= self.eval_concurrency <= 50):
@@ -171,6 +173,28 @@ class RunConfig:
             raise ValueError("generators list is required and cannot be empty")
         if not self.models:
             raise ValueError("models list is required and cannot be empty")
+
+        # Validate per-model settings
+        if not self.model_settings:
+            raise ValueError("model_settings is required and cannot be empty")
+        for model in self.models:
+            if model not in self.model_settings:
+                raise ValueError(f"Missing model_settings for model: {model}")
+            settings = self.model_settings[model]
+            provider = settings.get("provider")
+            base_model = settings.get("model") or (model.split(":", 1)[1] if ":" in model else model)
+            temperature = settings.get("temperature")
+            max_tokens = settings.get("max_tokens")
+            if not provider:
+                raise ValueError(f"provider is required for model {model} in model_settings")
+            if not base_model:
+                raise ValueError(f"model name is required for model {model} in model_settings")
+            if temperature is None:
+                raise ValueError(f"temperature is required for model {model} in model_settings")
+            if max_tokens is None or max_tokens < 1:
+                raise ValueError(f"max_tokens must be >= 1 for model {model} in model_settings")
+            # Persist the resolved base model name back into settings for later use
+            self.model_settings[model]["model"] = base_model
         
         # Validate FPF instructions
         if GeneratorType.FPF in self.generators and not self.instructions:
@@ -188,6 +212,14 @@ class RunConfig:
                     "Single evaluation enabled but no instructions provided. "
                     "Select single_eval_instructions from Content Library in preset."
                 )
+            if self.eval_retries is None or self.eval_retries < 0 or self.eval_retries > 10:
+                raise ValueError("eval_retries must be 0-10 and is required when single evaluation is enabled")
+            if self.eval_timeout is None:
+                raise ValueError("eval_timeout must be set when single evaluation is enabled")
+            if self.eval_max_tokens is None or self.eval_max_tokens < 1:
+                raise ValueError("eval_max_tokens must be >= 1 when single evaluation is enabled")
+            if self.eval_temperature is None:
+                raise ValueError("eval_temperature must be set when single evaluation is enabled")
         
         if self.enable_pairwise:
             if not self.eval_judge_models:
@@ -197,6 +229,14 @@ class RunConfig:
                     "Pairwise evaluation enabled but no instructions provided. "
                     "Select pairwise_eval_instructions from Content Library in preset."
                 )
+            if self.eval_retries is None or self.eval_retries < 0 or self.eval_retries > 10:
+                raise ValueError("eval_retries must be 0-10 and is required when pairwise evaluation is enabled")
+            if self.eval_timeout is None:
+                raise ValueError("eval_timeout must be set when pairwise evaluation is enabled")
+            if self.eval_max_tokens is None or self.eval_max_tokens < 1:
+                raise ValueError("eval_max_tokens must be >= 1 when pairwise evaluation is enabled")
+            if self.eval_temperature is None:
+                raise ValueError("eval_temperature must be set when pairwise evaluation is enabled")
         
         if (self.enable_single_eval or self.enable_pairwise) and not self.eval_criteria:
             raise ValueError(
@@ -751,6 +791,11 @@ class RunExecutor:
                 custom_criteria=config.eval_criteria,
                 concurrent_limit=config.eval_concurrency,
                 timeout_seconds=config.eval_timeout,
+                temperature=config.eval_temperature,
+                max_tokens=config.eval_max_tokens,
+                retries=config.eval_retries,
+                strict_json=config.eval_strict_json,
+                enable_grounding=config.eval_enable_grounding,
             )
             self.logger.info(f"[STATS-DEBUG] Creating SingleDocEvaluator with stats_tracker={self._fpf_stats is not None}")
             single_evaluator = SingleDocEvaluator(eval_config, stats_tracker=self._fpf_stats)
@@ -964,12 +1009,25 @@ class RunExecutor:
         
         try:
             adapter = self._get_adapter(generator)
-            
-            # Pass model string as-is to adapter - FPF handles model/provider logic
-            # Model can be "gpt-5", "openai:gpt-5", etc. Adapter decides how to use it.
+
+            settings = (self.config.model_settings or {}).get(model)
+            if not settings:
+                raise ValueError(f"Missing model_settings for model {model}")
+            provider = settings.get("provider")
+            base_model = settings.get("model") or (model.split(":", 1)[1] if ":" in model else model)
+            temperature = settings.get("temperature")
+            max_tokens = settings.get("max_tokens")
+            if not provider:
+                raise ValueError(f"provider not set for model {model}")
+            if max_tokens is None or max_tokens < 1:
+                raise ValueError(f"max_tokens missing for model {model}")
+            if temperature is None:
+                raise ValueError(f"temperature missing for model {model}")
+
+            # Pass explicit provider/model plus per-model settings
             gen_config = GenerationConfig(
-                provider="openai",  # Default, adapter may override based on model
-                model=model,
+                provider=provider,
+                model=base_model,
             )
             
             # pass run-specific task id to adapter via config.extra
@@ -977,6 +1035,8 @@ class RunExecutor:
             if not gen_config.extra:
                 gen_config.extra = {}
             gen_config.extra["task_id"] = task_id
+            gen_config.extra["max_completion_tokens"] = max_tokens
+            gen_config.extra["temperature"] = temperature
             if timeout:
                 gen_config.extra["timeout"] = timeout
 

@@ -314,7 +314,7 @@ def parse_response(raw_json: Dict) -> str:
         import json
         return json.dumps(raw_json, indent=2)
 
-def execute_and_verify(provider_url: str, payload: Dict, headers: Optional[Dict], verify_helpers, timeout: int = 600, max_retries: int = 3) -> Dict:
+def execute_and_verify(provider_url: str, payload: Dict, headers: Optional[Dict], verify_helpers, timeout: Optional[int] = None, max_retries: int = 3) -> Dict:
     """
     Execute the Google Gemini request and verify both grounding and reasoning are present.
     Enforces mandatory grounding (google_search) and reasoning at the lowest level.
@@ -385,6 +385,8 @@ def execute_and_verify(provider_url: str, payload: Dict, headers: Optional[Dict]
             # Wrap urlopen in a logged function for call tracing
             @log_call
             def logged_urlopen(r, t):
+                if t is None:
+                    return urllib.request.urlopen(r)
                 return urllib.request.urlopen(r, timeout=t)
 
             with logged_urlopen(req, timeout) as resp:

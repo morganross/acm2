@@ -173,15 +173,26 @@ def _http_post_json(
         except Exception:
             pass
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            start_ts = time.time()
+            if timeout is None:
+                resp_ctx = urllib.request.urlopen(req)
+            else:
+                resp_ctx = urllib.request.urlopen(req, timeout=timeout)
+            with resp_ctx as resp:
                 raw = resp.read().decode("utf-8")
+                elapsed = time.time() - start_ts
                 # Response summary (truncated) - output controlled by FPF_LOG_OUTPUT
                 try:
                     status_code = getattr(resp, "status", resp.getcode() if hasattr(resp, "getcode") else "unknown")
-                    _fpf_log(f"[FPF API][RESP] {url} status={status_code} bytes={len(raw)} preview={_truncate(raw)}")
+                    _fpf_log(f"[FPF API][RESP] {url} status={status_code} bytes={len(raw)} duration={elapsed:.2f}s preview={_truncate(raw)}")
                 except Exception:
                     pass
-                return json.loads(raw)
+                if not raw:
+                    raise RuntimeError(f"Empty HTTP response from {url} on attempt {attempt}/{max_retries}")
+                parsed = json.loads(raw)
+                if not isinstance(parsed, (dict, list)):
+                    raise RuntimeError(f"Unexpected JSON type {type(parsed)} from {url} on attempt {attempt}/{max_retries}")
+                return parsed
         except urllib.error.HTTPError as he:
             try:
                 msg = he.read().decode("utf-8", errors="ignore")
@@ -406,30 +417,40 @@ def _extract_json_from_text(text: str) -> Optional[str]:
     except Exception:
         return None
 
-def _resolve_timeout(cfg: dict, provider_name: str) -> int:
-    """
-    Resolve the effective request timeout with precedence:
-      providers.<provider>.timeout_seconds > concurrency.timeout_seconds > defaults
-    Defaults: 7200 for 'openaidp' (deep research background), 1800 for 'tavily', else 600.
-    """
+def _resolve_timeout(cfg: dict, provider_name: str) -> Optional[int]:
+    """Resolve timeout but allow unbounded; returns None when not explicitly set."""
     try:
         _conc = cfg.get("concurrency") or {}
-        _timeout_cfg = int(_conc.get("timeout_seconds") or 0)
+        _timeout_cfg = _conc.get("timeout_seconds")
     except Exception:
-        _timeout_cfg = 0
+        _timeout_cfg = None
     try:
         _prov_cfg = (cfg.get("providers") or {}).get(provider_name, {}) or {}
-        _prov_timeout = int(_prov_cfg.get("timeout_seconds") or 0)
+        _prov_timeout = _prov_cfg.get("timeout_seconds")
     except Exception:
-        _prov_timeout = 0
-    # Set fallback based on provider
-    if provider_name == "openaidp":
-        _fallback = 7200
-    elif provider_name == "tavily":
-        _fallback = 1800  # 30 minutes for Tavily async research
-    else:
-        _fallback = 600
-    return _prov_timeout or _timeout_cfg or _fallback
+        _prov_timeout = None
+    # If nothing is configured, return None to signal no timeout
+    return _prov_timeout or _timeout_cfg or None
+
+
+def _validate_run_inputs(file_a: Optional[str], file_b: Optional[str], out_path: Optional[str], env_file: Path, provider: str, model: str, timeout: Optional[int]) -> None:
+    """Fail fast on missing inputs or obviously bad configuration."""
+    if not file_a or not Path(file_a).is_file():
+        raise RuntimeError(f"file_a must point to an existing file (got {file_a})")
+    if not file_b or not Path(file_b).is_file():
+        raise RuntimeError(f"file_b must point to an existing file (got {file_b})")
+    if not provider:
+        raise RuntimeError("provider is required and cannot be empty")
+    if not model:
+        raise RuntimeError("model is required and cannot be empty")
+    if not env_file.exists():
+        raise RuntimeError(f"env file not found at {env_file}")
+    # Pre-flight output directory writability if provided
+    if out_path:
+        out_parent = Path(out_path).expanduser().resolve().parent
+        out_parent.mkdir(parents=True, exist_ok=True)
+        if not os.access(out_parent, os.W_OK):
+            raise RuntimeError(f"Output directory not writable: {out_parent}")
 
 
 def run(file_a: Optional[str] = None,
@@ -485,6 +506,8 @@ def run(file_a: Optional[str] = None,
     api_key_name = f"{provider_name.upper()}_API_KEY"
 
     env_file = Path(env_path) if env_path else Path(__file__).resolve().parent.parent / ".env"
+    selected_model = model or cfg.get("model")
+    _validate_run_inputs(file_a, file_b, out_path, env_file, provider_name, selected_model, timeout)
     LOG.info(f"Attempting to load API key '{api_key_name}' from {env_file}")
     api_key_value = _read_key_from_env_file(env_file, api_key_name)
 
@@ -492,25 +515,6 @@ def run(file_a: Optional[str] = None,
         LOG.info(f"Successfully loaded API key '{api_key_name}' (Length: {len(api_key_value)})")
     else:
         LOG.warning(f"Failed to load API key '{api_key_name}' from {env_file}")
-
-    if api_key_value is None or api_key_value == "":
-        # Fallback for backward compatibility with OPENAI_API_KEY
-        if provider_name in ("openai", "openaidp"):
-            LOG.info("Attempting fallback to OPENAI_API_KEY")
-            api_key_value = _read_key_from_env_file(env_file, "OPENAI_API_KEY")
-            if api_key_value:
-                 LOG.info(f"Successfully loaded fallback OPENAI_API_KEY (Length: {len(api_key_value)})")
-
-    # Tavily: load key from the same .env file and inject into process env for the adapter
-    if provider_name == "tavily" and (api_key_value is None or api_key_value == ""):
-        LOG.info("Attempting fallback to TAVILY_API_KEY")
-        api_key_value = _read_key_from_env_file(env_file, "TAVILY_API_KEY")
-        if api_key_value:
-            LOG.info(f"Successfully loaded fallback TAVILY_API_KEY (Length: {len(api_key_value)})")
-            try:
-                os.environ["TAVILY_API_KEY"] = api_key_value
-            except Exception:
-                pass
 
     if api_key_value is None or api_key_value == "":
         LOG.error("API key '%s' not found in env file: %s", api_key_name, env_file)

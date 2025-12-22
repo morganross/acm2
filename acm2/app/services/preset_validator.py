@@ -54,15 +54,7 @@ class PresetValidator:
         elif not (0.5 <= preset.retry_delay <= 30.0):
             errors.append(f"retry_delay must be 0.5-30.0, got {preset.retry_delay}")
         
-        if preset.request_timeout is None:
-            errors.append("request_timeout is required")
-        elif not (60 <= preset.request_timeout <= 3600):
-            errors.append(f"request_timeout must be 60-3600 seconds, got {preset.request_timeout}")
-        
-        if preset.eval_timeout is None:
-            errors.append("eval_timeout is required")
-        elif not (60 <= preset.eval_timeout <= 3600):
-            errors.append(f"eval_timeout must be 60-3600 seconds, got {preset.eval_timeout}")
+        # timeouts are optional/unbounded now
         
         # =====================================================================
         # Required Concurrency Configuration

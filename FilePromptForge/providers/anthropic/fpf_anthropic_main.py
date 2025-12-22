@@ -216,7 +216,7 @@ def parse_response(raw_json: Dict) -> str:
         return str(raw_json)
 
 
-def execute_and_verify(provider_url: str, payload: Dict, headers: Optional[Dict], verify_helpers, timeout: int = 600, max_retries: int = 3) -> Dict:
+def execute_and_verify(provider_url: str, payload: Dict, headers: Optional[Dict], verify_helpers, timeout: Optional[int] = None, max_retries: int = 3) -> Dict:
     data = json.dumps(payload).encode("utf-8")
     hdrs = {"Content-Type": "application/json"}
     if headers:
@@ -232,7 +232,11 @@ def execute_and_verify(provider_url: str, payload: Dict, headers: Optional[Dict]
         req = urllib.request.Request(provider_url, data=data, headers=hdrs, method="POST")
         try:
             LOG.debug("Anthropic request attempt %d/%d to %s", attempt, max_retries, provider_url)
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            if timeout is None:
+                resp_ctx = urllib.request.urlopen(req)
+            else:
+                resp_ctx = urllib.request.urlopen(req, timeout=timeout)
+            with resp_ctx as resp:
                 raw = resp.read().decode("utf-8")
                 raw_json = json.loads(raw)
                 # Use the actual module object so validation can see extract_reasoning
@@ -273,7 +277,7 @@ def list_available_models(api_key: str, api_base: str = "https://api.anthropic.c
         "anthropic-version": version,
     }
     req = urllib.request.Request(url, headers=hdrs, method="GET")
-    with urllib.request.urlopen(req, timeout=60) as resp:
+    with urllib.request.urlopen(req) as resp:
         raw = resp.read().decode("utf-8")
         data = json.loads(raw)
     models = [m.get("id") for m in data.get("data", []) if isinstance(m, dict) and m.get("id")]
