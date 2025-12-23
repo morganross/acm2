@@ -619,6 +619,7 @@ class RunExecutor:
                             pass
             
             # Phase 3: Combine (optional)
+            self.logger.info(f"Run {run_id}: Combine check - enable_combine={config.enable_combine}, winner_doc_id={result.winner_doc_id}")
             if config.enable_combine and result.winner_doc_id:
                 self.logger.info(f"Run {run_id}: Starting combine phase")
                 result.status = RunPhase.COMBINING
