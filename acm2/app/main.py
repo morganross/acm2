@@ -7,10 +7,11 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.exceptions import RequestValidationError
 
 from .api.router import api_router
 from .infra.db.session import engine, async_session_factory
@@ -101,6 +102,15 @@ def create_app() -> FastAPI:
     
     # Include API routes
     app.include_router(api_router)
+    
+    # Validation error handler - log full details for debugging
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        logger.error(f"Validation error on {request.method} {request.url.path}: {exc.errors()}")
+        return JSONResponse(
+            status_code=422,
+            content={"detail": exc.errors()},
+        )
     
     # ---------------------------------------------------------------------
     # Static UI (SPA)

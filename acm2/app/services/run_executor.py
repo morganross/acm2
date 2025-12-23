@@ -1468,7 +1468,10 @@ class RunExecutor:
             )
             
             # Run pairwise evaluation
+            post_combine_start = datetime.utcnow()
             summary = await evaluator.evaluate_all_pairs(all_doc_ids, all_contents)
+            post_combine_end = datetime.utcnow()
+            post_combine_duration = (post_combine_end - post_combine_start).total_seconds()
             result.post_combine_eval_results = summary
             
             self.logger.info(
@@ -1476,6 +1479,24 @@ class RunExecutor:
                 f"winner={summary.winner_doc_id} | "
                 f"comparisons={summary.total_comparisons} | "
                 f"pairs={summary.total_pairs}"
+            )
+            
+            # Emit timeline event for post-combine pairwise
+            await self._emit_timeline_event(
+                run_id=result.run_id,
+                phase="post_combine_pairwise",
+                event_type="pairwise_eval",
+                description=f"Post-combine pairwise: {summary.total_comparisons} comparisons",
+                model=", ".join(config.eval_judge_models),
+                timestamp=post_combine_start,
+                completed_at=post_combine_end,
+                duration_seconds=post_combine_duration,
+                success=True,
+                details={
+                    "total_comparisons": summary.total_comparisons,
+                    "winner_doc_id": summary.winner_doc_id,
+                    "documents_compared": len(all_doc_ids),
+                },
             )
             
             # Broadcast results via WebSocket

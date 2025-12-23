@@ -230,21 +230,21 @@ class GeneralConfigComplete(BaseModel):
 class ConcurrencyConfigComplete(BaseModel):
     """Complete Concurrency configuration for preset persistence."""
     # Concurrency limits
-    generation_concurrency: int = Field(5, ge=1, le=50, description="Max concurrent document generations")
-    eval_concurrency: int = Field(5, ge=1, le=50, description="Max concurrent evaluation calls")
+    generation_concurrency: Optional[int] = Field(5, ge=1, le=50, description="Max concurrent document generations")
+    eval_concurrency: Optional[int] = Field(5, ge=1, le=50, description="Max concurrent evaluation calls")
     
     # Timeouts
-    request_timeout: int = Field(600, ge=60, le=3600, description="Request timeout in seconds")
-    eval_timeout: int = Field(600, ge=60, le=3600, description="Evaluation timeout in seconds")
+    request_timeout: Optional[int] = Field(600, ge=60, le=3600, description="Request timeout in seconds")
+    eval_timeout: Optional[int] = Field(600, ge=60, le=3600, description="Evaluation timeout in seconds")
     
     # Retry settings
-    max_retries: int = Field(3, ge=1, le=10, description="Max retries per model before moving to next")
-    retry_delay: float = Field(2.0, ge=0.5, le=30.0, description="Seconds to wait between retry attempts")
+    max_retries: Optional[int] = Field(3, ge=1, le=10, description="Max retries per model before moving to next")
+    retry_delay: Optional[float] = Field(2.0, ge=0.5, le=30.0, description="Seconds to wait between retry attempts")
     
     # Legacy fields for backward compatibility
-    max_concurrent: int = Field(5, ge=1, le=20, description="Deprecated: use generation_concurrency")
-    launch_delay: float = Field(1.0, ge=0, description="Deprecated")
-    enable_rate_limiting: bool = Field(True, description="Deprecated")
+    max_concurrent: Optional[int] = Field(5, ge=1, le=20, description="Deprecated: use generation_concurrency")
+    launch_delay: Optional[float] = Field(1.0, ge=0, description="Deprecated")
+    enable_rate_limiting: Optional[bool] = Field(True, description="Deprecated")
 
 
 # ============================================================================
