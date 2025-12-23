@@ -134,6 +134,17 @@ async def execute_run_background(run_id: str, config: RunConfig):
                     "iteration": doc.iteration,
                 })
             
+            # Add combined docs to generated_docs (UI filters from this list)
+            for combined_doc in (result.combined_docs or []):
+                generated_docs_data.append({
+                    "id": combined_doc.doc_id,
+                    "model": combined_doc.model,
+                    "generator": combined_doc.generator.value if hasattr(combined_doc.generator, 'value') else str(combined_doc.generator),
+                    "source_doc_id": combined_doc.source_doc_id,
+                    "iteration": combined_doc.iteration,
+                    "is_combined": True,
+                })
+            
             results_summary = {
                 "winner": result.winner_doc_id,
                 "generated_count": len(result.generated_docs),
@@ -146,10 +157,15 @@ async def execute_run_background(run_id: str, config: RunConfig):
                 "generated_docs": generated_docs_data,
             }
 
-            # json.dumps will fail if datetime objects are present - fail fast
+            # Convert datetime objects to ISO strings for JSON serialization
+            def datetime_serializer(obj):
+                if isinstance(obj, datetime):
+                    return obj.isoformat()
+                raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+            
             await run_repo.complete(
                 run_id, 
-                results_summary=json.loads(json.dumps(results_summary)),
+                results_summary=json.loads(json.dumps(results_summary, default=datetime_serializer)),
                 total_cost_usd=result.total_cost_usd
             )
             logger.info(f"Run {run_id} completed successfully")

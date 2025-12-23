@@ -1290,9 +1290,14 @@ class RunExecutor:
                 if not model_name:
                     raise ValueError(f"Model name cannot be empty in: {combine_model}")
                 
+                # Generate unique task_id for combine phase
+                safe_model_name = combine_model.replace(":", "_")
+                combine_task_id = f"{result.run_id[-8:]}.combine.{model_idx}.{safe_model_name}"
+                
                 combine_gen_config = GenerationConfig(
                     provider=provider,
                     model=model_name,
+                    extra={"task_id": combine_task_id},
                 )
                 
                 self.logger.info(f"Combining with model {combine_model} ({model_idx + 1}/{len(config.combine_models)})")
