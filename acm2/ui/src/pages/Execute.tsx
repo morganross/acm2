@@ -76,23 +76,6 @@ export default function Execute() {
     });
   }, []);
 
-  const handleEvalComplete = useCallback((evalResult: any) => {
-    // The useRunSocket hook already updates the React Query cache with the correct object format
-    // This handler is for any additional side effects (logging, notifications, etc.)
-    // The pre_combine_evals is an object keyed by doc_id, not an array
-    setCurrentRun(prev => {
-      if (!prev) return prev;
-      const preCombineEvals = prev.pre_combine_evals || {};
-      return { 
-        ...prev, 
-        pre_combine_evals: {
-          ...preCombineEvals,
-          [evalResult.doc_id]: evalResult.scores_by_model || {},
-        }
-      };
-    });
-  }, []);
-
   const handleTaskUpdate = useCallback((task: any) => {
     setCurrentRun(prev => {
       if (!prev) return prev;
@@ -112,7 +95,6 @@ export default function Execute() {
     onTasksInit: handleTasksInit,
     onStatsUpdate: handleStatsUpdate,
     onGenComplete: handleGenComplete,
-    onEvalComplete: handleEvalComplete,
   });
 
   // Load run from URL if runId is provided (initial load only - WebSocket handles updates)

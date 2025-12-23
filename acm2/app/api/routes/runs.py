@@ -558,8 +558,8 @@ def _to_detail(run) -> RunDetail:
     # Parse pairwise results (including comparisons)
     pairwise_results = None
     try:
-        if results_summary.get("pairwise"):
-            pw = results_summary["pairwise"]
+        pw = results_summary.get("pairwise_results") or results_summary.get("pairwise")
+        if pw:
             rankings = [PairwiseRanking(**r) for r in (pw.get("rankings") or [])]
             comparisons = [PairwiseComparison(**c) for c in (pw.get("comparisons") or [])]
             pairwise_results = PairwiseResults(

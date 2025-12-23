@@ -7,13 +7,12 @@ type RunSocketHandlers = {
   onTasksInit?: (tasks: any[]) => void
   onStatsUpdate?: (stats: any) => void
   onGenComplete?: (genDoc: { id: string; model: string; generator: string; source_doc_id: string; iteration: number }) => void
-  onEvalComplete?: (evalResult: { doc_id: string; average_score: number; scores_by_model: Record<string, number>; duration_seconds: number }) => void
 }
 
 export function useRunSocket(runId?: string, handlers: RunSocketHandlers = {}) {
   const wsRef = useRef<WebSocket | null>(null)
   const queryClient = useQueryClient()
-  const { onRunUpdate, onTaskUpdate, onTasksInit, onStatsUpdate, onGenComplete, onEvalComplete } = handlers
+  const { onRunUpdate, onTaskUpdate, onTasksInit, onStatsUpdate, onGenComplete } = handlers
 
   useEffect(() => {
     if (!runId) return
@@ -100,28 +99,6 @@ export function useRunSocket(runId?: string, handlers: RunSocketHandlers = {}) {
             return { ...oldRun, generated_docs: [...generatedDocs, genDoc] }
           })
           onGenComplete?.(genDoc)
-        }
-
-        // Handle individual eval completions
-        if (msg.event === 'eval_complete') {
-          const evalResult = {
-            doc_id: msg.doc_id,
-            average_score: msg.average_score,
-            scores_by_model: msg.scores_by_model,
-            duration_seconds: msg.duration_seconds,
-          }
-          queryClient.setQueryData(['runs', runId], (oldRun: any) => {
-            if (!oldRun) return oldRun
-            // pre_combine_evals is an object keyed by doc_id, not an array
-            // Each value is an object with judge model names as keys and scores as values
-            const preCombineEvals = oldRun.pre_combine_evals || {}
-            const updatedEvals = {
-              ...preCombineEvals,
-              [msg.doc_id]: msg.scores_by_model || {},
-            }
-            return { ...oldRun, pre_combine_evals: updatedEvals }
-          })
-          onEvalComplete?.(evalResult)
         }
       } catch (e) {
         // console.error('Invalid run ws message', e)

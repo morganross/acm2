@@ -72,12 +72,78 @@ async def execute_run_background(run_id: str, config: RunConfig):
         run_repo = RunRepository(session)
         
         if result.status.value == "completed":
+            # Build pre_combine_evals: { doc_id: { judge_model: avg_score } }
+            pre_combine_evals = {}
+            pre_combine_evals_detailed = {}
+            if result.single_eval_results:
+                for doc_id, summary in result.single_eval_results.items():
+                    # Build simple scores by model
+                    scores_by_model = {}
+                    if hasattr(summary, 'results') and summary.results:
+                        model_scores: dict[str, list[float]] = {}
+                        for eval_result in summary.results:
+                            model = eval_result.model
+                            if model not in model_scores:
+                                model_scores[model] = []
+                            for score_item in eval_result.scores:
+                                model_scores[model].append(score_item.score)
+                        # Average per model
+                        for model, scores in model_scores.items():
+                            scores_by_model[model] = sum(scores) / len(scores) if scores else 0.0
+                    pre_combine_evals[doc_id] = scores_by_model
+                    # Detailed info
+                    pre_combine_evals_detailed[doc_id] = {
+                        "avg_score": summary.avg_score,
+                        "scores_by_criterion": summary.scores_by_criterion,
+                        "num_evaluations": summary.num_evaluations,
+                    }
+            
+            # Build pairwise_results
+            pairwise_data = None
+            if result.pairwise_results:
+                pw = result.pairwise_results
+                pairwise_data = {
+                    "total_comparisons": pw.total_comparisons,
+                    "total_pairs": pw.total_pairs,
+                    "winner_doc_id": pw.winner_doc_id,
+                    "rankings": [
+                        {"doc_id": r.doc_id, "elo": r.rating, "wins": r.wins, "losses": r.losses}
+                        for r in pw.elo_ratings
+                    ],
+                    "comparisons": [
+                        {
+                            "doc_id_a": r.doc_id_1,
+                            "doc_id_b": r.doc_id_2,
+                            "winner": r.winner_doc_id,
+                            "judge_model": r.model,
+                            "trial": r.trial,
+                            "reason": r.reason,
+                        }
+                        for r in pw.results
+                    ],
+                }
+            
+            # Build generated_docs list
+            generated_docs_data = []
+            for doc in result.generated_docs:
+                generated_docs_data.append({
+                    "id": doc.doc_id,
+                    "model": doc.model,
+                    "generator": doc.generator.value if hasattr(doc.generator, 'value') else str(doc.generator),
+                    "source_doc_id": doc.source_doc_id,
+                    "iteration": doc.iteration,
+                })
+            
             results_summary = {
                 "winner": result.winner_doc_id,
                 "generated_count": len(result.generated_docs),
                 "eval_count": len(result.single_eval_results or {}),
                 "combined_doc_id": result.combined_docs[0].doc_id if result.combined_docs else None,
                 "post_combine_eval": asdict(result.post_combine_eval_results) if result.post_combine_eval_results else None,
+                "pre_combine_evals": pre_combine_evals,
+                "pre_combine_evals_detailed": pre_combine_evals_detailed,
+                "pairwise_results": pairwise_data,
+                "generated_docs": generated_docs_data,
             }
 
             # json.dumps will fail if datetime objects are present - fail fast

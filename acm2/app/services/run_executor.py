@@ -946,19 +946,6 @@ class RunExecutor:
                                 },
                             )
                             
-                            # Broadcast eval score via WebSocket for live UI updates
-                            if getattr(self, '_run_ws_manager', None):
-                                try:
-                                    await self._run_ws_manager.broadcast(run_id, {
-                                        "event": "eval_complete",
-                                        "doc_id": gen_result.doc_id,
-                                        "average_score": summary.avg_score,
-                                        "scores_by_model": {m: s.avg_score for m, s in summary.model_scores.items()} if hasattr(summary, 'model_scores') and summary.model_scores else {},
-                                        "duration_seconds": (eval_completed_at - eval_started_at).total_seconds(),
-                                    })
-                                except Exception:
-                                    pass
-                            
                             self.logger.info(
                                 f"Single eval complete: {gen_result.doc_id} | "
                                 f"avg={summary.avg_score:.2f}"
