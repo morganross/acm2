@@ -1032,6 +1032,8 @@ async def start_run(
     eval_config = run_config.get("eval_config", {}) or run_config.get("config_overrides", {}).get("eval", {})
     pairwise_config = run_config.get("pairwise_config", {}) or run_config.get("config_overrides", {}).get("pairwise", {})
     concurrency_config = run_config.get("concurrency_config", {}) or run_config.get("config_overrides", {}).get("concurrency", {})
+    fpf_config = run_config.get("fpf_config", {}) or run_config.get("config_overrides", {}).get("fpf", {})
+    gptr_config = run_config.get("gptr_config", {}) or run_config.get("config_overrides", {}).get("gptr", {})
     
     # Get generation instructions from Content Library - NO FALLBACKS
     generation_instructions_id = run_config.get("generation_instructions_id")
@@ -1139,8 +1141,8 @@ async def start_run(
     for model_entry in models:
         provider = model_entry.get("provider")
         base_model = model_entry.get("model")
-        temperature = model_entry.get("temperature") or fpf_cfg.get("temperature") or gptr_cfg.get("temperature")
-        max_tokens = model_entry.get("max_tokens") or fpf_cfg.get("max_tokens") or gptr_cfg.get("max_tokens")
+        temperature = model_entry.get("temperature") or fpf_config.get("temperature") or gptr_config.get("temperature")
+        max_tokens = model_entry.get("max_tokens") or fpf_config.get("max_tokens") or gptr_config.get("max_tokens")
 
         if not provider or not base_model:
             raise ValueError(f"Model entry missing provider/model: {model_entry}")
