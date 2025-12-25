@@ -119,3 +119,22 @@ class GitHubImportRequest(BaseModel):
     name: Optional[str] = Field(None, description="Name for the content (defaults to filename)")
     description: Optional[str] = None
     tags: list[str] = Field(default_factory=list)
+
+
+class GitHubExportRequest(BaseModel):
+    """Request to export/push content to GitHub."""
+    path: str = Field(..., description="Destination path in repository (e.g., 'outputs/doc.md')")
+    content: str = Field(..., description="File content to push")
+    commit_message: str = Field(default="Exported from ACM2", description="Git commit message")
+    branch: Optional[str] = Field(None, description="Branch to push to (defaults to connection's branch)")
+
+
+class GitHubExportResponse(BaseModel):
+    """Response from exporting content to GitHub."""
+    connection_id: str
+    repo: str
+    branch: str
+    path: str
+    commit_sha: str
+    commit_url: str
+    file_url: str

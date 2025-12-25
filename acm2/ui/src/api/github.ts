@@ -90,6 +90,23 @@ export interface GitHubImportRequest {
   tags?: string[]
 }
 
+export interface GitHubExportRequest {
+  path: string
+  content: string
+  commit_message?: string
+  branch?: string
+}
+
+export interface GitHubExportResponse {
+  connection_id: string
+  repo: string
+  branch: string
+  path: string
+  commit_sha: string
+  commit_url: string
+  file_url: string
+}
+
 // ============================================================================
 // API Functions
 // ============================================================================
@@ -156,5 +173,12 @@ export const githubApi = {
    */
   async importFile(connectionId: string, data: GitHubImportRequest): Promise<ContentDetail> {
     return apiClient.post<ContentDetail>(`/github-connections/${connectionId}/import`, data)
+  },
+
+  /**
+   * Export/push a file to GitHub repository
+   */
+  async exportFile(connectionId: string, data: GitHubExportRequest): Promise<GitHubExportResponse> {
+    return apiClient.post<GitHubExportResponse>(`/github-connections/${connectionId}/export`, data)
   },
 }

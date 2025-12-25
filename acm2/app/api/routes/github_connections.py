@@ -25,6 +25,8 @@ from ..schemas.github_connection import (
     GitHubFileInfo,
     GitHubFileContent,
     GitHubImportRequest,
+    GitHubExportRequest,
+    GitHubExportResponse,
 )
 from ..schemas.content import ContentDetail
 
@@ -485,3 +487,88 @@ async def import_file_as_content(
     except Exception as e:
         logger.exception(f"Error importing file from GitHub")
         raise HTTPException(status_code=500, detail=f"Error importing file: {str(e)}")
+
+
+# ============================================================================
+# Export/Push File to GitHub
+# ============================================================================
+
+@router.post("/{connection_id}/export", response_model=GitHubExportResponse, status_code=201)
+async def export_file_to_github(
+    connection_id: str,
+    data: GitHubExportRequest,
+    db: AsyncSession = Depends(get_db),
+) -> GitHubExportResponse:
+    """
+    Export/push a file to a GitHub repository.
+    
+    Creates a new file or updates an existing one in the connected repository.
+    Useful for pushing generated outputs back to GitHub.
+    """
+    gh_repo = GitHubConnectionRepository(db)
+    connection = await gh_repo.get_by_id(connection_id)
+    
+    if not connection or connection.is_deleted:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    
+    try:
+        from github import Github
+        from github.GithubException import GithubException
+        
+        token = _decrypt_token(connection.token_encrypted)
+        g = Github(token)
+        repository = g.get_repo(connection.repo)
+        
+        # Use specified branch or connection's default
+        branch = data.branch or connection.branch
+        
+        # Clean path
+        path = data.path.strip("/")
+        
+        # Check if file exists (to update) or needs to be created
+        try:
+            existing_file = repository.get_contents(path, ref=branch)
+            # Update existing file
+            result = repository.update_file(
+                path=path,
+                message=data.commit_message,
+                content=data.content,
+                sha=existing_file.sha,
+                branch=branch,
+            )
+            logger.info(f"Updated file {path} in {connection.repo} ({branch})")
+        except GithubException as e:
+            if e.status == 404:
+                # Create new file
+                result = repository.create_file(
+                    path=path,
+                    message=data.commit_message,
+                    content=data.content,
+                    branch=branch,
+                )
+                logger.info(f"Created file {path} in {connection.repo} ({branch})")
+            else:
+                raise
+        
+        # Build response
+        commit = result["commit"]
+        content_info = result["content"]
+        
+        return GitHubExportResponse(
+            connection_id=connection_id,
+            repo=connection.repo,
+            branch=branch,
+            path=path,
+            commit_sha=commit.sha,
+            commit_url=commit.html_url,
+            file_url=content_info.html_url,
+        )
+        
+    except ImportError:
+        raise HTTPException(status_code=500, detail="PyGithub not installed")
+    except GithubException as e:
+        error_msg = e.data.get('message', str(e)) if hasattr(e, 'data') else str(e)
+        raise HTTPException(status_code=400, detail=f"GitHub error: {error_msg}")
+    except Exception as e:
+        logger.exception(f"Error exporting file to GitHub")
+        raise HTTPException(status_code=500, detail=f"Error exporting file: {str(e)}")

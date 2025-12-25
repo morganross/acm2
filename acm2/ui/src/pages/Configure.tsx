@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Save, RotateCcw, Sliders, Play, FileText, Library, ExternalLink } from 'lucide-react'
+import { Save, RotateCcw, Sliders, Play, FileText, Library, ExternalLink, Github } from 'lucide-react'
 import { Button } from '../components/ui/button'
 import { useConfigStore } from '../stores/config'
 import { notify } from '@/stores/notifications'
 import { runsApi } from '@/api/runs'
 import { contentsApi, type ContentSummary } from '@/api/contents'
 import { getConcurrencySettings } from '@/hooks/useSettings'
+import { GitHubFileBrowser } from '@/components/github'
 import { 
   listPresets, 
   createPreset, 
@@ -461,6 +462,16 @@ export default function Configure() {
   const [selectedInstructionId, setSelectedInstructionId] = useState<string | null>(null)
   const [inputDocuments, setInputDocuments] = useState<ContentSummary[]>([])
   const [selectedInputDocIds, setSelectedInputDocIds] = useState<string[]>([])
+  
+  // GitHub integration state
+  const [showGithubBrowser, setShowGithubBrowser] = useState(false)
+  const [githubDocuments, setGithubDocuments] = useState<{
+    id: string
+    name: string
+    path: string
+    connectionId: string
+    content: string
+  }[]>([])
 
   // Load presets and content library on mount
   useEffect(() => {
@@ -524,6 +535,36 @@ export default function Configure() {
         ? prev.filter(d => d !== docId)
         : [...prev, docId]
     )
+  }
+
+  // Handle GitHub file selection
+  const handleGithubFileSelect = (connectionId: string, path: string, content: string) => {
+    const filename = path.split('/').pop() || path
+    const id = `github:${connectionId}:${path}`
+    
+    // Add to github documents if not already there
+    if (!githubDocuments.find(d => d.id === id)) {
+      setGithubDocuments(prev => [...prev, {
+        id,
+        name: filename,
+        path,
+        connectionId,
+        content
+      }])
+    }
+    
+    // Select it
+    if (!selectedInputDocIds.includes(id)) {
+      setSelectedInputDocIds(prev => [...prev, id])
+    }
+    
+    notify.success(`Added "${filename}" from GitHub`)
+  }
+
+  // Remove a GitHub document
+  const removeGithubDoc = (id: string) => {
+    setGithubDocuments(prev => prev.filter(d => d.id !== id))
+    setSelectedInputDocIds(prev => prev.filter(d => d !== id))
   }
 
   const handleSavePreset = async () => {
@@ -856,54 +897,125 @@ export default function Configure() {
                       <p className="text-sm text-gray-400">Select documents to process</p>
                     </div>
                   </div>
-                  <a 
-                    href="/content" 
-                    target="_blank"
-                    className="inline-flex items-center gap-2 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-sm transition-colors"
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                    Add Documents
-                  </a>
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => setShowGithubBrowser(true)}
+                      className="inline-flex items-center gap-2 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-sm transition-colors"
+                    >
+                      <Github className="w-4 h-4" />
+                      From GitHub
+                    </button>
+                    <a 
+                      href="/content" 
+                      target="_blank"
+                      className="inline-flex items-center gap-2 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-sm transition-colors"
+                    >
+                      <ExternalLink className="w-4 h-4" />
+                      Add Local
+                    </a>
+                  </div>
                 </div>
 
-                <div className="p-4">
-                  {inputDocuments.length === 0 ? (
+                <div className="p-4 space-y-3">
+                  {/* GitHub Documents */}
+                  {githubDocuments.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="text-xs font-medium text-gray-400 uppercase tracking-wide">From GitHub</div>
+                      <div className="grid gap-2">
+                        {githubDocuments.map((doc) => (
+                          <label
+                            key={doc.id}
+                            className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors ${
+                              selectedInputDocIds.includes(doc.id)
+                                ? 'bg-purple-500/20 border border-purple-500'
+                                : 'bg-gray-700/50 border border-transparent hover:bg-gray-700'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedInputDocIds.includes(doc.id)}
+                              onChange={() => toggleInputDoc(doc.id)}
+                              className="w-4 h-4 rounded border-gray-600 text-purple-600 focus:ring-purple-500 bg-gray-700"
+                            />
+                            <Github className="w-5 h-5 text-purple-400" />
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium text-gray-200">{doc.name}</div>
+                              <div className="text-xs text-gray-500 line-clamp-1">{doc.path}</div>
+                            </div>
+                            <button
+                              onClick={(e) => { e.preventDefault(); removeGithubDoc(doc.id) }}
+                              className="p-1 hover:bg-red-500/20 text-gray-400 hover:text-red-400 rounded transition-colors"
+                              title="Remove"
+                            >
+                              ×
+                            </button>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Local Documents */}
+                  {inputDocuments.length === 0 && githubDocuments.length === 0 ? (
                     <div className="text-center py-6 text-gray-400">
                       <FileText className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                      <p className="text-sm">No input documents in library</p>
-                      <a href="/content" className="text-blue-400 hover:text-blue-300 text-sm mt-1 inline-block">
-                        Create one in Content Library →
-                      </a>
-                    </div>
-                  ) : (
-                    <div className="grid gap-2 max-h-48 overflow-y-auto">
-                      {inputDocuments.map((doc) => (
-                        <label
-                          key={doc.id}
-                          data-testid={`input-doc-${doc.id}`}
-                          className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors ${
-                            selectedInputDocIds.includes(doc.id)
-                              ? 'bg-blue-500/20 border border-blue-500'
-                              : 'bg-gray-700/50 border border-transparent hover:bg-gray-700'
-                          }`}
+                      <p className="text-sm">No input documents selected</p>
+                      <div className="flex justify-center gap-4 mt-2">
+                        <button 
+                          onClick={() => setShowGithubBrowser(true)}
+                          className="text-purple-400 hover:text-purple-300 text-sm inline-flex items-center gap-1"
                         >
-                          <input
-                            type="checkbox"
-                            checked={selectedInputDocIds.includes(doc.id)}
-                            onChange={() => toggleInputDoc(doc.id)}
-                            className="w-4 h-4 rounded border-gray-600 text-blue-600 focus:ring-blue-500 bg-gray-700"
-                          />
-                          <FileText className="w-5 h-5 text-blue-400" />
-                          <div className="flex-1 min-w-0">
-                            <div className="font-medium text-gray-200">{doc.name}</div>
-                            <div className="text-xs text-gray-500 line-clamp-1">{doc.body_preview}</div>
-                          </div>
-                        </label>
-                      ))}
+                          <Github className="w-3 h-3" /> Import from GitHub
+                        </button>
+                        <a href="/content" className="text-blue-400 hover:text-blue-300 text-sm">
+                          Content Library →
+                        </a>
+                      </div>
+                    </div>
+                  ) : inputDocuments.length > 0 && (
+                    <div className="space-y-2">
+                      {githubDocuments.length > 0 && (
+                        <div className="text-xs font-medium text-gray-400 uppercase tracking-wide">From Content Library</div>
+                      )}
+                      <div className="grid gap-2 max-h-48 overflow-y-auto">
+                        {inputDocuments.map((doc) => (
+                          <label
+                            key={doc.id}
+                            data-testid={`input-doc-${doc.id}`}
+                            className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors ${
+                              selectedInputDocIds.includes(doc.id)
+                                ? 'bg-blue-500/20 border border-blue-500'
+                                : 'bg-gray-700/50 border border-transparent hover:bg-gray-700'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedInputDocIds.includes(doc.id)}
+                              onChange={() => toggleInputDoc(doc.id)}
+                              className="w-4 h-4 rounded border-gray-600 text-blue-600 focus:ring-blue-500 bg-gray-700"
+                            />
+                            <FileText className="w-5 h-5 text-blue-400" />
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium text-gray-200">{doc.name}</div>
+                              <div className="text-xs text-gray-500 line-clamp-1">{doc.body_preview}</div>
+                            </div>
+                          </label>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
               </div>
+
+              {/* GitHub File Browser Modal */}
+              <GitHubFileBrowser
+                isOpen={showGithubBrowser}
+                onClose={() => setShowGithubBrowser(false)}
+                onSelectFile={handleGithubFileSelect}
+                mode="select-file"
+                title="Select Input Document from GitHub"
+                allowedExtensions={['.md', '.txt', '.json', '.xml', '.html', '.csv']}
+              />
             </div>
 
             {/* Column 2: Generate */}

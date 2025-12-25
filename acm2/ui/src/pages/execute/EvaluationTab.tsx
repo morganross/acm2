@@ -1,8 +1,11 @@
-import { FileText, Loader2, X, ExternalLink } from 'lucide-react'
+import { FileText, Loader2, X, ExternalLink, Github } from 'lucide-react'
 import { useState } from 'react'
 import type { Run } from '../../api'
 import type { ExecutionStatus } from './types'
 import { getScoreBadgeStyle } from './utils'
+import { GitHubFileBrowser } from '@/components/github'
+import { githubApi } from '@/api/github'
+import { notify } from '@/stores/notifications'
 
 interface EvaluationTabProps {
   currentRun: Run | null
@@ -28,6 +31,10 @@ export default function EvaluationTab({ currentRun, execStatus }: EvaluationTabP
     loading: false,
     error: null,
   })
+  
+  // GitHub export state
+  const [showGithubExport, setShowGithubExport] = useState(false)
+  const [exporting, setExporting] = useState(false)
 
   const openDocViewer = async (docId: string, model: string) => {
     if (!currentRun?.id) return
@@ -71,6 +78,33 @@ export default function EvaluationTab({ currentRun, execStatus }: EvaluationTabP
       loading: false,
       error: null,
     })
+  }
+
+  // Handle export to GitHub
+  const handleGithubExport = async (connectionId: string, path: string) => {
+    if (!docViewer.content) {
+      notify.error('No content to export')
+      return
+    }
+    
+    setExporting(true)
+    try {
+      const result = await githubApi.exportFile(connectionId, {
+        path,
+        content: docViewer.content,
+        commit_message: `Export generated document: ${docViewer.model}`,
+      })
+      
+      notify.success(`Exported to GitHub: ${result.path}`)
+      setShowGithubExport(false)
+      
+      // Optionally open the file in GitHub
+      window.open(result.file_url, '_blank')
+    } catch (err) {
+      notify.error(err instanceof Error ? err.message : 'Failed to export to GitHub')
+    } finally {
+      setExporting(false)
+    }
   }
 
   // Get new format data
@@ -701,6 +735,18 @@ export default function EvaluationTab({ currentRun, execStatus }: EvaluationTabP
                 {docViewer.content ? `${docViewer.content.length.toLocaleString()} characters` : ''}
               </span>
               <button
+                onClick={() => setShowGithubExport(true)}
+                disabled={!docViewer.content || exporting}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors disabled:opacity-50"
+              >
+                {exporting ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Github className="w-4 h-4" />
+                )}
+                Export to GitHub
+              </button>
+              <button
                 onClick={closeDocViewer}
                 className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg transition-colors"
               >
@@ -710,6 +756,16 @@ export default function EvaluationTab({ currentRun, execStatus }: EvaluationTabP
           </div>
         </div>
       )}
+
+      {/* GitHub Export Browser */}
+      <GitHubFileBrowser
+        isOpen={showGithubExport}
+        onClose={() => setShowGithubExport(false)}
+        onSelectPath={handleGithubExport}
+        mode="select-path"
+        title="Export to GitHub"
+        defaultFilename={`${docViewer.model?.replace(/[^a-zA-Z0-9-_]/g, '_') || 'output'}.md`}
+      />
     </div>
   )
 }
