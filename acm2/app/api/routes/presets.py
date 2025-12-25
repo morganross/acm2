@@ -904,6 +904,8 @@ async def execute_preset(
         eval_concurrency=eval_concurrency_val or preset.eval_concurrency,
         fpf_log_output=preset.fpf_log_output or "file",
         fpf_log_file_path=preset.fpf_log_file_path or f"logs/{run.id}/fpf_output.log",
+        fpf_max_retries=concurrency_cfg.get("fpf_max_retries", 3) if concurrency_cfg else 3,
+        fpf_retry_delay=concurrency_cfg.get("fpf_retry_delay", 1.0) if concurrency_cfg else 1.0,
         post_combine_top_n=preset.post_combine_top_n,
         single_eval_instructions=single_eval_instructions,
         pairwise_eval_instructions=pairwise_eval_instructions,

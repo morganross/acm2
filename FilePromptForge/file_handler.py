@@ -463,6 +463,8 @@ def run(file_a: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
         max_completion_tokens: Optional[int] = None,
         timeout: Optional[int] = None,
+        fpf_max_retries: Optional[int] = None,
+        fpf_retry_delay: Optional[float] = None,
         request_json: Optional[bool] = None) -> str:
     """
     High-level entry point (OpenAI-only).
@@ -665,8 +667,13 @@ def run(file_a: Optional[str] = None,
     # Determine request timeout with provider override > concurrency > defaults
     # If explicit timeout provided via CLI/args, it takes precedence over everything
     timeout_to_use = timeout if timeout is not None else _resolve_timeout(cfg, provider_name)
+    
+    # Resolve FPF retry settings with defaults
+    max_retries_to_use = fpf_max_retries if fpf_max_retries is not None else 3
+    retry_delay_to_use = fpf_retry_delay if fpf_retry_delay is not None else 1.0
 
-    LOG.info("[EXTREME LOGGING] Starting execution for provider=%s model=%s timeout=%s", provider_name, cfg.get("model"), timeout_to_use)
+    LOG.info("[EXTREME LOGGING] Starting execution for provider=%s model=%s timeout=%s max_retries=%s retry_delay=%s", 
+             provider_name, cfg.get("model"), timeout_to_use, max_retries_to_use, retry_delay_to_use)
     LOG.info("[EXTREME LOGGING] Payload keys: %s", list(payload_body.keys()) if isinstance(payload_body, dict) else "not_dict")
 
     if hasattr(provider, "execute_and_verify"):
@@ -678,6 +685,8 @@ def run(file_a: Optional[str] = None,
             headers,
             _ge,
             timeout=timeout_to_use,
+            max_retries=max_retries_to_use,
+            retry_delay=retry_delay_to_use,
         )
         trace("Returned from execute_and_verify")
         LOG.info("[EXTREME LOGGING] provider.execute_and_verify returned. Response type: %s", type(raw_json))

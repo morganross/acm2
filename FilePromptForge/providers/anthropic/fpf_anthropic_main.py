@@ -216,7 +216,7 @@ def parse_response(raw_json: Dict) -> str:
         return str(raw_json)
 
 
-def execute_and_verify(provider_url: str, payload: Dict, headers: Optional[Dict], verify_helpers, timeout: Optional[int] = None, max_retries: int = 3) -> Dict:
+def execute_and_verify(provider_url: str, payload: Dict, headers: Optional[Dict], verify_helpers, timeout: Optional[int] = None, max_retries: int = 3, retry_delay: float = 1.0) -> Dict:
     data = json.dumps(payload).encode("utf-8")
     hdrs = {"Content-Type": "application/json"}
     if headers:
@@ -224,8 +224,9 @@ def execute_and_verify(provider_url: str, payload: Dict, headers: Optional[Dict]
     if "anthropic-version" not in hdrs:
         hdrs["anthropic-version"] = DEFAULT_VERSION
 
-    base_delay_ms = 500
-    max_delay_ms = 30000
+    # Use provided retry_delay as base, converted to ms
+    base_delay_ms = retry_delay * 1000
+    max_delay_ms = max(base_delay_ms * 4, 120000)  # Max 2 minutes or 4x base delay
     last_error: Optional[Exception] = None
 
     for attempt in range(1, max_retries + 1):

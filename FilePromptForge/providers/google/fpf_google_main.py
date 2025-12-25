@@ -314,12 +314,15 @@ def parse_response(raw_json: Dict) -> str:
         import json
         return json.dumps(raw_json, indent=2)
 
-def execute_and_verify(provider_url: str, payload: Dict, headers: Optional[Dict], verify_helpers, timeout: Optional[int] = None, max_retries: int = 3) -> Dict:
+def execute_and_verify(provider_url: str, payload: Dict, headers: Optional[Dict], verify_helpers, timeout: Optional[int] = None, max_retries: int = 3, retry_delay: float = 1.0) -> Dict:
     """
     Execute the Google Gemini request and verify both grounding and reasoning are present.
     Enforces mandatory grounding (google_search) and reasoning at the lowest level.
     
     Includes retry logic with exponential backoff for transient errors (502, 503, 504, etc.)
+    
+    Args:
+        retry_delay: Base delay in seconds between retry attempts (default 1.0)
     """
     import urllib.request
     import urllib.error
@@ -360,7 +363,7 @@ def execute_and_verify(provider_url: str, payload: Dict, headers: Optional[Dict]
         trace("CRITICAL: x-goog-api-key NOT found in headers!")
         LOG.error("x-goog-api-key missing from Google request headers")
 
-    base_delay_ms = 500
+    base_delay_ms = int(retry_delay * 1000)  # Convert retry_delay seconds to milliseconds
     max_delay_ms = 30000
     last_error = None
     

@@ -1136,6 +1136,10 @@ async def start_run(
     if retry_delay is None:
         raise ValueError("concurrency_config.retry_delay must be set in preset")
     
+    # FPF retry settings (with defaults for backwards compatibility)
+    fpf_max_retries = concurrency_config.get("fpf_max_retries", 3)
+    fpf_retry_delay = concurrency_config.get("fpf_retry_delay", 1.0)
+    
     model_settings = {}
     model_names: list[str] = []
     for model_entry in models:
@@ -1160,8 +1164,8 @@ async def start_run(
         }
         model_names.append(key)
 
-    eval_temperature = eval_config.get("temperature") or fpf_cfg.get("temperature")
-    eval_max_tokens = eval_config.get("max_tokens") or fpf_cfg.get("max_tokens")
+    eval_temperature = eval_config.get("temperature") or fpf_config.get("temperature")
+    eval_max_tokens = eval_config.get("max_tokens") or fpf_config.get("max_tokens")
     eval_retries = eval_config.get("retries")
     if eval_retries is None:
         raise ValueError("eval_config.retries must be set in preset")
@@ -1207,6 +1211,8 @@ async def start_run(
         request_timeout=request_timeout,
         max_retries=max_retries,
         retry_delay=retry_delay,
+        fpf_max_retries=fpf_max_retries,
+        fpf_retry_delay=fpf_retry_delay,
     )
     
     background_tasks.add_task(execute_run_background, run_id, executor_config)

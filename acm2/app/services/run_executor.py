@@ -23,6 +23,7 @@ from ..adapters.gptr.adapter import GptrAdapter
 from ..adapters.combine.adapter import CombineAdapter
 from ..adapters.combine.config import CombineConfig
 from ..adapters.base import GenerationConfig, GenerationResult, GeneratorType, ProgressCallback, TaskStatus
+from .rate_limiter import RateLimitedRequest, ProviderRegistry
 from ..evaluation import (
     DocumentInput,
     EvaluationConfig,
@@ -123,6 +124,10 @@ class RunConfig:
     # FPF Logging - Defaults provided
     fpf_log_output: str = "file"  # REQUIRED: 'stream', 'file', or 'none'
     fpf_log_file_path: Optional[str] = None  # REQUIRED if fpf_log_output='file'
+    
+    # FPF Retry settings - Defaults provided
+    fpf_max_retries: int = 3  # Max retries within FPF for API errors
+    fpf_retry_delay: float = 1.0  # Seconds between FPF retry attempts
     
     # Post-Combine Configuration - Optional
     post_combine_top_n: Optional[int] = None  # Optional limit for post-combine eval
@@ -1042,6 +1047,10 @@ class RunExecutor:
             gen_config.extra["temperature"] = temperature
             if timeout:
                 gen_config.extra["timeout"] = timeout
+            
+            # Pass FPF retry settings
+            gen_config.extra["fpf_max_retries"] = self.config.fpf_max_retries
+            gen_config.extra["fpf_retry_delay"] = self.config.fpf_retry_delay
 
             # For FPF: query=instructions, document_content=the document
             # For GPTR: query=the document content (GPTR generates research, not processes docs)
@@ -1069,21 +1078,25 @@ class RunExecutor:
                         safe_task_id = task_id.replace(":", "_")
                         fpf_log_file = str(log_dir / f"fpf_{safe_task_id}.log")
                 
-                gen_result = await adapter.generate(
-                    query=instructions,  # No fallback - already validated
-                    config=gen_config,
-                    document_content=content,
-                    progress_callback=progress_callback,
-                    fpf_log_output=fpf_log_output,
-                    fpf_log_file=fpf_log_file,
-                    run_log_file=run_log_file,
-                )
+                # Apply provider-level rate limiting before making API call
+                async with RateLimitedRequest(provider):
+                    gen_result = await adapter.generate(
+                        query=instructions,  # No fallback - already validated
+                        config=gen_config,
+                        document_content=content,
+                        progress_callback=progress_callback,
+                        fpf_log_output=fpf_log_output,
+                        fpf_log_file=fpf_log_file,
+                        run_log_file=run_log_file,
+                    )
             else:
                 # GPTR and others use query as the research topic
-                gen_result = await adapter.generate(
-                    query=content,
-                    config=gen_config,
-                    progress_callback=progress_callback,
+                # Apply provider-level rate limiting before making API call
+                async with RateLimitedRequest(provider):
+                    gen_result = await adapter.generate(
+                        query=content,
+                        config=gen_config,
+                        progress_callback=progress_callback,
                 )
             
             completed_at = datetime.utcnow()

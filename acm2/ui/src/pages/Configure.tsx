@@ -33,6 +33,7 @@ import {
   MultiAgentPanel,
   EvalPanel,
   CombinePanel,
+  ConcurrencyPanel,
 } from '../components/config'
 
 // Helper to parse model string "provider:model"
@@ -917,6 +918,7 @@ export default function Configure() {
             {/* Evaluate */}
             <div className="space-y-6">
               <EvalPanel />
+              <ConcurrencyPanel />
             </div>
 
             {/* Combine */}

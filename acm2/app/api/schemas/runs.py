@@ -237,9 +237,13 @@ class ConcurrencyConfigComplete(BaseModel):
     request_timeout: Optional[int] = Field(600, ge=60, le=3600, description="Request timeout in seconds")
     eval_timeout: Optional[int] = Field(600, ge=60, le=3600, description="Evaluation timeout in seconds")
     
-    # Retry settings
+    # ACM Retry settings
     max_retries: Optional[int] = Field(3, ge=1, le=10, description="Max retries per model before moving to next")
     retry_delay: Optional[float] = Field(2.0, ge=0.5, le=30.0, description="Seconds to wait between retry attempts")
+    
+    # FPF Retry settings (passed to FPF subprocess)
+    fpf_max_retries: Optional[int] = Field(3, ge=0, le=10, description="Max retries within FPF for API errors")
+    fpf_retry_delay: Optional[float] = Field(1.0, ge=0, le=120.0, description="Seconds to wait between FPF retry attempts")
     
     # Legacy fields for backward compatibility
     max_concurrent: Optional[int] = Field(5, ge=1, le=20, description="Deprecated: use generation_concurrency")

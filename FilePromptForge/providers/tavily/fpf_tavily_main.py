@@ -72,7 +72,7 @@ def _http_get_json(url: str, headers: dict, timeout: Optional[int] = None) -> di
         return json.loads(raw)
 
 
-def execute_and_verify(provider_url: str, payload: dict, headers: dict, verify_helpers, timeout: Optional[int] = None, max_retries: int = 3, verbose: bool = None) -> dict:
+def execute_and_verify(provider_url: str, payload: dict, headers: dict, verify_helpers, timeout: Optional[int] = None, max_retries: int = 3, verbose: bool = None, retry_delay: float = 1.0) -> dict:
     """
     Tavily is asynchronous: POST returns {status: pending, request_id}. We must poll
     GET /research/{request_id} until status == "completed" (or timeout) and then
@@ -84,12 +84,13 @@ def execute_and_verify(provider_url: str, payload: dict, headers: dict, verify_h
         timeout: Polling deadline in seconds (default 300s for long research tasks)
         verbose: If True, emit status updates to stdout for ACM subprocess capture.
                  If None (default), auto-detect from FPF_LOG_OUTPUT env var.
+        retry_delay: Base delay in seconds between retry attempts (default 1.0)
     """
     import sys
     import os
     body = json.dumps(payload).encode("utf-8")
     hdrs = dict(headers or {})
-    base_delay_ms = 500
+    base_delay_ms = int(retry_delay * 1000)  # Convert retry_delay seconds to milliseconds
     max_delay_ms = 30000
     
     # Auto-detect verbose mode from FPF_LOG_OUTPUT if not explicitly set

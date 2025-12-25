@@ -66,6 +66,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--reasoning-effort", dest="reasoning_effort")
     parser.add_argument("--max-completion-tokens", dest="max_completion_tokens", type=int)
     parser.add_argument("--timeout", required=False, dest="timeout", type=int)
+    parser.add_argument("--fpf-max-retries", dest="fpf_max_retries", type=int, default=3)
+    parser.add_argument("--fpf-retry-delay", dest="fpf_retry_delay", type=float, default=1.0)
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--verbose", "-v", action="store_true")
     parser.add_argument("--log-file", dest="log_file")
@@ -91,6 +93,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     reasoning_effort = args.reasoning_effort
     max_completion_tokens = args.max_completion_tokens
     timeout = args.timeout
+    fpf_max_retries = args.fpf_max_retries
+    fpf_retry_delay = args.fpf_retry_delay
     provider = args.provider
     request_json = args.json
 
@@ -107,6 +111,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         reasoning_effort=reasoning_effort,
         max_completion_tokens=max_completion_tokens,
         timeout=timeout,
+        fpf_max_retries=fpf_max_retries,
+        fpf_retry_delay=fpf_retry_delay,
         request_json=request_json,
     )
 

@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from ..adapters.fpf.adapter import FpfAdapter
 from ..adapters.base import GenerationConfig
+from ..services.rate_limiter import RateLimitedRequest
 from .criteria import CriteriaManager, format_criteria_for_prompt
 from .models import (
     CriterionScore,
@@ -248,11 +249,19 @@ class Judge:
                 if self.stats:
                     self.stats.record_call_start("single_eval", f"Evaluating {doc_id} (attempt {attempt + 1})")
                 
+                # Extract provider from model name (format: "provider:model_name")
+                if ":" in self.config.model:
+                    provider, base_model = self.config.model.split(":", 1)
+                else:
+                    # Default to openai if no prefix (legacy format)
+                    provider = "openai"
+                    base_model = self.config.model
+                
                 # Build config for FPF adapter
                 eval_task_id = f"{doc_id}.single_eval.{trial}.{self.config.model}.{uuid4().hex[:6]}"
                 gen_config = GenerationConfig(
-                    provider="openai",
-                    model=self.config.model,
+                    provider=provider,
+                    model=base_model,
                     extra={
                         "max_completion_tokens": self.config.max_tokens,
                         "temperature": self.config.temperature,
@@ -263,17 +272,19 @@ class Judge:
                 )
                 
                 # INSTRUMENTATION: Log before FPF dispatch
-                logger.info(f"[EVAL-DISPATCH] About to call FPF for single_eval: task_id={eval_task_id}, model={self.config.model}, timeout={self.config.timeout_seconds}s")
+                logger.info(f"[EVAL-DISPATCH] About to call FPF for single_eval: task_id={eval_task_id}, provider={provider}, model={base_model}, timeout={self.config.timeout_seconds}s")
                 
                 # Call FPF for evaluation with hard timeout to prevent indefinite hangs
+                # Apply provider-level rate limiting before making API call
                 try:
-                    result = await asyncio.wait_for(
-                        self.fpf.generate(
-                            query=prompt,
-                            config=gen_config,
-                        ),
-                        timeout=float(self.config.timeout_seconds + 30),  # Add buffer over FPF's internal timeout
-                    )
+                    async with RateLimitedRequest(provider):
+                        result = await asyncio.wait_for(
+                            self.fpf.generate(
+                                query=prompt,
+                                config=gen_config,
+                            ),
+                            timeout=float(self.config.timeout_seconds + 30),  # Add buffer over FPF's internal timeout
+                        )
                 except asyncio.TimeoutError:
                     logger.error(f"[EVAL-DISPATCH] HARD TIMEOUT: FPF single_eval call for {eval_task_id} exceeded {self.config.timeout_seconds + 30}s")
                     raise RuntimeError(f"Single eval call timed out after {self.config.timeout_seconds + 30}s for {eval_task_id}")
@@ -398,11 +409,19 @@ class Judge:
                 if self.stats:
                     self.stats.record_call_start("pairwise_eval", f"Comparing {doc_id_1} vs {doc_id_2} (attempt {attempt + 1})")
                 
+                # Extract provider from model name (format: "provider:model_name")
+                if ":" in self.config.model:
+                    provider, base_model = self.config.model.split(":", 1)
+                else:
+                    # Default to openai if no prefix (legacy format)
+                    provider = "openai"
+                    base_model = self.config.model
+                
                 # Build config for FPF adapter
                 pairwise_task_id = f"{doc_id_1}.vs.{doc_id_2}.pairwise.{trial}.{self.config.model}.{uuid4().hex[:6]}"
                 gen_config = GenerationConfig(
-                    provider="openai",
-                    model=self.config.model,
+                    provider=provider,
+                    model=base_model,
                     extra={
                         "max_completion_tokens": self.config.max_tokens,
                         "temperature": self.config.temperature,
@@ -413,17 +432,19 @@ class Judge:
                 )
                 
                 # INSTRUMENTATION: Log before FPF dispatch
-                logger.info(f"[EVAL-DISPATCH] About to call FPF for pairwise_eval: task_id={pairwise_task_id}, model={self.config.model}, timeout={self.config.timeout_seconds}s")
+                logger.info(f"[EVAL-DISPATCH] About to call FPF for pairwise_eval: task_id={pairwise_task_id}, provider={provider}, model={base_model}, timeout={self.config.timeout_seconds}s")
                 
                 # Call FPF for pairwise evaluation with hard timeout
+                # Apply provider-level rate limiting before making API call
                 try:
-                    result = await asyncio.wait_for(
-                        self.fpf.generate(
-                            query=prompt,
-                            config=gen_config,
-                        ),
-                        timeout=float(self.config.timeout_seconds + 30),
-                    )
+                    async with RateLimitedRequest(provider):
+                        result = await asyncio.wait_for(
+                            self.fpf.generate(
+                                query=prompt,
+                                config=gen_config,
+                            ),
+                            timeout=float(self.config.timeout_seconds + 30),
+                        )
                 except asyncio.TimeoutError:
                     logger.error(f"[EVAL-DISPATCH] HARD TIMEOUT: FPF pairwise_eval call for {pairwise_task_id} exceeded {self.config.timeout_seconds + 30}s")
                     raise RuntimeError(f"Pairwise eval call timed out after {self.config.timeout_seconds + 30}s for {pairwise_task_id}")

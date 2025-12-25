@@ -248,6 +248,12 @@ class FpfAdapter(BaseAdapter):
             cmd.extend(["--max-completion-tokens", str(extra["max_completion_tokens"])])
         if extra.get("json_output"):
             cmd.append("--json")
+        
+        # FPF retry settings
+        if "fpf_max_retries" in extra:
+            cmd.extend(["--fpf-max-retries", str(extra["fpf_max_retries"])])
+        if "fpf_retry_delay" in extra:
+            cmd.extend(["--fpf-retry-delay", str(extra["fpf_retry_delay"])])
 
         return cmd
 

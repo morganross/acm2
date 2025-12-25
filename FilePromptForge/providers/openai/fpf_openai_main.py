@@ -374,13 +374,16 @@ def _start_heartbeat(log, fpf_log: Optional[Callable[[str], None]], label: str, 
     return stop_event, thread, _emit
 
 
-def execute_and_verify(provider_url: str, payload: Dict, headers: Optional[Dict], verify_helpers, timeout: Optional[int] = None, max_retries: int = 3) -> Dict:
+def execute_and_verify(provider_url: str, payload: Dict, headers: Optional[Dict], verify_helpers, timeout: Optional[int] = None, max_retries: int = 3, retry_delay: float = 1.0) -> Dict:
     """
     Execute the OpenAI request and verify both grounding and reasoning are present.
     This is a lowest-level enforcement hook that ensures FPF only succeeds when
     the model actually used web search and produced reasoning.
     
     Includes retry logic with exponential backoff for transient errors (502, 503, 504, etc.)
+    
+    Args:
+        retry_delay: Base delay in seconds between retry attempts (default 1.0)
     """
     import urllib.request
     import urllib.error
@@ -403,7 +406,7 @@ def execute_and_verify(provider_url: str, payload: Dict, headers: Optional[Dict]
         hdrs.update(headers)
 
     last_error = None
-    base_delay_ms = 500
+    base_delay_ms = int(retry_delay * 1000)  # Convert retry_delay seconds to milliseconds
     max_delay_ms = 30000
     
     for attempt in range(1, max_retries + 1):

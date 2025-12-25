@@ -15,6 +15,8 @@ export interface ConcurrencySettings {
   evalIterations: number
   fpfLogOutput: 'stream' | 'file' | 'none'
   fpfLogFilePath: string
+  fpfMaxRetries: number
+  fpfRetryDelay: number
   postCombineTopN: number | null
 }
 
@@ -29,6 +31,8 @@ const defaultConcurrency: ConcurrencySettings = {
   evalIterations: 1,
   fpfLogOutput: 'file',
   fpfLogFilePath: 'logs/{run_id}/fpf_output.log',
+  fpfMaxRetries: 3,
+  fpfRetryDelay: 1.0,
   postCombineTopN: 5,  // Enable post-combine eval by default
 }
 
@@ -425,9 +429,47 @@ export default function Settings() {
           </div>
 
           <div className="bg-card border rounded-lg p-4 space-y-4">
-            <h2 className="font-semibold text-foreground">FPF Logging Settings</h2>
+            <h2 className="font-semibold text-foreground">FPF Settings</h2>
             
             <div className="space-y-4">
+              {/* FPF Retry Settings */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">
+                    FPF Max Retries: {concurrency.fpfMaxRetries}
+                  </label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="10"
+                    value={concurrency.fpfMaxRetries}
+                    onChange={(e) => setConcurrency(prev => ({ ...prev, fpfMaxRetries: Number(e.target.value) }))}
+                    className="w-full"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Max retries within FPF for API errors (0 = no retry)
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">
+                    FPF Retry Delay: {concurrency.fpfRetryDelay}s
+                  </label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="120"
+                    step="1"
+                    value={concurrency.fpfRetryDelay}
+                    onChange={(e) => setConcurrency(prev => ({ ...prev, fpfRetryDelay: Number(e.target.value) }))}
+                    className="w-full"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Seconds between FPF retry attempts
+                  </p>
+                </div>
+              </div>
+
+              {/* FPF Logging Settings */}
               <div className="space-y-2">
                 <label className="text-sm font-medium text-foreground">
                   FPF Log Output

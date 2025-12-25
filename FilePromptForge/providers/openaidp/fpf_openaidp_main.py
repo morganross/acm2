@@ -290,9 +290,10 @@ def execute_dp_background(provider_url: str, payload: Dict, headers: Dict, timeo
             return red
         except Exception:
             return {}
-                poll_count += 1
-                if max_polls is not None and poll_count >= max_polls:
-                    raise RuntimeError(f"Background DP task timed out after {int(elapsed)}s (id={response_id})")
+
+    def _truncate(s, n: int = 500) -> str:
+        """Truncate string to n characters with ellipsis."""
+        try:
             if s is None:
                 return ""
             s = str(s)
@@ -394,12 +395,16 @@ def execute_dp_background(provider_url: str, payload: Dict, headers: Dict, timeo
         poll_count += 1
         _time.sleep(polling_interval)
 
-def execute_and_verify(provider_url: str, payload: Dict, headers: Dict, verify_helpers, timeout: Optional[int] = None) -> Dict:
+def execute_and_verify(provider_url: str, payload: Dict, headers: Dict, verify_helpers, timeout: Optional[int] = None, max_retries: int = 3, retry_delay: float = 1.0) -> Dict:
     """
     Execute the OpenAI Deep Research request (background mode) and enforce mandatory
     grounding and reasoning verification (non-configurable).
+    
+    Args:
+        max_retries: Maximum retry attempts (passed for interface consistency, not used in DP)
+        retry_delay: Base delay in seconds between retry attempts (passed for interface consistency)
     """
-    # Reuse provider's background execution flow
+    # Reuse provider's background execution flow (DP has its own polling, doesn't use retry params)
     raw_json = execute_dp_background(provider_url, payload, headers, timeout=timeout)
 
     # Enforce mandatory verification (non-configurable): assert grounding and reasoning.
