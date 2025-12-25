@@ -43,7 +43,6 @@ export interface FpfSettings {
 export interface FpfConfigComplete {
   enabled: boolean;
   selected_models: string[];
-  grounding_level: number;
   max_tokens: number;
   thinking_budget_tokens?: number;
   temperature: number;
@@ -52,7 +51,6 @@ export interface FpfConfigComplete {
   frequency_penalty: number;
   presence_penalty: number;
   stream_response: boolean;
-  use_grounding: boolean;
   include_metadata: boolean;
   save_prompt_history: boolean;
   prompt_template: string;
@@ -153,8 +151,6 @@ export interface ConcurrencyConfigComplete {
   max_concurrent: number;
   launch_delay: number;
   enable_rate_limiting: boolean;
-  max_retries: number;
-  retry_delay: number;
   generation_concurrency: number;
   eval_concurrency: number;
   request_timeout: number | null;

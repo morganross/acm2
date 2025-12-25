@@ -83,25 +83,24 @@ function serializeConfigToPreset(
     });
   }
 
-  // Serialize GeneralConfig - get settings from localStorage
+  // Serialize GeneralConfig - mix of Zustand store and localStorage settings
   const concurrencySettings = getConcurrencySettings();
   const general_config: GeneralConfig = {
-    iterations: concurrencySettings.iterations,
-    eval_iterations: concurrencySettings.evalIterations,
+    iterations: config.general.iterations,
+    eval_iterations: config.eval.iterations,
     output_dir: config.general.outputDir,
     enable_logging: config.general.enableLogging,
     log_level: config.general.logLevel,
     save_intermediate: config.general.saveIntermediate,
     fpf_log_output: concurrencySettings.fpfLogOutput,
     fpf_log_file_path: concurrencySettings.fpfLogFilePath,
-    post_combine_top_n: concurrencySettings.postCombineTopN,
+    post_combine_top_n: config.combine.postCombineTopN,
   };
 
   // Serialize FpfConfig
   const fpf_config: FpfConfig = {
     enabled: config.fpf.enabled,
     selected_models: config.fpf.selectedModels,
-    grounding_level: config.fpf.groundingLevel,
     max_tokens: config.fpf.maxTokens,
     thinking_budget_tokens: config.fpf.thinkingBudget,
     temperature: config.fpf.temperature,
@@ -110,7 +109,6 @@ function serializeConfigToPreset(
     frequency_penalty: config.fpf.frequencyPenalty,
     presence_penalty: config.fpf.presencePenalty,
     stream_response: config.fpf.streamResponse,
-    use_grounding: config.fpf.useGrounding,
     include_metadata: config.fpf.includeMetadata,
     save_prompt_history: config.fpf.savePromptHistory,
     prompt_template: fpfInstructions,
@@ -188,17 +186,15 @@ function serializeConfigToPreset(
     enable_citation: config.eval.enableCitation,
   };
 
-  // Serialize ConcurrencyConfig
+  // Serialize ConcurrencyConfig - use Zustand store values
   const concurrency_config: ConcurrencyConfig = {
     max_concurrent: config.concurrency.maxConcurrent,
     launch_delay: config.concurrency.launchDelay,
     enable_rate_limiting: config.concurrency.enableRateLimiting,
-    max_retries: concurrencySettings.maxRetries,
-    retry_delay: concurrencySettings.retryDelay,
-    generation_concurrency: concurrencySettings.generationConcurrency,
-    eval_concurrency: concurrencySettings.evalConcurrency,
-    request_timeout: concurrencySettings.requestTimeout,
-    eval_timeout: concurrencySettings.evalTimeout,
+    generation_concurrency: config.concurrency.maxConcurrent,
+    eval_concurrency: config.concurrency.evalConcurrency,
+    request_timeout: config.concurrency.requestTimeout,
+    eval_timeout: config.eval.timeoutSeconds,
   };
 
   // Serialize CombineConfig
@@ -295,7 +291,6 @@ function deserializePresetToConfig(
     config.updateFpf({
       enabled: preset.fpf_config.enabled ?? preset.generators?.includes('fpf') ?? config.fpf.enabled,
       selectedModels: preset.fpf_config.selected_models ?? config.fpf.selectedModels,
-      groundingLevel: preset.fpf_config.grounding_level ?? config.fpf.groundingLevel,
       maxTokens: preset.fpf_config.max_tokens ?? config.fpf.maxTokens,
       thinkingBudget: preset.fpf_config.thinking_budget_tokens ?? config.fpf.thinkingBudget,
       temperature: preset.fpf_config.temperature ?? config.fpf.temperature,
@@ -304,7 +299,6 @@ function deserializePresetToConfig(
       frequencyPenalty: preset.fpf_config.frequency_penalty ?? config.fpf.frequencyPenalty,
       presencePenalty: preset.fpf_config.presence_penalty ?? config.fpf.presencePenalty,
       streamResponse: preset.fpf_config.stream_response ?? config.fpf.streamResponse,
-      useGrounding: preset.fpf_config.use_grounding ?? config.fpf.useGrounding,
       includeMetadata: preset.fpf_config.include_metadata ?? config.fpf.includeMetadata,
       savePromptHistory: preset.fpf_config.save_prompt_history ?? config.fpf.savePromptHistory,
     });
@@ -423,10 +417,10 @@ function deserializePresetToConfig(
   if (preset.concurrency_config) {
     config.updateConcurrency({
       maxConcurrent: preset.concurrency_config.max_concurrent ?? config.concurrency.maxConcurrent,
+      evalConcurrency: preset.concurrency_config.eval_concurrency ?? config.concurrency.evalConcurrency,
       launchDelay: preset.concurrency_config.launch_delay ?? config.concurrency.launchDelay,
       enableRateLimiting: preset.concurrency_config.enable_rate_limiting ?? config.concurrency.enableRateLimiting,
-      maxRetries: preset.concurrency_config.max_retries ?? config.concurrency.maxRetries,
-      retryDelay: preset.concurrency_config.retry_delay ?? config.concurrency.retryDelay,
+      requestTimeout: preset.concurrency_config.request_timeout ?? config.concurrency.requestTimeout,
     });
   }
 
@@ -436,6 +430,7 @@ function deserializePresetToConfig(
       enabled: preset.combine_config.enabled ?? config.combine.enabled,
       selectedModels: preset.combine_config.selected_models ?? config.combine.selectedModels,
       combineInstructionsId: (preset as any).combine_instructions_id ?? null,
+      postCombineTopN: (preset.general_config as any)?.post_combine_top_n ?? config.combine.postCombineTopN,
     });
   }
 
@@ -804,13 +799,14 @@ export default function Configure() {
 
       {/* Content */}
       <div className="flex-1 overflow-auto">
-        <div className="max-w-7xl mx-auto px-4 py-6 pb-24">
+        <div className="max-w-[1600px] mx-auto px-4 py-6 pb-24">
 
-          {/* Generate / Evaluate / Combine: 3 columns, always visible */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Generate */}
+          {/* 4-column layout: Setup / Generate / Evaluate / Combine */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            {/* Column 1: Setup */}
             <div className="space-y-6">
               <GeneralPanel />
+              <ConcurrencyPanel />
 
               <div className="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden">
                 <div className="p-4 border-b border-gray-700 flex items-center justify-between">
@@ -908,20 +904,22 @@ export default function Configure() {
                   )}
                 </div>
               </div>
+            </div>
 
+            {/* Column 2: Generate */}
+            <div className="space-y-6">
               <FpfParamsPanel />
               <GptrParamsPanel />
               <DeepResearchPanel />
               <MultiAgentPanel />
             </div>
 
-            {/* Evaluate */}
+            {/* Column 3: Evaluate */}
             <div className="space-y-6">
               <EvalPanel />
-              <ConcurrencyPanel />
             </div>
 
-            {/* Combine */}
+            {/* Column 4: Combine */}
             <div className="space-y-6">
               <CombinePanel />
             </div>

@@ -244,232 +244,26 @@ export default function Settings() {
 
       {activeTab === 'advanced' && (
         <div className="space-y-6">
+          {/* Info Banner */}
+          <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4 flex items-start gap-3">
+            <Info className="w-5 h-5 text-blue-400 mt-0.5 flex-shrink-0" />
+            <div>
+              <h3 className="font-medium text-blue-300">Settings Moved to Build Preset</h3>
+              <p className="text-sm text-blue-200/70 mt-1">
+                Concurrency, timeout, retry, and iteration settings are now configured per-preset on the Build Preset page.
+                This ensures all execution settings are saved together with your preset configuration.
+              </p>
+            </div>
+          </div>
+
+          {/* FPF Logging Settings */}
           <div className="bg-card border rounded-lg p-4 space-y-4">
-            <h2 className="font-semibold text-foreground">Concurrency Settings</h2>
+            <h2 className="font-semibold text-foreground">FPF Logging</h2>
             <p className="text-sm text-muted-foreground">
-              Control how many parallel operations run during document generation and evaluation.
+              Configure how FilePromptForge subprocess output is logged.
             </p>
             
             <div className="space-y-4">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-sm font-medium text-foreground">
-                    Generation Concurrency
-                  </label>
-                  <span className="text-sm font-mono bg-muted px-2 py-0.5 rounded">{concurrency.generationConcurrency}</span>
-                </div>
-                <input
-                  type="range"
-                  min="1"
-                  max="10"
-                  value={concurrency.generationConcurrency}
-                  onChange={(e) => setConcurrency(prev => ({ ...prev, generationConcurrency: Number(e.target.value) }))}
-                  className="w-full"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Max concurrent document generations (FPF/GPTR calls)
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-sm font-medium text-foreground">
-                    Evaluation Concurrency
-                  </label>
-                  <span className="text-sm font-mono bg-muted px-2 py-0.5 rounded">{concurrency.evalConcurrency}</span>
-                </div>
-                <input
-                  type="range"
-                  min="1"
-                  max="10"
-                  value={concurrency.evalConcurrency}
-                  onChange={(e) => setConcurrency(prev => ({ ...prev, evalConcurrency: Number(e.target.value) }))}
-                  className="w-full"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Max concurrent evaluation calls (single-doc and pairwise)
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-card border rounded-lg p-4 space-y-4">
-            <h2 className="font-semibold text-foreground">Timeout & Retry Settings</h2>
-
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-sm font-medium text-foreground">
-                    Request Timeout (seconds)
-                  </label>
-                  <span className="text-sm font-mono bg-muted px-2 py-0.5 rounded">
-                    {concurrency.requestTimeout === null ? 'none' : `${concurrency.requestTimeout}s`}
-                  </span>
-                </div>
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  placeholder="None"
-                  value={concurrency.requestTimeout ?? ''}
-                  onChange={(e) => setConcurrency(prev => ({
-                    ...prev,
-                    requestTimeout: e.target.value === '' ? null : Number(e.target.value)
-                  }))}
-                  className="w-full px-3 py-2 border rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Leave blank for no timeout; when set, this limits a single LLM call
-                </p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">
-                    Max Retries
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="10"
-                    value={concurrency.maxRetries}
-                    onChange={(e) => setConcurrency(prev => ({ ...prev, maxRetries: Number(e.target.value) }))}
-                    className="w-full px-3 py-2 border rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Retry count on transient failures
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">
-                    Retry Delay (seconds)
-                  </label>
-                  <input
-                    type="number"
-                    min="0.5"
-                    max="30"
-                    step="0.5"
-                    value={concurrency.retryDelay}
-                    onChange={(e) => setConcurrency(prev => ({ ...prev, retryDelay: Number(e.target.value) }))}
-                    className="w-full px-3 py-2 border rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Wait time between retries
-                  </p>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-sm font-medium text-foreground">
-                    Evaluation Timeout (seconds)
-                  </label>
-                  <span className="text-sm font-mono bg-muted px-2 py-0.5 rounded">
-                    {concurrency.evalTimeout === null ? 'none' : `${concurrency.evalTimeout}s`}
-                  </span>
-                </div>
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  placeholder="None"
-                  value={concurrency.evalTimeout ?? ''}
-                  onChange={(e) => setConcurrency(prev => ({
-                    ...prev,
-                    evalTimeout: e.target.value === '' ? null : Number(e.target.value)
-                  }))}
-                  className="w-full px-3 py-2 border rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Leave blank for no timeout; when set, this limits evaluation requests
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-card border rounded-lg p-4 space-y-4">
-            <h2 className="font-semibold text-foreground">Iteration Settings</h2>
-            
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">
-                  Generation Iterations
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  max="10"
-                  value={concurrency.iterations}
-                  onChange={(e) => setConcurrency(prev => ({ ...prev, iterations: Number(e.target.value) }))}
-                  className="w-full px-3 py-2 border rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Number of document generation iterations
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">
-                  Evaluation Iterations
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  max="10"
-                  value={concurrency.evalIterations}
-                  onChange={(e) => setConcurrency(prev => ({ ...prev, evalIterations: Number(e.target.value) }))}
-                  className="w-full px-3 py-2 border rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Number of evaluation iterations
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-card border rounded-lg p-4 space-y-4">
-            <h2 className="font-semibold text-foreground">FPF Settings</h2>
-            
-            <div className="space-y-4">
-              {/* FPF Retry Settings */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">
-                    FPF Max Retries: {concurrency.fpfMaxRetries}
-                  </label>
-                  <input
-                    type="range"
-                    min="0"
-                    max="10"
-                    value={concurrency.fpfMaxRetries}
-                    onChange={(e) => setConcurrency(prev => ({ ...prev, fpfMaxRetries: Number(e.target.value) }))}
-                    className="w-full"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Max retries within FPF for API errors (0 = no retry)
-                  </p>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-foreground">
-                    FPF Retry Delay: {concurrency.fpfRetryDelay}s
-                  </label>
-                  <input
-                    type="range"
-                    min="0"
-                    max="120"
-                    step="1"
-                    value={concurrency.fpfRetryDelay}
-                    onChange={(e) => setConcurrency(prev => ({ ...prev, fpfRetryDelay: Number(e.target.value) }))}
-                    className="w-full"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Seconds between FPF retry attempts
-                  </p>
-                </div>
-              </div>
-
-              {/* FPF Logging Settings */}
               <div className="space-y-2">
                 <label className="text-sm font-medium text-foreground">
                   FPF Log Output
@@ -508,33 +302,12 @@ export default function Settings() {
             </div>
           </div>
 
-          <div className="bg-card border rounded-lg p-4 space-y-4">
-            <h2 className="font-semibold text-foreground">Post-Combine Settings</h2>
-            
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">
-                Post-Combine Top-N Limit (optional)
-              </label>
-              <input
-                type="number"
-                min="2"
-                max="20"
-                value={concurrency.postCombineTopN || ''}
-                onChange={(e) => setConcurrency(prev => ({ 
-                  ...prev, 
-                  postCombineTopN: e.target.value ? Number(e.target.value) : null 
-                }))}
-                placeholder="null (compare all)"
-                className="w-full px-3 py-2 border rounded-md bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-              />
-              <p className="text-xs text-muted-foreground">
-                Limit number of documents compared in post-combine evaluation (leave empty for no limit)
-              </p>
-            </div>
-          </div>
-
+          {/* Data Storage */}
           <div className="bg-card border rounded-lg p-4 space-y-4">
             <h2 className="font-semibold text-foreground">Data Storage</h2>
+            <p className="text-sm text-muted-foreground">
+              Read-only paths showing where ACM stores data.
+            </p>
             
             <div className="space-y-2">
               <label className="text-sm font-medium text-foreground">

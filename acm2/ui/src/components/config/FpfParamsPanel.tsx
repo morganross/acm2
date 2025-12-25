@@ -66,16 +66,6 @@ export function FpfParamsPanel() {
           </h4>
 
           <Slider
-            label="Grounding Level"
-            value={config.fpf.groundingLevel}
-            onChange={(val) => config.updateFpf({ groundingLevel: val })}
-            min={0}
-            max={100}
-            step={1}
-            displayValue={`${config.fpf.groundingLevel}%`}
-          />
-
-          <Slider
             label="Temperature"
             value={config.fpf.temperature}
             onChange={(val) => config.updateFpf({ temperature: val })}

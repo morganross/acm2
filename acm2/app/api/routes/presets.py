@@ -863,7 +863,7 @@ async def execute_preset(
     if eval_max_tokens is None:
         raise ValueError(f"Preset {preset.name} has no eval max_tokens configured")
     eval_strict_json = eval_cfg.get("strict_json", True)
-    eval_enable_grounding = eval_cfg.get("enable_grounding", True)
+    # NOTE: eval_enable_grounding removed - FPF always uses grounding
 
     gen_concurrency = concurrency_cfg.get("generation_concurrency") if concurrency_cfg else None
     eval_concurrency_val = concurrency_cfg.get("eval_concurrency") if concurrency_cfg else None
@@ -890,14 +890,11 @@ async def execute_preset(
         eval_temperature=eval_temperature,
         eval_max_tokens=eval_max_tokens,
         eval_strict_json=eval_strict_json,
-        eval_enable_grounding=eval_enable_grounding,
         pairwise_top_n=eval_cfg.get("pairwise_top_n"),
         enable_combine=combine_enabled,
         combine_strategy=combine_strategy or "",
         combine_models=combine_models_list if combine_enabled else [],
         log_level=preset.log_level,
-        max_retries=concurrency_cfg.get("max_retries") if concurrency_cfg else preset.max_retries,
-        retry_delay=concurrency_cfg.get("retry_delay") if concurrency_cfg else preset.retry_delay,
         request_timeout=request_timeout_val or preset.request_timeout,
         eval_timeout=eval_timeout_val or preset.eval_timeout,
         generation_concurrency=gen_concurrency or preset.generation_concurrency,

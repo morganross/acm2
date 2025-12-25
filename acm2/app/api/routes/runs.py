@@ -1129,12 +1129,6 @@ async def start_run(
     request_timeout = concurrency_config.get("request_timeout")
     if request_timeout is None:
         raise ValueError("concurrency_config.request_timeout must be set in preset")
-    max_retries = concurrency_config.get("max_retries")
-    if max_retries is None:
-        raise ValueError("concurrency_config.max_retries must be set in preset")
-    retry_delay = concurrency_config.get("retry_delay")
-    if retry_delay is None:
-        raise ValueError("concurrency_config.retry_delay must be set in preset")
     
     # FPF retry settings (with defaults for backwards compatibility)
     fpf_max_retries = concurrency_config.get("fpf_max_retries", 3)
@@ -1174,7 +1168,7 @@ async def start_run(
     if eval_max_tokens is None:
         raise ValueError("eval_config.max_tokens must be set in preset")
     eval_strict_json = eval_config.get("strict_json", True)
-    eval_enable_grounding = eval_config.get("enable_grounding", True)
+    # NOTE: eval_enable_grounding removed - FPF always uses grounding
 
     executor_config = RunConfig(
         document_ids=list(document_contents.keys()),
@@ -1192,7 +1186,6 @@ async def start_run(
         eval_temperature=eval_temperature,
         eval_max_tokens=eval_max_tokens,
         eval_strict_json=eval_strict_json,
-        eval_enable_grounding=eval_enable_grounding,
         eval_timeout=eval_timeout,
         pairwise_top_n=eval_config.get("pairwise_top_n"),
         single_eval_instructions=single_eval_instructions,
@@ -1209,8 +1202,6 @@ async def start_run(
         generation_concurrency=gen_concurrency,
         eval_concurrency=eval_concurrency_val,
         request_timeout=request_timeout,
-        max_retries=max_retries,
-        retry_delay=retry_delay,
         fpf_max_retries=fpf_max_retries,
         fpf_retry_delay=fpf_retry_delay,
     )

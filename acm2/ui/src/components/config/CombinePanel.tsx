@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Section } from '../ui/section'
 import { Checkbox, CheckboxGroup } from '../ui/checkbox'
-import { Combine as CombineIcon, Cpu, FileText, ExternalLink } from 'lucide-react'
+import { Combine as CombineIcon, Cpu, FileText, ExternalLink, Scale } from 'lucide-react'
 import { useConfigStore } from '../../stores/config'
 import { useModelCatalog } from '../../stores/modelCatalog'
 import { contentsApi, type ContentSummary } from '../../api/contents'
@@ -100,6 +100,14 @@ export function CombinePanel() {
               ))}
             </select>
           )}
+        </div>
+
+        {/* Post-Combine Evaluation Info */}
+        <div className="border-t border-gray-700 pt-4 mt-4" data-section="post-combine-eval">
+          <div className="flex items-center gap-2 text-sm text-gray-400">
+            <Scale className="w-4 h-4" />
+            <span>Post-combine evaluation runs automatically when combine produces documents</span>
+          </div>
         </div>
       </CheckboxGroup>
     </Section>

@@ -107,10 +107,12 @@ class FpfConfigComplete(BaseModel):
     
     NOTE: prompt_template is REMOVED - generation instructions are now
     fetched from Content Library via generation_instructions_id.
+    
+    NOTE: grounding_level and use_grounding REMOVED - FPF always uses
+    grounding, it's mandatory and non-configurable.
     """
     enabled: bool = True
     selected_models: list[str] = Field(default_factory=list, description="REQUIRED from preset")
-    grounding_level: int = Field(5, ge=0, le=100)
     max_tokens: int = Field(32000, ge=1)
     temperature: float = Field(0.7, ge=0, le=2)
     top_p: float = Field(0.95, ge=0, le=1)
@@ -118,7 +120,6 @@ class FpfConfigComplete(BaseModel):
     frequency_penalty: float = Field(0.0, ge=-2, le=2)
     presence_penalty: float = Field(0.0, ge=-2, le=2)
     stream_response: bool = True
-    use_grounding: bool = True
     include_metadata: bool = True
     save_prompt_history: bool = True
 
@@ -236,10 +237,6 @@ class ConcurrencyConfigComplete(BaseModel):
     # Timeouts
     request_timeout: Optional[int] = Field(600, ge=60, le=3600, description="Request timeout in seconds")
     eval_timeout: Optional[int] = Field(600, ge=60, le=3600, description="Evaluation timeout in seconds")
-    
-    # ACM Retry settings
-    max_retries: Optional[int] = Field(3, ge=1, le=10, description="Max retries per model before moving to next")
-    retry_delay: Optional[float] = Field(2.0, ge=0.5, le=30.0, description="Seconds to wait between retry attempts")
     
     # FPF Retry settings (passed to FPF subprocess)
     fpf_max_retries: Optional[int] = Field(3, ge=0, le=10, description="Max retries within FPF for API errors")

@@ -9,7 +9,6 @@ import { create } from 'zustand'
 interface FpfConfig {
   enabled: boolean
   selectedModels: string[]
-  groundingLevel: number
   maxTokens: number
   thinkingBudget: number
   temperature: number
@@ -18,7 +17,6 @@ interface FpfConfig {
   frequencyPenalty: number
   presencePenalty: number
   streamResponse: boolean
-  useGrounding: boolean
   includeMetadata: boolean
   savePromptHistory: boolean
 }
@@ -111,10 +109,10 @@ interface EvalConfig {
 // ============================================================================
 interface ConcurrencyConfig {
   maxConcurrent: number
+  evalConcurrency: number
   launchDelay: number
   enableRateLimiting: boolean
-  maxRetries: number
-  retryDelay: number
+  requestTimeout: number | null
 }
 
 // ============================================================================
@@ -125,6 +123,8 @@ interface CombineConfig {
   selectedModels: string[]
   // Content Library instruction ID
   combineInstructionsId: string | null
+  // Post-combine evaluation settings
+  postCombineTopN: number | null
 }
 
 // ============================================================================
@@ -177,7 +177,6 @@ const defaultGeneral: GeneralConfig = {
 const defaultFpf: FpfConfig = {
   enabled: true,
   selectedModels: [],  // REQUIRED from preset - no hardcoded default
-  groundingLevel: 5,
   maxTokens: 32000,
   thinkingBudget: 2048,
   temperature: 0.7,
@@ -186,7 +185,6 @@ const defaultFpf: FpfConfig = {
   frequencyPenalty: 0.0,
   presencePenalty: 0.0,
   streamResponse: true,
-  useGrounding: true,
   includeMetadata: true,
   savePromptHistory: true,
 }
@@ -263,16 +261,17 @@ const defaultEval: EvalConfig = {
 
 const defaultConcurrency: ConcurrencyConfig = {
   maxConcurrent: 5,
+  evalConcurrency: 5,
   launchDelay: 1.0,
   enableRateLimiting: true,
-  maxRetries: 3,
-  retryDelay: 2.0,
+  requestTimeout: null,
 }
 
 const defaultCombine: CombineConfig = {
   enabled: true,
   selectedModels: [],  // REQUIRED from preset - no hardcoded default
   combineInstructionsId: null,
+  postCombineTopN: 5,
 }
 
 // ============================================================================

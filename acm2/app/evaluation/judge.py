@@ -111,7 +111,7 @@ class JudgeConfig:
     
     # Prompt settings
     strict_json: bool = True
-    enable_grounding: bool = True  # Allow web search for fact-checking
+    # NOTE: enable_grounding removed - FPF always uses grounding, non-configurable
 
 
 def _parse_json_response(text: str) -> Dict[str, Any]:

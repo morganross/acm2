@@ -90,8 +90,6 @@ class RunConfig:
     eval_concurrency: int
     request_timeout: Optional[int]
     eval_timeout: Optional[int]
-    max_retries: int
-    retry_delay: float
     
     # Logging - REQUIRED (no defaults)
     log_level: str
@@ -107,7 +105,7 @@ class RunConfig:
     eval_temperature: Optional[float] = None
     eval_max_tokens: Optional[int] = None
     eval_strict_json: bool = True
-    eval_enable_grounding: bool = True
+    # NOTE: eval_enable_grounding removed - FPF always uses grounding, non-configurable
     pairwise_top_n: Optional[int] = None  # Optional top-N filtering
     
     # Custom evaluation instructions (from Content Library) - Validated based on enabled features
@@ -143,10 +141,6 @@ class RunConfig:
             raise ValueError("iterations must be >= 1 and is required")
         if self.eval_iterations is None or self.eval_iterations < 1:
             raise ValueError("eval_iterations must be >= 1 and is required")
-        if self.max_retries is None or not (1 <= self.max_retries <= 10):
-            raise ValueError("max_retries must be 1-10 and is required")
-        if self.retry_delay is None or not (0.5 <= self.retry_delay <= 30.0):
-            raise ValueError("retry_delay must be 0.5-30.0 and is required")
         if self.generation_concurrency is None or not (1 <= self.generation_concurrency <= 50):
             raise ValueError("generation_concurrency must be 1-50 and is required")
         if self.eval_concurrency is None or not (1 <= self.eval_concurrency <= 50):
@@ -801,7 +795,6 @@ class RunExecutor:
                 max_tokens=config.eval_max_tokens,
                 retries=config.eval_retries,
                 strict_json=config.eval_strict_json,
-                enable_grounding=config.eval_enable_grounding,
             )
             self.logger.info(f"[STATS-DEBUG] Creating SingleDocEvaluator with stats_tracker={self._fpf_stats is not None}")
             single_evaluator = SingleDocEvaluator(eval_config, stats_tracker=self._fpf_stats)
@@ -1286,7 +1279,6 @@ class RunExecutor:
             if not config.combine_models:
                 raise ValueError("No combine models configured")
             
-            max_retries = config.max_retries
             all_models_failed = True
             
             for model_idx, combine_model in enumerate(config.combine_models):
@@ -1314,89 +1306,75 @@ class RunExecutor:
                 )
                 
                 self.logger.info(f"Combining with model {combine_model} ({model_idx + 1}/{len(config.combine_models)})")
-                model_succeeded = False
                 
-                # Retry logic for this specific model
-                for attempt in range(1, max_retries + 1):
-                    combine_started_at = datetime.utcnow()
-                    try:
-                        self.logger.info(f"Combine attempt {attempt}/{max_retries} for {combine_model}")
-                        
-                        combine_result = await combine_adapter.combine(
-                            reports=top_docs,
-                            instructions=combine_instructions,
-                            config=combine_gen_config,
-                            original_instructions=original_instructions
-                        )
-                        combine_completed_at = datetime.utcnow()
-                        combine_duration = (combine_completed_at - combine_started_at).total_seconds()
-                        
-                        result.total_cost_usd += combine_result.cost_usd
-                        
-                        # Create unique doc_id with model info
-                        safe_model_name = combine_model.replace(":", "_")
-                        short_run_id = result.run_id[-8:] if len(result.run_id) >= 8 else result.run_id
-                        file_uuid = str(uuid4())[:4]
-                        combined_doc_id = f"combined.{short_run_id}.{file_uuid}.{safe_model_name}"
-                        
-                        # Create GeneratedDocument for combined content
-                        combined_doc = GeneratedDocument(
-                            doc_id=combined_doc_id,
-                            content=combine_result.content,
-                            generator=GeneratorType.FPF,
-                            model=combine_model,
-                            source_doc_id=result.generated_docs[0].source_doc_id if result.generated_docs else "",
-                            iteration=1,
-                            cost_usd=combine_result.cost_usd,
-                            duration_seconds=combine_duration,
-                            started_at=combine_started_at,
-                            completed_at=combine_completed_at,
-                        )
-                        
-                        # Add to list of combined docs
-                        result.combined_docs.append(combined_doc)
-                        
-                        # Save combined content to file
-                        await self._save_generated_content(result.run_id, combined_doc)
-                        
-                        # Emit combine timeline event
-                        await self._emit_timeline_event(
-                            run_id=result.run_id,
-                            phase="combination",
-                            event_type="combine",
-                            description=f"Combined documents using {combine_model}",
-                            model=combine_model,
-                            timestamp=combine_started_at,
-                            completed_at=combine_completed_at,
-                            duration_seconds=combine_duration,
-                            success=True,
-                            details={"combined_doc_id": combined_doc_id, "attempt": attempt, "model_index": model_idx},
-                        )
-                        
-                        self.logger.info(f"Combine with {combine_model} succeeded on attempt {attempt}. Cost: ${combine_result.cost_usd:.4f}")
-                        model_succeeded = True
-                        all_models_failed = False
-                        break  # Success for this model, move to next model
-                        
-                    except Exception as e:
-                        self.logger.error(f"Combine attempt {attempt}/{max_retries} for {combine_model} failed: {e}")
-                        
-                        if attempt < max_retries:
-                            # Wait before retry with same model
-                            await asyncio.sleep(config.retry_delay)
-                        else:
-                            # All retries exhausted for this model
-                            error_msg = f"Combine with {combine_model} failed after {max_retries} attempts: {str(e)}"
-                            result.errors.append(error_msg)
-                            self.logger.warning(f"{error_msg} - will try next model if available")
-                
-                # Continue to next model to get multiple combined docs for comparison
-                if model_succeeded:
-                    self.logger.info(f"Combine with {combine_model} succeeded, continuing to next model")
+                # Single attempt per model - FPF handles transient HTTP retries internally
+                combine_started_at = datetime.utcnow()
+                try:
+                    self.logger.info(f"Combining with {combine_model}")
+                    
+                    combine_result = await combine_adapter.combine(
+                        reports=top_docs,
+                        instructions=combine_instructions,
+                        config=combine_gen_config,
+                        original_instructions=original_instructions
+                    )
+                    combine_completed_at = datetime.utcnow()
+                    combine_duration = (combine_completed_at - combine_started_at).total_seconds()
+                    
+                    result.total_cost_usd += combine_result.cost_usd
+                    
+                    # Create unique doc_id with model info
+                    safe_model_name = combine_model.replace(":", "_")
+                    short_run_id = result.run_id[-8:] if len(result.run_id) >= 8 else result.run_id
+                    file_uuid = str(uuid4())[:4]
+                    combined_doc_id = f"combined.{short_run_id}.{file_uuid}.{safe_model_name}"
+                    
+                    # Create GeneratedDocument for combined content
+                    combined_doc = GeneratedDocument(
+                        doc_id=combined_doc_id,
+                        content=combine_result.content,
+                        generator=GeneratorType.FPF,
+                        model=combine_model,
+                        source_doc_id=result.generated_docs[0].source_doc_id if result.generated_docs else "",
+                        iteration=1,
+                        cost_usd=combine_result.cost_usd,
+                        duration_seconds=combine_duration,
+                        started_at=combine_started_at,
+                        completed_at=combine_completed_at,
+                    )
+                    
+                    # Add to list of combined docs
+                    result.combined_docs.append(combined_doc)
+                    
+                    # Save combined content to file
+                    await self._save_generated_content(result.run_id, combined_doc)
+                    
+                    # Emit combine timeline event
+                    await self._emit_timeline_event(
+                        run_id=result.run_id,
+                        phase="combination",
+                        event_type="combine",
+                        description=f"Combined documents using {combine_model}",
+                        model=combine_model,
+                        timestamp=combine_started_at,
+                        completed_at=combine_completed_at,
+                        duration_seconds=combine_duration,
+                        success=True,
+                        details={"combined_doc_id": combined_doc_id, "model_index": model_idx},
+                    )
+                    
+                    self.logger.info(f"Combine with {combine_model} succeeded. Cost: ${combine_result.cost_usd:.4f}")
+                    all_models_failed = False
+                    
+                except Exception as e:
+                    self.logger.error(f"Combine with {combine_model} failed: {e}")
+                    error_msg = f"Combine with {combine_model} failed: {str(e)}"
+                    result.errors.append(error_msg)
+                    self.logger.warning(f"{error_msg} - will try next model if available")
             
             # Check if all models failed
             if all_models_failed:
-                raise RuntimeError(f"All {len(config.combine_models)} combine models failed after {max_retries} retries each")
+                raise RuntimeError(f"All {len(config.combine_models)} combine models failed")
             
             self.logger.info(f"Combine phase complete. Total combined docs: {len(result.combined_docs)}")
             
@@ -1414,6 +1392,9 @@ class RunExecutor:
         
         Compares combined documents against the top-ranked originals that were sent to the combiner.
         This validates whether combining improved quality vs individual winners.
+        
+        Post-combine eval is MANDATORY when combine produces documents - it validates that
+        combining actually improved quality over the individual winners.
         """
         if not result.combined_docs:
             self.logger.warning("Post-combine eval skipped: No combined documents produced")
@@ -1423,17 +1404,15 @@ class RunExecutor:
             self.logger.info("Post-combine eval skipped: Pairwise evaluation disabled in config")
             return
 
-        if config.post_combine_top_n is None:
-            self.logger.info("Post-combine eval skipped: post_combine_top_n not configured")
-            return
+        # Post-combine eval is mandatory when combined docs exist - no opt-out
+        self.logger.info("Post-combine eval starting: comparing combined docs against source documents")
 
         try:
-            # Create pairwise config with same settings as pre-combine
-            # Use post_combine_top_n if configured, otherwise compare all
+            # Create pairwise config - top_n not used since we compare all docs in pool
             pairwise_config = PairwiseConfig(
                 iterations=config.eval_iterations,
                 judge_models=config.eval_judge_models,
-                top_n=config.post_combine_top_n,  # Use config value, not hardcoded None
+                top_n=None,  # Compare all docs in pool (originals + combined)
                 custom_instructions=config.pairwise_eval_instructions,
                 concurrent_limit=config.eval_concurrency,
             )

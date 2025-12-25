@@ -30,7 +30,7 @@ class SingleEvalConfig:
     timeout_seconds: int = 600  # Per-call timeout (GUI EvalPanel)
     retries: int = 0
     strict_json: bool = True
-    enable_grounding: bool = True
+    # NOTE: enable_grounding removed - FPF always uses grounding, non-configurable
     
     # Custom instructions from Content Library
     custom_instructions: Optional[str] = None
@@ -45,7 +45,6 @@ class SingleEvalConfig:
             timeout_seconds=self.timeout_seconds,
             retries=self.retries,
             strict_json=self.strict_json,
-            enable_grounding=self.enable_grounding,
         )
 
 

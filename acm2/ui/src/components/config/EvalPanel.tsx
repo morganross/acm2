@@ -102,7 +102,7 @@ export function EvalPanel() {
           />
 
           <Slider
-            label="Retries"
+            label="Extra Retries (JSON/Parse Errors)"
             value={config.eval.retries}
             onChange={(val) => config.updateEval({ retries: val })}
             min={0}
@@ -110,6 +110,7 @@ export function EvalPanel() {
             step={1}
             displayValue={`${config.eval.retries} retries`}
           />
+          <p className="text-xs text-gray-500">Additional retries for malformed LLM responses. HTTP errors use FPF's built-in retry.</p>
         </div>
 
         {/* Judge Model Selection */}

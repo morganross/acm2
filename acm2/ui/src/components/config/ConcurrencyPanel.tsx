@@ -1,7 +1,7 @@
 import { Section } from '../ui/section'
 import { Slider } from '../ui/slider'
 import { Checkbox } from '../ui/checkbox'
-import { Zap, Clock, RefreshCw } from 'lucide-react'
+import { Zap, Clock, Timer } from 'lucide-react'
 import { useConfigStore } from '../../stores/config'
 
 export function ConcurrencyPanel() {
@@ -21,13 +21,23 @@ export function ConcurrencyPanel() {
           </h4>
 
           <Slider
-            label="Max Concurrent Requests"
+            label="Generation Concurrency"
             value={config.concurrency.maxConcurrent}
             onChange={(val) => config.updateConcurrency({ maxConcurrent: val })}
             min={1}
             max={20}
             step={1}
             displayValue={`${config.concurrency.maxConcurrent} concurrent`}
+          />
+
+          <Slider
+            label="Evaluation Concurrency"
+            value={config.concurrency.evalConcurrency}
+            onChange={(val) => config.updateConcurrency({ evalConcurrency: val })}
+            min={1}
+            max={10}
+            step={1}
+            displayValue={`${config.concurrency.evalConcurrency} concurrent`}
           />
 
           <Slider
@@ -54,32 +64,35 @@ export function ConcurrencyPanel() {
           />
         </div>
 
-        {/* Retry Settings */}
+        {/* Timeout Settings */}
         <div className="space-y-3 border-t border-gray-700 pt-4">
           <h4 className="text-sm font-semibold text-gray-300 flex items-center gap-2">
-            <RefreshCw className="w-4 h-4" /> Retry Settings
+            <Timer className="w-4 h-4" /> Timeout Settings
           </h4>
 
-          <Slider
-            label="Max Retries"
-            value={config.concurrency.maxRetries}
-            onChange={(val) => config.updateConcurrency({ maxRetries: val })}
-            min={0}
-            max={10}
-            step={1}
-            displayValue={`${config.concurrency.maxRetries} retries`}
-          />
-
-          <Slider
-            label="Retry Delay (seconds)"
-            value={config.concurrency.retryDelay}
-            onChange={(val) => config.updateConcurrency({ retryDelay: val })}
-            min={0.5}
-            max={10.0}
-            step={0.5}
-            displayValue={`${config.concurrency.retryDelay.toFixed(1)}s`}
-          />
+          <div className="space-y-1">
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-300">Request Timeout</span>
+              <span className="font-mono text-blue-400">
+                {config.concurrency.requestTimeout === null ? 'none' : `${config.concurrency.requestTimeout}s`}
+              </span>
+            </div>
+            <input
+              type="number"
+              min="0"
+              step="1"
+              placeholder="None (no timeout)"
+              value={config.concurrency.requestTimeout ?? ''}
+              onChange={(e) => config.updateConcurrency({
+                requestTimeout: e.target.value === '' ? null : Number(e.target.value)
+              })}
+              className="w-full rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-sm text-gray-200 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+            <p className="text-xs text-gray-500">Timeout for generation requests (blank = no limit)</p>
+          </div>
         </div>
+
+
       </div>
     </Section>
   )
