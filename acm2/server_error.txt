@@ -1,0 +1,255 @@
+2025-12-25 20:49:07,322 - app.main - INFO - Serving UI static files from: C:\dev\godzilla\acm2\acm2\ui\dist
+2025-12-25 20:49:07,423 - app.main - INFO - Serving UI static files from: C:\dev\godzilla\acm2\acm2\ui\dist
+INFO:     Started server process [17036]
+INFO:     Waiting for application startup.
+2025-12-25 20:49:07,471 - app.main - INFO - Starting ACM2 API server...
+2025-12-25 20:49:07,479 - app.main - INFO - Database tables initialized
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8002 (Press CTRL+C to quit)
+2025-12-25 20:50:23,047 - app.api.routes.runs - INFO - Loading config from preset: gptr (id=6649c152-1b72-44c8-abeb-44c453d827d3)
+2025-12-25 20:50:23,054 - app.api.routes.runs - INFO - DEBUG: RunCreate fields: dict_keys(['name', 'description', 'preset_id', 'document_ids', 'generators', 'models', 'iterations', 'log_level', 'gptr_settings', 'fpf_settings', 'evaluation', 'pairwise', 'combine', 'tags'])
+2025-12-25 20:50:23,054 - app.api.routes.runs - INFO - DEBUG: Has config_overrides? False | merged keys: ['general', 'fpf', 'gptr', 'dr', 'ma', 'eval', 'pairwise', 'combine', 'concurrency']
+2025-12-25 20:50:23,054 - app.api.routes.runs - INFO - DEBUG: Preset post_combine_top_n: None
+2025-12-25 20:50:29,852 - app.api.routes.runs - INFO - Document found in Content Library: 0dd19fd9-45f8-456a-822f-44517469e725 -> Sample Policy Document
+2025-12-25 20:50:29,853 - app.api.routes.runs - INFO - Loaded generation instructions from Content Library: Web Search Generation Instructions
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "C:\dev\godzilla\.venv\Lib\site-packages\uvicorn\protocols\http\h11_impl.py", line 410, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        self.scope, self.receive, self.send
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\dev\godzilla\.venv\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\dev\godzilla\.venv\Lib\site-packages\fastapi\applications.py", line 1135, in __call__
+    await super().__call__(scope, receive, send)
+  File "C:\dev\godzilla\.venv\Lib\site-packages\starlette\applications.py", line 107, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\dev\godzilla\.venv\Lib\site-packages\starlette\middleware\errors.py", line 186, in __call__
+    raise exc
+  File "C:\dev\godzilla\.venv\Lib\site-packages\starlette\middleware\errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "C:\dev/godzilla/acm2/acm2\app\middleware\auth.py", line 30, in __call__
+    await self.app(scope, receive, send)
+  File "C:\dev/godzilla/acm2/acm2\app\middleware\auth.py", line 88, in __call__
+    await self.app(scope, receive, send)
+  File "C:\dev\godzilla\.venv\Lib\site-packages\starlette\middleware\cors.py", line 85, in __call__
+    await self.app(scope, receive, send)
+  File "C:\dev\godzilla\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "C:\dev\godzilla\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\dev\godzilla\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\dev\godzilla\.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "C:\dev\godzilla\.venv\Lib\site-packages\starlette\routing.py", line 716, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\dev\godzilla\.venv\Lib\site-packages\starlette\routing.py", line 736, in app
+    await route.handle(scope, receive, send)
+  File "C:\dev\godzilla\.venv\Lib\site-packages\starlette\routing.py", line 290, in handle
+    await self.app(scope, receive, send)
+  File "C:\dev\godzilla\.venv\Lib\site-packages\fastapi\routing.py", line 119, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "C:\dev\godzilla\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\dev\godzilla\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\dev\godzilla\.venv\Lib\site-packages\fastapi\routing.py", line 105, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\dev\godzilla\.venv\Lib\site-packages\fastapi\routing.py", line 426, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "C:\dev\godzilla\.venv\Lib\site-packages\fastapi\routing.py", line 312, in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\dev/godzilla/acm2/acm2\app\api\routes\runs.py", line 1120, in start_run
+    raise ValueError("combine_config.selected_models must be set when combine is enabled")
+ValueError: combine_config.selected_models must be set when combine is enabled
+2025-12-25 20:50:57,484 - app.api.routes.runs - INFO - Loading config from preset: gptr (id=6649c152-1b72-44c8-abeb-44c453d827d3)
+2025-12-25 20:50:57,489 - app.api.routes.runs - INFO - DEBUG: RunCreate fields: dict_keys(['name', 'description', 'preset_id', 'document_ids', 'generators', 'models', 'iterations', 'log_level', 'gptr_settings', 'fpf_settings', 'evaluation', 'pairwise', 'combine', 'tags'])
+2025-12-25 20:50:57,489 - app.api.routes.runs - INFO - DEBUG: Has config_overrides? False | merged keys: ['general', 'fpf', 'gptr', 'dr', 'ma', 'eval', 'pairwise', 'combine', 'concurrency']
+2025-12-25 20:50:57,489 - app.api.routes.runs - INFO - DEBUG: Preset post_combine_top_n: None
+2025-12-25 20:50:59,570 - app.api.routes.runs - INFO - Document found in Content Library: 0dd19fd9-45f8-456a-822f-44517469e725 -> Sample Policy Document
+2025-12-25 20:50:59,571 - app.api.routes.runs - INFO - Loaded generation instructions from Content Library: Web Search Generation Instructions
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "C:\dev\godzilla\.venv\Lib\site-packages\uvicorn\protocols\http\h11_impl.py", line 410, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        self.scope, self.receive, self.send
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\dev\godzilla\.venv\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\dev\godzilla\.venv\Lib\site-packages\fastapi\applications.py", line 1135, in __call__
+    await super().__call__(scope, receive, send)
+  File "C:\dev\godzilla\.venv\Lib\site-packages\starlette\applications.py", line 107, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\dev\godzilla\.venv\Lib\site-packages\starlette\middleware\errors.py", line 186, in __call__
+    raise exc
+  File "C:\dev\godzilla\.venv\Lib\site-packages\starlette\middleware\errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "C:\dev/godzilla/acm2/acm2\app\middleware\auth.py", line 30, in __call__
+    await self.app(scope, receive, send)
+  File "C:\dev/godzilla/acm2/acm2\app\middleware\auth.py", line 88, in __call__
+    await self.app(scope, receive, send)
+  File "C:\dev\godzilla\.venv\Lib\site-packages\starlette\middleware\cors.py", line 85, in __call__
+    await self.app(scope, receive, send)
+  File "C:\dev\godzilla\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "C:\dev\godzilla\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\dev\godzilla\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\dev\godzilla\.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "C:\dev\godzilla\.venv\Lib\site-packages\starlette\routing.py", line 716, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\dev\godzilla\.venv\Lib\site-packages\starlette\routing.py", line 736, in app
+    await route.handle(scope, receive, send)
+  File "C:\dev\godzilla\.venv\Lib\site-packages\starlette\routing.py", line 290, in handle
+    await self.app(scope, receive, send)
+  File "C:\dev\godzilla\.venv\Lib\site-packages\fastapi\routing.py", line 119, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "C:\dev\godzilla\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\dev\godzilla\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\dev\godzilla\.venv\Lib\site-packages\fastapi\routing.py", line 105, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\dev\godzilla\.venv\Lib\site-packages\fastapi\routing.py", line 426, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "C:\dev\godzilla\.venv\Lib\site-packages\fastapi\routing.py", line 312, in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\dev/godzilla/acm2/acm2\app\api\routes\runs.py", line 1132, in start_run
+    raise ValueError("concurrency_config.request_timeout must be set in preset")
+ValueError: concurrency_config.request_timeout must be set in preset
+2025-12-25 20:51:31,836 - app.api.routes.runs - INFO - Loading config from preset: gptr (id=6649c152-1b72-44c8-abeb-44c453d827d3)
+2025-12-25 20:51:31,837 - app.api.routes.runs - INFO - DEBUG: RunCreate fields: dict_keys(['name', 'description', 'preset_id', 'document_ids', 'generators', 'models', 'iterations', 'log_level', 'gptr_settings', 'fpf_settings', 'evaluation', 'pairwise', 'combine', 'tags'])
+2025-12-25 20:51:31,838 - app.api.routes.runs - INFO - DEBUG: Has config_overrides? False | merged keys: ['general', 'fpf', 'gptr', 'dr', 'ma', 'eval', 'pairwise', 'combine', 'concurrency']
+2025-12-25 20:51:31,838 - app.api.routes.runs - INFO - DEBUG: Preset post_combine_top_n: None
+2025-12-25 20:51:33,913 - app.api.routes.runs - INFO - Document found in Content Library: 0dd19fd9-45f8-456a-822f-44517469e725 -> Sample Policy Document
+2025-12-25 20:51:33,914 - app.api.routes.runs - INFO - Loaded generation instructions from Content Library: Web Search Generation Instructions
+2025-12-25 20:51:33,930 - app.evaluation.judge - INFO - [STATS-DEBUG] record_call_start called: phase=generation, desc=Generating 0dd19fd9-45f8-456a-822f-44517469e725 with openai:gpt-5.1
+2025-12-25 20:51:33,931 - app.evaluation.judge - INFO - [STATS-DEBUG] _notify: callback=<lambda>, bound_to=NO_SELF, id=2640625099744
+2025-12-25 20:51:33,931 - app.evaluation.judge - INFO - [STATS-DEBUG] Calling _on_update callback
+2025-12-25 20:51:33,932 - app.evaluation.judge - INFO - [STATS-DEBUG] _on_update callback completed
+2025-12-25 20:51:33,933 - app.services.rate_limiter - INFO - [RATE-LIMIT] Initialized ProviderRegistry with 4 providers: ['anthropic', 'openai', 'google', 'openrouter']
+2025-12-25 20:51:33,933 - app.services.rate_limiter - INFO - [RATE-LIMIT] Provider openai: ACQUIRED slot (in_flight=1/5)
+2025-12-25 20:51:33,937 - app.adapters.fpf.adapter - INFO - FPF adapter: task_id='0dd19fd9-45f8-456a-822f-44517469e725.fpf.1.openai:gpt-5.1' safe_task_id='0dd19fd9-45f8-456a-822f-44517469e725.fpf.1.openai_gpt-5.1'
+2025-12-25 20:51:33,944 - app.evaluation.judge - INFO - [STATS-DEBUG] record_call_start called: phase=generation, desc=Generating 0dd19fd9-45f8-456a-822f-44517469e725 with google:gemini-3-pro-preview
+2025-12-25 20:51:33,945 - app.evaluation.judge - INFO - [STATS-DEBUG] _notify: callback=<lambda>, bound_to=NO_SELF, id=2640625099744
+2025-12-25 20:51:33,945 - app.evaluation.judge - INFO - [STATS-DEBUG] Calling _on_update callback
+2025-12-25 20:51:33,945 - app.evaluation.judge - INFO - [STATS-DEBUG] _on_update callback completed
+2025-12-25 20:51:33,946 - app.services.rate_limiter - INFO - [RATE-LIMIT] Provider google: ACQUIRED slot (in_flight=1/5)
+2025-12-25 20:51:33,947 - app.adapters.fpf.adapter - INFO - FPF adapter: task_id='0dd19fd9-45f8-456a-822f-44517469e725.fpf.1.google:gemini-3-pro-preview' safe_task_id='0dd19fd9-45f8-456a-822f-44517469e725.fpf.1.google_gemini-3-pro-preview'
+2025-12-25 20:51:33,954 - app.evaluation.judge - INFO - [STATS-DEBUG] record_call_start called: phase=generation, desc=Generating 0dd19fd9-45f8-456a-822f-44517469e725 with openai:gpt-5.1
+2025-12-25 20:51:33,955 - app.evaluation.judge - INFO - [STATS-DEBUG] _notify: callback=<lambda>, bound_to=NO_SELF, id=2640625099744
+2025-12-25 20:51:33,955 - app.evaluation.judge - INFO - [STATS-DEBUG] Calling _on_update callback
+2025-12-25 20:51:33,955 - app.evaluation.judge - INFO - [STATS-DEBUG] _on_update callback completed
+2025-12-25 20:51:33,956 - app.services.rate_limiter - INFO - [RATE-LIMIT] Provider openai: Waiting 1.0s (min_delay=1.0s, elapsed=0.0s)
+2025-12-25 20:51:33,956 - app.evaluation.judge - INFO - [STATS-DEBUG] record_call_start called: phase=generation, desc=Generating 0dd19fd9-45f8-456a-822f-44517469e725 with google:gemini-3-pro-preview
+2025-12-25 20:51:33,956 - app.evaluation.judge - INFO - [STATS-DEBUG] _notify: callback=<lambda>, bound_to=NO_SELF, id=2640625099744
+2025-12-25 20:51:33,957 - app.evaluation.judge - INFO - [STATS-DEBUG] Calling _on_update callback
+2025-12-25 20:51:33,958 - app.evaluation.judge - INFO - [STATS-DEBUG] _on_update callback completed
+2025-12-25 20:51:33,958 - app.services.rate_limiter - INFO - [RATE-LIMIT] Provider google: Waiting 1.0s (min_delay=1.0s, elapsed=0.0s)
+2025-12-25 20:51:33,958 - app.evaluation.judge - INFO - [STATS-DEBUG] record_call_start called: phase=generation, desc=Generating 0dd19fd9-45f8-456a-822f-44517469e725 with openai:gpt-5.1
+2025-12-25 20:51:33,959 - app.evaluation.judge - INFO - [STATS-DEBUG] _notify: callback=<lambda>, bound_to=NO_SELF, id=2640625099744
+2025-12-25 20:51:33,959 - app.evaluation.judge - INFO - [STATS-DEBUG] Calling _on_update callback
+2025-12-25 20:51:33,960 - app.evaluation.judge - INFO - [STATS-DEBUG] _on_update callback completed
+2025-12-25 20:51:33,961 - app.evaluation.judge - INFO - [STATS-DEBUG] _notify: callback=<lambda>, bound_to=NO_SELF, id=2640625099744
+2025-12-25 20:51:33,962 - app.evaluation.judge - INFO - [STATS-DEBUG] Calling _on_update callback
+2025-12-25 20:51:33,962 - app.evaluation.judge - INFO - [STATS-DEBUG] _on_update callback completed
+2025-12-25 20:51:33,962 - app.evaluation.judge - INFO - [STATS-DEBUG] record_call_start called: phase=generation, desc=Generating 0dd19fd9-45f8-456a-822f-44517469e725 with google:gemini-3-pro-preview
+2025-12-25 20:51:33,963 - app.evaluation.judge - INFO - [STATS-DEBUG] _notify: callback=<lambda>, bound_to=NO_SELF, id=2640625099744
+2025-12-25 20:51:33,963 - app.evaluation.judge - INFO - [STATS-DEBUG] Calling _on_update callback
+2025-12-25 20:51:33,963 - app.evaluation.judge - INFO - [STATS-DEBUG] _on_update callback completed
+2025-12-25 20:51:33,964 - app.evaluation.judge - INFO - [STATS-DEBUG] _notify: callback=<lambda>, bound_to=NO_SELF, id=2640625099744
+2025-12-25 20:51:33,965 - app.evaluation.judge - INFO - [STATS-DEBUG] Calling _on_update callback
+2025-12-25 20:51:33,965 - app.evaluation.judge - INFO - [STATS-DEBUG] _on_update callback completed
+2025-12-25 20:51:33,965 - app.api.websockets - INFO - [WS] Broadcasting to run e730d1c9-c8dc-4b57-b4d8-8034e4130c7d: 0 connections. Event: fpf_stats_update
+2025-12-25 20:51:33,966 - app.api.websockets - INFO - [WS] Broadcasting to run e730d1c9-c8dc-4b57-b4d8-8034e4130c7d: 0 connections. Event: fpf_stats_update
+2025-12-25 20:51:33,966 - app.api.websockets - INFO - [WS] Broadcasting to run e730d1c9-c8dc-4b57-b4d8-8034e4130c7d: 0 connections. Event: fpf_stats_update
+2025-12-25 20:51:33,967 - app.api.websockets - INFO - [WS] Broadcasting to run e730d1c9-c8dc-4b57-b4d8-8034e4130c7d: 0 connections. Event: fpf_stats_update
+2025-12-25 20:51:33,967 - app.api.websockets - INFO - [WS] Broadcasting to run e730d1c9-c8dc-4b57-b4d8-8034e4130c7d: 0 connections. Event: fpf_stats_update
+2025-12-25 20:51:33,967 - app.api.websockets - INFO - [WS] Broadcasting to run e730d1c9-c8dc-4b57-b4d8-8034e4130c7d: 0 connections. Event: fpf_stats_update
+2025-12-25 20:51:33,967 - app.api.websockets - INFO - [WS] Broadcasting to run e730d1c9-c8dc-4b57-b4d8-8034e4130c7d: 0 connections. Event: fpf_stats_update
+2025-12-25 20:51:33,968 - app.api.websockets - INFO - [WS] Broadcasting to run e730d1c9-c8dc-4b57-b4d8-8034e4130c7d: 0 connections. Event: fpf_stats_update
+2025-12-25 20:51:34,947 - app.services.rate_limiter - INFO - [RATE-LIMIT] Provider openai: ACQUIRED slot (in_flight=2/5)
+2025-12-25 20:51:34,960 - app.services.rate_limiter - INFO - [RATE-LIMIT] Provider google: ACQUIRED slot (in_flight=2/5)
+2025-12-25 20:51:56,893 - app.adapters.gptr.adapter - ERROR - GPT-R Adapter execution error
+Traceback (most recent call last):
+  File "C:\dev/godzilla/acm2/acm2\app\adapters\gptr\adapter.py", line 159, in generate
+    stdout_str = stdout.decode().strip()
+                 ^^^^^^^^^^^^^
+AttributeError: 'str' object has no attribute 'decode'. Did you mean: 'encode'?
+2025-12-25 20:51:56,899 - app.services.rate_limiter - INFO - [RATE-LIMIT] Provider openai: RELEASED slot (in_flight=1/5)
+2025-12-25 20:51:56,899 - app.evaluation.judge - INFO - [STATS-DEBUG] _notify: callback=<lambda>, bound_to=NO_SELF, id=2640625099744
+2025-12-25 20:51:56,900 - app.evaluation.judge - INFO - [STATS-DEBUG] Calling _on_update callback
+2025-12-25 20:51:56,900 - app.evaluation.judge - INFO - [STATS-DEBUG] _on_update callback completed
+2025-12-25 20:51:56,906 - app.api.websockets - INFO - [WS] Broadcasting to run e730d1c9-c8dc-4b57-b4d8-8034e4130c7d: 0 connections. Event: fpf_stats_update
+2025-12-25 20:51:56,908 - app.adapters.gptr.adapter - ERROR - GPT-R Adapter execution error
+Traceback (most recent call last):
+  File "C:\dev/godzilla/acm2/acm2\app\adapters\gptr\adapter.py", line 159, in generate
+    stdout_str = stdout.decode().strip()
+                 ^^^^^^^^^^^^^
+AttributeError: 'str' object has no attribute 'decode'. Did you mean: 'encode'?
+2025-12-25 20:51:56,909 - app.services.rate_limiter - INFO - [RATE-LIMIT] Provider google: RELEASED slot (in_flight=1/5)
+2025-12-25 20:51:56,909 - app.evaluation.judge - INFO - [STATS-DEBUG] _notify: callback=<lambda>, bound_to=NO_SELF, id=2640625099744
+2025-12-25 20:51:56,909 - app.evaluation.judge - INFO - [STATS-DEBUG] Calling _on_update callback
+2025-12-25 20:51:56,910 - app.evaluation.judge - INFO - [STATS-DEBUG] _on_update callback completed
+2025-12-25 20:51:56,910 - app.api.websockets - INFO - [WS] Broadcasting to run e730d1c9-c8dc-4b57-b4d8-8034e4130c7d: 0 connections. Event: fpf_stats_update
+2025-12-25 20:51:56,934 - app.api.routes.runs - ERROR - Run e730d1c9-c8dc-4b57-b4d8-8034e4130c7d failed: Failed to save 7469e725.436c.gptr.1.openai_gpt-5.1: Cannot save document 7469e725.436c.gptr.1.openai_gpt-5.1: content is None or empty; Traceback (most recent call last):
+  File "C:\dev/godzilla/acm2/acm2\app\services\run_executor.py", line 481, in _save_generated_content
+    raise ValueError(f"Cannot save document {gen_doc.doc_id}: content is None or empty")
+ValueError: Cannot save document 7469e725.436c.gptr.1.openai_gpt-5.1: content is None or empty
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\dev/godzilla/acm2/acm2\app\services\run_executor.py", line 565, in execute
+    await self._run_generation_with_eval(run_id, config, result)
+  File "C:\dev/godzilla/acm2/acm2\app\services\run_executor.py", line 989, in _run_generation_with_eval
+    await asyncio.gather(*[process_task(t) for t in tasks])
+  File "C:\dev/godzilla/acm2/acm2\app\services\run_executor.py", line 887, in process_task
+    await self._save_generated_content(run_id, gen_result)
+  File "C:\dev/godzilla/acm2/acm2\app\services\run_executor.py", line 502, in _save_generated_content
+    raise RuntimeError(f"Failed to save {gen_doc.doc_id}: {e}") from e
+RuntimeError: Failed to save 7469e725.436c.gptr.1.openai_gpt-5.1: Cannot save document 7469e725.436c.gptr.1.openai_gpt-5.1: content is None or empty
+
+2025-12-25 20:52:10,288 - app.services.rate_limiter - INFO - [RATE-LIMIT] Provider google: RELEASED slot (in_flight=0/5)
+2025-12-25 20:52:10,294 - app.evaluation.judge - INFO - [STATS-DEBUG] _notify: callback=<lambda>, bound_to=NO_SELF, id=2640625099744
+2025-12-25 20:52:10,295 - app.evaluation.judge - INFO - [STATS-DEBUG] Calling _on_update callback
+2025-12-25 20:52:10,295 - app.evaluation.judge - INFO - [STATS-DEBUG] _on_update callback completed
+2025-12-25 20:52:10,298 - app.api.websockets - INFO - [WS] Broadcasting to run e730d1c9-c8dc-4b57-b4d8-8034e4130c7d: 0 connections. Event: fpf_stats_update
+2025-12-25 20:52:10,299 - app.api.websockets - INFO - [WS] Broadcasting to run e730d1c9-c8dc-4b57-b4d8-8034e4130c7d: 0 connections. Event: gen_complete
+2025-12-25 20:56:00,306 - app.services.rate_limiter - INFO - [RATE-LIMIT] Provider openai: RELEASED slot (in_flight=0/5)
+2025-12-25 20:56:00,307 - app.evaluation.judge - INFO - [STATS-DEBUG] _notify: callback=<lambda>, bound_to=NO_SELF, id=2640625099744
+2025-12-25 20:56:00,308 - app.evaluation.judge - INFO - [STATS-DEBUG] Calling _on_update callback
+2025-12-25 20:56:00,308 - app.evaluation.judge - INFO - [STATS-DEBUG] _on_update callback completed
+2025-12-25 20:56:00,309 - app.api.websockets - INFO - [WS] Broadcasting to run e730d1c9-c8dc-4b57-b4d8-8034e4130c7d: 0 connections. Event: fpf_stats_update
+2025-12-25 20:56:00,311 - app.api.websockets - INFO - [WS] Broadcasting to run e730d1c9-c8dc-4b57-b4d8-8034e4130c7d: 0 connections. Event: gen_complete
+INFO:     127.0.0.1:61930 - "WebSocket /api/v1/runs/ws/run/786d6175-234c-47a1-8c5a-ff3c1967175a" [accepted]
+2025-12-25 21:25:22,062 - app.api.websockets - INFO - [WS] Client connected to run 786d6175-234c-47a1-8c5a-ff3c1967175a. Total connections for this run: 1
+INFO:     connection open
+2025-12-25 21:25:25,375 - app.api.websockets - INFO - [WS] Client disconnected from run 786d6175-234c-47a1-8c5a-ff3c1967175a. Remaining: 0
+INFO:     connection closed
+INFO:     127.0.0.1:51373 - "WebSocket /api/v1/runs/ws/run/e730d1c9-c8dc-4b57-b4d8-8034e4130c7d" [accepted]
+2025-12-25 21:25:26,492 - app.api.websockets - INFO - [WS] Client connected to run e730d1c9-c8dc-4b57-b4d8-8034e4130c7d. Total connections for this run: 1
+INFO:     connection open

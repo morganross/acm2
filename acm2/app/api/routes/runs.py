@@ -143,7 +143,8 @@ async def execute_run_background(run_id: str, config: RunConfig):
                 if result.single_eval_results:
                     for gen_doc_id, summary in result.single_eval_results.items():
                         # Skip combined doc evaluations (handle in post_combine_evals)
-                        if result.combined_doc and gen_doc_id == result.combined_doc.doc_id:
+                        combined_doc_ids = [d.doc_id for d in (result.combined_docs or [])]
+                        if gen_doc_id in combined_doc_ids:
                             continue
                         
                         # Build detailed evaluations with full criteria breakdown
@@ -935,6 +936,21 @@ async def get_run(
         raise HTTPException(status_code=500, detail=f"Error retrieving run: {str(e)}")
 
 
+@router.delete("/bulk")
+async def bulk_delete_runs(
+    target: str = Query(..., regex="^(failed|completed_failed)$", description="failed or completed_failed"),
+    db: AsyncSession = Depends(get_db)
+) -> dict:
+    """Bulk delete runs by status groups."""
+    repo = RunRepository(db)
+    if target == "failed":
+        statuses = [RunStatus.FAILED.value]
+    else:
+        statuses = [RunStatus.FAILED.value, RunStatus.COMPLETED.value]
+    deleted = await repo.bulk_delete_by_status(statuses)
+    return {"status": "ok", "deleted": deleted, "target": target}
+
+
 @router.delete("/{run_id}")
 async def delete_run(
     run_id: str,
@@ -958,21 +974,6 @@ async def delete_run(
     
     await repo.delete(run_id)
     return {"status": "deleted", "run_id": run_id}
-
-
-@router.delete("/bulk")
-async def bulk_delete_runs(
-    target: str = Query(..., regex="^(failed|completed_failed)$", description="failed or completed_failed"),
-    db: AsyncSession = Depends(get_db)
-) -> dict:
-    """Bulk delete runs by status groups."""
-    repo = RunRepository(db)
-    if target == "failed":
-        statuses = [RunStatus.FAILED.value]
-    else:
-        statuses = [RunStatus.FAILED.value, RunStatus.COMPLETED.value]
-    deleted = await repo.bulk_delete_by_status(statuses)
-    return {"status": "ok", "deleted": deleted, "target": target}
 
 
 @router.post("/{run_id}/start")
@@ -1103,8 +1104,8 @@ async def start_run(
     if eval_iterations is None:
         raise ValueError("eval_iterations must be set in preset")
     judge_models = eval_config.get("judge_models")
-    if not judge_models:
-        raise ValueError("eval_config.judge_models must be set in preset")
+    if eval_enabled and not judge_models:
+        raise ValueError("eval_config.judge_models must be set in preset when evaluation is enabled")
     eval_timeout = eval_config.get("timeout_seconds")
     if eval_timeout is None:
         raise ValueError("eval_config.timeout_seconds must be set in preset")

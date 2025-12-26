@@ -14,8 +14,8 @@ async def main():
         prompt = os.environ.get("GPTR_PROMPT")
         report_type = os.environ.get("GPTR_REPORT_TYPE", "research_report")
         tone = os.environ.get("GPTR_TONE")
-        retriever = os.environ.get("GPTR_RETRIEVER")
         source_urls_json = os.environ.get("GPTR_SOURCE_URLS")
+        # Note: RETRIEVER env var is read directly by GPT-Researcher, not passed to constructor
         
         if not prompt:
             raise ValueError("GPTR_PROMPT environment variable is required")
@@ -33,25 +33,37 @@ async def main():
         # 3. Configure Researcher
         source_urls = json.loads(source_urls_json) if source_urls_json else None
         
-        researcher = GPTResearcher(
-            query=prompt,
-            report_type=report_type,
-            report_source="web", # Default to web
-            source_urls=source_urls,
-            tone=tone if tone else None, # GPT-R might expect None for default
-            retriever=retriever
-        )
+        # Build researcher kwargs - only include valid parameters
+        researcher_kwargs = {
+            "query": prompt,
+            "report_type": report_type,
+            "report_source": "web",  # Default to web
+        }
+        
+        if source_urls:
+            researcher_kwargs["source_urls"] = source_urls
+        if tone:
+            researcher_kwargs["tone"] = tone
+        # Note: 'retriever' is set via RETRIEVER env var, not constructor param
+        
+        researcher = GPTResearcher(**researcher_kwargs)
 
         # 4. Run Research
         # Print an initial progress event (simple indicator for streaming)
         print(json.dumps({"event": "progress", "status": "starting", "progress": 0.0, "message": "Starting GPT-Researcher"}), flush=True)
-        # We can hook into websocket/stream here if we want real-time updates later
-        # For now, just run and get the report
-        report = await researcher.run()
+        
+        # Conduct research first (gathers sources and context)
+        print(json.dumps({"event": "progress", "status": "researching", "progress": 0.2, "message": "Conducting research..."}), flush=True)
+        await researcher.conduct_research()
+        
+        # Then write the report based on research
+        print(json.dumps({"event": "progress", "status": "writing", "progress": 0.7, "message": "Writing report..."}), flush=True)
+        report = await researcher.write_report()
         
         # 5. Get Context/Costs (if available)
         context = researcher.get_research_context()
         costs = researcher.get_costs() # Returns float or dict? usually float estimate
+        source_urls = researcher.get_source_urls() if hasattr(researcher, "get_source_urls") else []
         
         # 6. Output Result as JSON
         result = {
@@ -59,7 +71,7 @@ async def main():
             "content": report,
             "context": context,
             "costs": costs,
-            "visited_urls": list(researcher.visited_urls) if hasattr(researcher, "visited_urls") else []
+            "visited_urls": list(source_urls) if source_urls else []
         }
         print(json.dumps(result))
 

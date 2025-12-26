@@ -4,8 +4,14 @@ ACM2 - API Cost Multiplier 2.0
 FastAPI application for research evaluation and cost tracking.
 """
 import logging
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
+
+# Windows requires ProactorEventLoop for subprocess support (used by FPF adapter)
+if sys.platform == 'win32':
+    import asyncio
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -166,5 +172,12 @@ app = create_app()
 
 
 if __name__ == "__main__":
+    import sys
     import uvicorn
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8002, reload=True)
+    
+    # Windows requires ProactorEventLoop for subprocess support with reload mode
+    if sys.platform == 'win32':
+        import asyncio
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8002, reload=False)

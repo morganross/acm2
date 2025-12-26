@@ -985,8 +985,36 @@ class RunExecutor:
                         f"Generated {completed}/{total_tasks}",
                     )
         
-        # Run all tasks
-        await asyncio.gather(*[process_task(t) for t in tasks])
+        # Run all tasks - return_exceptions=True ensures one failure doesn't abort others
+        task_results = await asyncio.gather(*[process_task(t) for t in tasks], return_exceptions=True)
+        
+        # Log any exceptions that occurred
+        for i, task_result in enumerate(task_results):
+            if isinstance(task_result, Exception):
+                task_info = tasks[i]
+                doc_id, generator, model, iteration = task_info
+                task_id = f"{doc_id}.{generator.value}.{iteration}.{model}"
+                self.logger.error(f"Task {task_id} failed with exception: {task_result}")
+                result.errors.append(f"Task {task_id} failed: {str(task_result)}")
+                
+                # Mark task as failed in run_store
+                if getattr(self, '_run_store', None):
+                    run = self._run_store.get(run_id)
+                    if run and 'tasks' in run:
+                        tasks_list = run['tasks']
+                        for t in tasks_list:
+                            if t['id'] == task_id:
+                                t['status'] = 'failed'
+                                t['progress'] = 0.0
+                                t['message'] = str(task_result)[:200]
+                                t['completed_at'] = datetime.utcnow()
+                                break
+                        self._run_store.update(run_id, tasks=tasks_list)
+                        if getattr(self, '_run_ws_manager', None):
+                            try:
+                                await self._run_ws_manager.broadcast(run_id, {"event": "task_update", "task": t})
+                            except Exception:
+                                pass
 
     async def _generate_single(
         self,

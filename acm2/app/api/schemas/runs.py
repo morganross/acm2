@@ -444,6 +444,8 @@ class TimelinePhase(str, Enum):
     EVALUATION = "evaluation"
     PAIRWISE = "pairwise"
     COMBINATION = "combination"
+    POST_COMBINE_EVAL = "post_combine_eval"
+    POST_COMBINE_PAIRWISE = "post_combine_pairwise"
     COMPLETION = "completion"
 
 

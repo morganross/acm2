@@ -56,8 +56,8 @@ class Preset(Base):
     models: Mapped[list] = mapped_column(JSON, default=list)     # List of model names
     generators: Mapped[list] = mapped_column(JSON, default=list) # ['fpf', 'gptr']
     
-    # Execution settings (iterations moved to new config section below)
-    # iterations: Mapped[int] = mapped_column(Integer, default=1)  # Moved to timing config section
+    # Execution settings
+    iterations: Mapped[int] = mapped_column(Integer, default=1)  # Number of generation iterations
     evaluation_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     pairwise_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     
@@ -73,21 +73,21 @@ class Preset(Base):
     # =========================================================================
     # Timing & Retry Configuration
     # =========================================================================
-    max_retries: Mapped[int] = mapped_column(Integer, nullable=False)
-    retry_delay: Mapped[float] = mapped_column(nullable=False)
-    request_timeout: Mapped[int] = mapped_column(Integer, nullable=False)
-    eval_timeout: Mapped[int] = mapped_column(Integer, nullable=False)
+    max_retries: Mapped[int] = mapped_column(Integer, default=3)
+    retry_delay: Mapped[float] = mapped_column(default=2.0)
+    request_timeout: Mapped[int] = mapped_column(Integer, default=600)
+    eval_timeout: Mapped[int] = mapped_column(Integer, default=600)
     
     # Concurrency Configuration
-    generation_concurrency: Mapped[int] = mapped_column(Integer, nullable=False)
-    eval_concurrency: Mapped[int] = mapped_column(Integer, nullable=False)
+    generation_concurrency: Mapped[int] = mapped_column(Integer, default=5)
+    eval_concurrency: Mapped[int] = mapped_column(Integer, default=5)
     
     # Iteration Configuration (moved from above, now required)
     # iterations field already exists above - will need to make non-nullable
-    eval_iterations: Mapped[int] = mapped_column(Integer, nullable=False)
+    eval_iterations: Mapped[int] = mapped_column(Integer, default=1)
     
     # FPF Logging Configuration
-    fpf_log_output: Mapped[str] = mapped_column(String(20), nullable=False)  # 'stream', 'file', 'none'
+    fpf_log_output: Mapped[str] = mapped_column(String(20), default="file")  # 'stream', 'file', 'none'
     fpf_log_file_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     
     # Post-Combine Configuration

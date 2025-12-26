@@ -3,7 +3,15 @@
 # Sections: fpf, gpt-r
 # Note: eval and combine use fpf list. gpt-r-DR uses gpt-r list.
 
-# OpenAI
+# OpenAI - GPT-4 Family
+openai:gpt-4o: [fpf, gpt-r]
+openai:gpt-4o-mini: [fpf, gpt-r]
+openai:gpt-4-turbo: [fpf, gpt-r]
+openai:gpt-4.1: [fpf, gpt-r]
+openai:gpt-4.1-mini: [fpf, gpt-r]
+openai:gpt-4.1-nano: [fpf]
+
+# OpenAI - GPT-5 Family
 openai:gpt-5: [fpf, gpt-r]
 openai:gpt-5-mini: [fpf]
 openai:gpt-5-nano: [fpf]

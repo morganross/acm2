@@ -67,108 +67,115 @@ async def execute_run_background(run_id: str, config: RunConfig):
     executor = get_executor()
     result = await executor.execute(run_id, config)
     
+    logger.info(f"Executor returned for run {run_id}: status={result.status.value}, docs={len(result.generated_docs)}, errors={result.errors}")
+    
     # Update run in DB
     async with async_session_factory() as session:
         run_repo = RunRepository(session)
         
         if result.status.value == "completed":
-            # Build pre_combine_evals: { doc_id: { judge_model: avg_score } }
-            pre_combine_evals = {}
-            pre_combine_evals_detailed = {}
-            if result.single_eval_results:
-                for doc_id, summary in result.single_eval_results.items():
-                    # Build simple scores by model
-                    scores_by_model = {}
-                    if hasattr(summary, 'results') and summary.results:
-                        model_scores: dict[str, list[float]] = {}
-                        for eval_result in summary.results:
-                            model = eval_result.model
-                            if model not in model_scores:
-                                model_scores[model] = []
-                            for score_item in eval_result.scores:
-                                model_scores[model].append(score_item.score)
-                        # Average per model
-                        for model, scores in model_scores.items():
-                            scores_by_model[model] = sum(scores) / len(scores) if scores else 0.0
-                    pre_combine_evals[doc_id] = scores_by_model
-                    # Detailed info
-                    pre_combine_evals_detailed[doc_id] = {
-                        "avg_score": summary.avg_score,
-                        "scores_by_criterion": summary.scores_by_criterion,
-                        "num_evaluations": summary.num_evaluations,
-                    }
-            
-            # Build pairwise_results
-            pairwise_data = None
-            if result.pairwise_results:
-                pw = result.pairwise_results
-                pairwise_data = {
-                    "total_comparisons": pw.total_comparisons,
-                    "total_pairs": pw.total_pairs,
-                    "winner_doc_id": pw.winner_doc_id,
-                    "rankings": [
-                        {"doc_id": r.doc_id, "elo": r.rating, "wins": r.wins, "losses": r.losses}
-                        for r in pw.elo_ratings
-                    ],
-                    "comparisons": [
-                        {
-                            "doc_id_a": r.doc_id_1,
-                            "doc_id_b": r.doc_id_2,
-                            "winner": r.winner_doc_id,
-                            "judge_model": r.model,
-                            "trial": r.trial,
-                            "reason": r.reason,
+            logger.info(f"Run {run_id}: Saving completed results to DB...")
+            try:
+                # Build pre_combine_evals: { doc_id: { judge_model: avg_score } }
+                pre_combine_evals = {}
+                pre_combine_evals_detailed = {}
+                if result.single_eval_results:
+                    for doc_id, summary in result.single_eval_results.items():
+                        # Build simple scores by model
+                        scores_by_model = {}
+                        if hasattr(summary, 'results') and summary.results:
+                            model_scores: dict[str, list[float]] = {}
+                            for eval_result in summary.results:
+                                model = eval_result.model
+                                if model not in model_scores:
+                                    model_scores[model] = []
+                                for score_item in eval_result.scores:
+                                    model_scores[model].append(score_item.score)
+                            # Average per model
+                            for model, scores in model_scores.items():
+                                scores_by_model[model] = sum(scores) / len(scores) if scores else 0.0
+                        pre_combine_evals[doc_id] = scores_by_model
+                        # Detailed info
+                        pre_combine_evals_detailed[doc_id] = {
+                            "avg_score": summary.avg_score,
+                            "scores_by_criterion": summary.scores_by_criterion,
+                            "num_evaluations": summary.num_evaluations,
                         }
-                        for r in pw.results
-                    ],
+                
+                # Build pairwise_results
+                pairwise_data = None
+                if result.pairwise_results:
+                    pw = result.pairwise_results
+                    pairwise_data = {
+                        "total_comparisons": pw.total_comparisons,
+                        "total_pairs": pw.total_pairs,
+                        "winner_doc_id": pw.winner_doc_id,
+                        "rankings": [
+                            {"doc_id": r.doc_id, "elo": r.rating, "wins": r.wins, "losses": r.losses}
+                            for r in pw.elo_ratings
+                        ],
+                        "comparisons": [
+                            {
+                                "doc_id_a": r.doc_id_1,
+                                "doc_id_b": r.doc_id_2,
+                                "winner": r.winner_doc_id,
+                                "judge_model": r.model,
+                                "trial": r.trial,
+                                "reason": r.reason,
+                            }
+                            for r in pw.results
+                        ],
+                    }
+                
+                # Build generated_docs list
+                generated_docs_data = []
+                for doc in result.generated_docs:
+                    generated_docs_data.append({
+                        "id": doc.doc_id,
+                        "model": doc.model,
+                        "generator": doc.generator.value if hasattr(doc.generator, 'value') else str(doc.generator),
+                        "source_doc_id": doc.source_doc_id,
+                        "iteration": doc.iteration,
+                    })
+                
+                # Add combined docs to generated_docs (UI filters from this list)
+                for combined_doc in (result.combined_docs or []):
+                    generated_docs_data.append({
+                        "id": combined_doc.doc_id,
+                        "model": combined_doc.model,
+                        "generator": combined_doc.generator.value if hasattr(combined_doc.generator, 'value') else str(combined_doc.generator),
+                        "source_doc_id": combined_doc.source_doc_id,
+                        "iteration": combined_doc.iteration,
+                        "is_combined": True,
+                    })
+                
+                results_summary = {
+                    "winner": result.winner_doc_id,
+                    "generated_count": len(result.generated_docs),
+                    "eval_count": len(result.single_eval_results or {}),
+                    "combined_doc_id": result.combined_docs[0].doc_id if result.combined_docs else None,
+                    "post_combine_eval": asdict(result.post_combine_eval_results) if result.post_combine_eval_results else None,
+                    "pre_combine_evals": pre_combine_evals,
+                    "pre_combine_evals_detailed": pre_combine_evals_detailed,
+                    "pairwise_results": pairwise_data,
+                    "generated_docs": generated_docs_data,
                 }
-            
-            # Build generated_docs list
-            generated_docs_data = []
-            for doc in result.generated_docs:
-                generated_docs_data.append({
-                    "id": doc.doc_id,
-                    "model": doc.model,
-                    "generator": doc.generator.value if hasattr(doc.generator, 'value') else str(doc.generator),
-                    "source_doc_id": doc.source_doc_id,
-                    "iteration": doc.iteration,
-                })
-            
-            # Add combined docs to generated_docs (UI filters from this list)
-            for combined_doc in (result.combined_docs or []):
-                generated_docs_data.append({
-                    "id": combined_doc.doc_id,
-                    "model": combined_doc.model,
-                    "generator": combined_doc.generator.value if hasattr(combined_doc.generator, 'value') else str(combined_doc.generator),
-                    "source_doc_id": combined_doc.source_doc_id,
-                    "iteration": combined_doc.iteration,
-                    "is_combined": True,
-                })
-            
-            results_summary = {
-                "winner": result.winner_doc_id,
-                "generated_count": len(result.generated_docs),
-                "eval_count": len(result.single_eval_results or {}),
-                "combined_doc_id": result.combined_docs[0].doc_id if result.combined_docs else None,
-                "post_combine_eval": asdict(result.post_combine_eval_results) if result.post_combine_eval_results else None,
-                "pre_combine_evals": pre_combine_evals,
-                "pre_combine_evals_detailed": pre_combine_evals_detailed,
-                "pairwise_results": pairwise_data,
-                "generated_docs": generated_docs_data,
-            }
 
-            # Convert datetime objects to ISO strings for JSON serialization
-            def datetime_serializer(obj):
-                if isinstance(obj, datetime):
-                    return obj.isoformat()
-                raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
-            
-            await run_repo.complete(
-                run_id, 
-                results_summary=json.loads(json.dumps(results_summary, default=datetime_serializer)),
-                total_cost_usd=result.total_cost_usd
-            )
-            logger.info(f"Run {run_id} completed successfully")
+                # Convert datetime objects to ISO strings for JSON serialization
+                def datetime_serializer(obj):
+                    if isinstance(obj, datetime):
+                        return obj.isoformat()
+                    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+                
+                await run_repo.complete(
+                    run_id, 
+                    results_summary=json.loads(json.dumps(results_summary, default=datetime_serializer)),
+                    total_cost_usd=result.total_cost_usd
+                )
+                logger.info(f"Run {run_id} completed and saved to DB successfully")
+            except Exception as save_err:
+                logger.exception(f"Run {run_id}: Failed to save results to DB: {save_err}")
+                await run_repo.fail(run_id, error_message=f"Failed to save results: {save_err}")
         else:
             error_msg = "; ".join(result.errors) if result.errors else "Unknown error"
             await run_repo.fail(run_id, error_message=error_msg)
@@ -793,14 +800,15 @@ async def execute_preset(
     if preset.pairwise_enabled is None:
         raise ValueError(f"Preset {preset.name} has no pairwise_enabled - set this in the GUI")
     
-    # Get eval config - REQUIRED
+    # Get eval config - REQUIRED only when evaluation is enabled
     eval_cfg = preset.config_overrides.get("eval", {}) if preset.config_overrides else {}
+    eval_enabled = eval_cfg.get("enabled") if eval_cfg.get("enabled") is not None else preset.evaluation_enabled
     eval_iterations = eval_cfg.get("iterations")
     if eval_iterations is None:
         raise ValueError(f"Preset {preset.name} has no eval_config.iterations - set this in the GUI")
     judge_models = eval_cfg.get("judge_models")
-    if not judge_models:
-        raise ValueError(f"Preset {preset.name} has no eval_config.judge_models - set this in the GUI")
+    if eval_enabled and not judge_models:
+        raise ValueError(f"Preset {preset.name} has eval enabled but no judge_models - set this in the GUI")
     
     # Get combine config - REQUIRED
     combine_enabled = combine_config.get("enabled")
@@ -882,7 +890,7 @@ async def execute_preset(
         models=model_names,
         model_settings=model_settings,
         iterations=_derive_iterations(preset),
-        enable_single_eval=preset.evaluation_enabled,
+        enable_single_eval=eval_enabled,
         enable_pairwise=preset.pairwise_enabled,
         eval_iterations=eval_iterations,
         eval_judge_models=judge_models,

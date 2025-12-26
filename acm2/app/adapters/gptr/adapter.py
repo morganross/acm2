@@ -7,10 +7,31 @@ from typing import AsyncGenerator, Optional, Dict, Any
 from pathlib import Path
 from datetime import datetime
 
+from dotenv import dotenv_values
+
 from app.adapters.base import BaseAdapter, GenerationConfig, GenerationResult, GeneratorType, TaskStatus, ProgressCallback
 from app.adapters.gptr.config import GptrConfig
 
+# Path to FilePromptForge .env file containing API keys
+FPF_ENV_PATH = Path(__file__).parent.parent.parent.parent.parent / "FilePromptForge" / ".env"
+
 logger = logging.getLogger(__name__)
+
+# Map ACM provider names to GPT-Researcher provider names
+GPTR_PROVIDER_MAP = {
+    "google": "google_genai",
+    "anthropic": "anthropic",
+    "openai": "openai",
+    "openrouter": "openrouter",
+}
+
+def _map_model_for_gptr(model_str: str) -> str:
+    """Convert ACM model string (provider:model) to GPT-Researcher format."""
+    if ":" not in model_str:
+        return model_str
+    provider, model = model_str.split(":", 1)
+    gptr_provider = GPTR_PROVIDER_MAP.get(provider, provider)
+    return f"{gptr_provider}:{model}"
 
 class GptrAdapter(BaseAdapter):
     """
@@ -62,11 +83,23 @@ class GptrAdapter(BaseAdapter):
         # 2. Prepare Environment
         env = os.environ.copy()
         
+        # Load API keys from FilePromptForge .env file (same source FPF uses)
+        if FPF_ENV_PATH.exists():
+            fpf_env = dotenv_values(FPF_ENV_PATH)
+            env.update(fpf_env)
+            logger.debug(f"GPT-R: Loaded {len(fpf_env)} environment variables from {FPF_ENV_PATH}")
+        else:
+            logger.warning(f"GPT-R: FilePromptForge .env not found at {FPF_ENV_PATH}")
+        
         # Handle Model Selection
         # GPT-R relies heavily on env vars for model selection
         # We map our standardized model name to what GPT-R expects
         
-        model_str = config.model
+        # Build full model string from provider and model
+        full_model = f"{config.provider}:{config.model}" if config.provider and config.model else config.model
+        logger.info(f"GPT-R config: provider={config.provider!r}, model={config.model!r}, full_model={full_model!r}")
+        model_str = _map_model_for_gptr(full_model)
+        logger.info(f"GPT-R model after mapping: {model_str!r}")
         
         # For now, we pass the model directly to SMART_LLM/FAST_LLM
         # This overrides config.py in GPT-R if set
@@ -149,15 +182,23 @@ class GptrAdapter(BaseAdapter):
             stderr_task = asyncio.create_task(_read_stderr())
 
             # Wait for process to exit and for read tasks to complete
+            logger.info(f"GPT-R subprocess started, waiting for completion...")
             await process.wait()
             await stdout_task
             await stderr_task
+            
+            logger.info(f"GPT-R subprocess completed with return code: {process.returncode}")
 
             stdout = '\n'.join(stdout_lines)
             stderr = '\n'.join(stderr_lines)
             
-            stdout_str = stdout.decode().strip()
-            stderr_str = stderr.decode().strip()
+            stdout_str = stdout.strip()
+            stderr_str = stderr.strip()
+            
+            # Log output regardless of return code for debugging
+            logger.info(f"GPT-R stdout ({len(stdout_lines)} lines, first 1500 chars): {stdout_str[:1500]}")
+            if stderr_str:
+                logger.warning(f"GPT-R stderr: {stderr_str[:1500]}")
 
             if process.returncode != 0:
                 if progress_callback:
@@ -183,6 +224,9 @@ class GptrAdapter(BaseAdapter):
             try:
                 # Find the last line that looks like JSON
                 lines = stdout.split('\n')
+                logger.info(f"GPT-R stdout lines count: {len(lines)}")
+                logger.info(f"GPT-R stdout (first 1000 chars): {stdout[:1000]}")
+                logger.info(f"GPT-R stderr (first 1000 chars): {stderr_str[:1000] if stderr_str else '(empty)'}")
                 json_line = ""
                 for line in reversed(lines):
                     if line.strip().startswith("{"):
@@ -192,6 +236,7 @@ class GptrAdapter(BaseAdapter):
                 if not json_line:
                      # Fallback: sometimes GPT-R prints logs after JSON?
                      # Or maybe it failed silently but printed something else
+                     logger.error(f"No JSON in GPT-R output. Full stdout: {stdout}")
                      raise ValueError("No JSON output found in subprocess stdout")
 
                 data = json.loads(json_line)
