@@ -10,6 +10,10 @@ class GptrConfig(BaseModel):
     
     # Environment variable overrides for this specific run
     env_overrides: Dict[str, str] = Field(default_factory=dict, description="Environment variables to override for the subprocess")
+    
+    # Subprocess timeout and retry settings
+    subprocess_timeout_minutes: int = Field(20, ge=10, le=45, description="Subprocess timeout in minutes (10-45)")
+    subprocess_retries: int = Field(1, ge=0, le=3, description="Number of retries on timeout (0-3)")
 
     class Config:
         extra = "ignore"

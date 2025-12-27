@@ -13,27 +13,29 @@ openai:gpt-4.1-nano: [fpf]
 
 # OpenAI - GPT-5 Family
 openai:gpt-5: [fpf, gpt-r]
-openai:gpt-5-mini: [fpf]
+openai:gpt-5-mini: [fpf, gpt-r]
 openai:gpt-5-nano: [fpf]
 openai:gpt-5.1: [fpf, gpt-r]
 openai:gpt-5.1-mini: [fpf]
-openai:gpt-5.1-preview: [fpf, gpt-r]
-openai:o4-mini: [fpf]
+openai:gpt-5.1-preview: [fpf]
+openai:gpt-5.2: [fpf, gpt-r]
+openai:o4-mini: [fpf, gpt-r]
 openai:o3: [fpf, gpt-r]
 
 # OpenAI Deep Research
-openaidp:o3-deep-research: [fpf, gpt-r]
+openaidp:o3-deep-research: [fpf]
 openaidp:o4-mini-deep-research: [fpf]
 
 # Google
 google:gemini-3-pro-preview: [fpf, gpt-r]
+google:gemini-3-flash: [fpf, gpt-r]
 google:gemini-2.5-pro: [fpf, gpt-r]
 google:gemini-2.5-flash: [fpf]
 google:gemini-2.5-flash-lite: [fpf]
 google:gemini-2.0-flash: [fpf]
-google:gemini-1.5-pro: [fpf, gpt-r]
+google:gemini-1.5-pro: [fpf]
 google:gemini-1.5-flash: [fpf]
-google:gemini-pro-latest: [fpf, gpt-r]
+google:gemini-pro-latest: [fpf]
 
 # Tavily (Research API)
 tavily:tvly-mini: [fpf]

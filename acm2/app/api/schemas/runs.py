@@ -145,6 +145,9 @@ class GptrConfigComplete(BaseModel):
     add_source_urls: bool = True
     verbose_mode: bool = False
     follow_links: bool = True
+    # Subprocess timeout and retry settings
+    subprocess_timeout_minutes: int = Field(20, ge=10, le=45, description="Subprocess timeout in minutes (10-45)")
+    subprocess_retries: int = Field(1, ge=0, le=3, description="Number of retries on timeout (0-3)")
 
 
 class DrConfigComplete(BaseModel):
@@ -157,7 +160,7 @@ class DrConfigComplete(BaseModel):
     concurrency_limit: int = Field(5, ge=1, le=10)
     temperature: float = Field(0.5, ge=0, le=2)
     max_tokens: int = Field(16000, ge=1000)
-    timeout: int = Field(600, ge=60, description="Request timeout in seconds - increased from 300 to handle slow LLM evals")
+    timeout: int = Field(600, ge=60, description="Request timeout in seconds - legacy, use subprocess_timeout_minutes instead")
     search_provider: str = "tavily"
     enable_caching: bool = True
     follow_links: bool = True
@@ -165,6 +168,9 @@ class DrConfigComplete(BaseModel):
     include_images: bool = False
     semantic_search: bool = True
     verbose_logging: bool = False
+    # Subprocess timeout and retry settings
+    subprocess_timeout_minutes: int = Field(20, ge=10, le=45, description="Subprocess timeout in minutes (10-45)")
+    subprocess_retries: int = Field(1, ge=0, le=3, description="Number of retries on timeout (0-3)")
 
 
 class MaConfigComplete(BaseModel):

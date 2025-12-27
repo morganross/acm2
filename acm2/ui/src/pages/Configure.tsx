@@ -135,6 +135,10 @@ function serializeConfigToPreset(
     add_source_urls: config.gptr.addSourceUrls,
     verbose_mode: config.gptr.verboseMode,
     follow_links: config.gptr.followLinks,
+    log_level: config.gptr.logLevel,
+    // Subprocess timeout and retry settings
+    subprocess_timeout_minutes: config.gptr.subprocessTimeoutMinutes,
+    subprocess_retries: config.gptr.subprocessRetries,
   };
 
   // Serialize DrConfig
@@ -155,6 +159,10 @@ function serializeConfigToPreset(
     include_images: config.dr.includeImages,
     semantic_search: config.dr.semanticSearch,
     verbose_logging: config.dr.verboseLogging,
+    log_level: config.dr.logLevel,
+    // Subprocess timeout and retry settings
+    subprocess_timeout_minutes: config.dr.subprocessTimeoutMinutes,
+    subprocess_retries: config.dr.subprocessRetries,
   };
 
   // Serialize MaConfig
@@ -336,6 +344,9 @@ function deserializePresetToConfig(
       addSourceUrls: preset.gptr_config.add_source_urls ?? config.gptr.addSourceUrls,
       verboseMode: preset.gptr_config.verbose_mode ?? config.gptr.verboseMode,
       followLinks: preset.gptr_config.follow_links ?? config.gptr.followLinks,
+      // Subprocess timeout and retry settings
+      subprocessTimeoutMinutes: preset.gptr_config.subprocess_timeout_minutes ?? config.gptr.subprocessTimeoutMinutes,
+      subprocessRetries: preset.gptr_config.subprocess_retries ?? config.gptr.subprocessRetries,
     });
   } else {
     // Fallback to legacy gptr_settings
@@ -365,6 +376,9 @@ function deserializePresetToConfig(
       includeImages: preset.dr_config.include_images ?? config.dr.includeImages,
       semanticSearch: preset.dr_config.semantic_search ?? config.dr.semanticSearch,
       verboseLogging: preset.dr_config.verbose_logging ?? config.dr.verboseLogging,
+      // Subprocess timeout and retry settings
+      subprocessTimeoutMinutes: preset.dr_config.subprocess_timeout_minutes ?? config.dr.subprocessTimeoutMinutes,
+      subprocessRetries: preset.dr_config.subprocess_retries ?? config.dr.subprocessRetries,
     });
   }
 

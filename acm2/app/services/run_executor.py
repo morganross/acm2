@@ -20,6 +20,7 @@ from uuid import uuid4
 
 from ..adapters.fpf.adapter import FpfAdapter
 from ..adapters.gptr.adapter import GptrAdapter
+from ..adapters.dr.adapter import DrAdapter
 from ..adapters.combine.adapter import CombineAdapter
 from ..adapters.combine.config import CombineConfig
 from ..adapters.base import GenerationConfig, GenerationResult, GeneratorType, ProgressCallback, TaskStatus
@@ -345,6 +346,7 @@ class RunExecutor:
     def __init__(self, ws_manager=None, run_logger: Optional[logging.Logger] = None):
         self._fpf_adapter = FpfAdapter()
         self._gptr_adapter = GptrAdapter()
+        self._dr_adapter = DrAdapter()
         self._cancelled = False
         self._fpf_stats = FpfStatsTracker()  # Track FPF stats across the run
         # NOTE: Callback is set in execute() with run_id closure, not here
@@ -464,6 +466,8 @@ class RunExecutor:
             return self._fpf_adapter
         elif generator == GeneratorType.GPTR:
             return self._gptr_adapter
+        elif generator == GeneratorType.DR:
+            return self._dr_adapter
         else:
             raise ValueError(f"Unknown generator: {generator}")
     

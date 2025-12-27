@@ -944,9 +944,9 @@ async def bulk_delete_runs(
     """Bulk delete runs by status groups."""
     repo = RunRepository(db)
     if target == "failed":
-        statuses = [RunStatus.FAILED.value]
+        statuses = [RunStatus.FAILED.value, RunStatus.CANCELLED.value]
     else:
-        statuses = [RunStatus.FAILED.value, RunStatus.COMPLETED.value]
+        statuses = [RunStatus.FAILED.value, RunStatus.COMPLETED.value, RunStatus.CANCELLED.value]
     deleted = await repo.bulk_delete_by_status(statuses)
     return {"status": "ok", "deleted": deleted, "target": target}
 

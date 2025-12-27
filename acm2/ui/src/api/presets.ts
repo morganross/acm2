@@ -76,6 +76,10 @@ export interface GptrConfigComplete {
   add_source_urls: boolean;
   verbose_mode: boolean;
   follow_links: boolean;
+  log_level: string;
+  // Subprocess timeout and retry settings
+  subprocess_timeout_minutes: number;
+  subprocess_retries: number;
 }
 
 export interface DrConfigComplete {
@@ -95,6 +99,10 @@ export interface DrConfigComplete {
   include_images: boolean;
   semantic_search: boolean;
   verbose_logging: boolean;
+  log_level: string;
+  // Subprocess timeout and retry settings
+  subprocess_timeout_minutes: number;
+  subprocess_retries: number;
 }
 
 export interface MaConfigComplete {

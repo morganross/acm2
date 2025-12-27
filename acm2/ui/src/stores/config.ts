@@ -43,6 +43,10 @@ interface GptrConfig {
   addSourceUrls: boolean
   verboseMode: boolean
   followLinks: boolean
+  logLevel: string
+  // Subprocess timeout and retry settings
+  subprocessTimeoutMinutes: number
+  subprocessRetries: number
 }
 
 // ============================================================================
@@ -65,6 +69,10 @@ interface DrConfig {
   includeImages: boolean
   semanticSearch: boolean
   verboseLogging: boolean
+  logLevel: string
+  // Subprocess timeout and retry settings
+  subprocessTimeoutMinutes: number
+  subprocessRetries: number
 }
 
 // ============================================================================
@@ -208,6 +216,10 @@ const defaultGptr: GptrConfig = {
   addSourceUrls: true,
   verboseMode: false,
   followLinks: true,
+  logLevel: 'INFO',
+  // Subprocess timeout and retry settings
+  subprocessTimeoutMinutes: 20,  // 20 minutes default
+  subprocessRetries: 1,  // 1 retry on timeout
 }
 
 const defaultDr: DrConfig = {
@@ -227,6 +239,10 @@ const defaultDr: DrConfig = {
   includeImages: false,
   semanticSearch: true,
   verboseLogging: false,
+  logLevel: 'INFO',
+  // Subprocess timeout and retry settings
+  subprocessTimeoutMinutes: 20,  // 20 minutes default
+  subprocessRetries: 1,  // 1 retry on timeout
 }
 
 const defaultMa: MaConfig = {

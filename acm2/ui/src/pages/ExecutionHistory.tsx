@@ -69,9 +69,19 @@ export default function ExecutionHistory() {
     setDeleting(deleteConfirm)
     try {
       await runsApi.delete(deleteConfirm)
-      setRuns(runs.filter(r => r.id !== deleteConfirm))
+      // Only update UI after confirmed deletion - refetch to ensure consistency
+      const updatedRuns = await runsApi.list({ limit: 100 })
+      setRuns(updatedRuns)
+      notify.success('Run deleted successfully')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete run')
+      const message = err instanceof Error ? err.message : 'Failed to delete run'
+      setError(message)
+      notify.error(message)
+      // Refetch to ensure UI matches actual state
+      try {
+        const freshRuns = await runsApi.list({ limit: 100 })
+        setRuns(freshRuns)
+      } catch { /* ignore refetch errors */ }
     } finally {
       setDeleting(null)
       setDeleteConfirm(null)
@@ -86,7 +96,7 @@ export default function ExecutionHistory() {
     if (bulkDeleteTarget) return
     if (deleting) return
 
-    const statuses = target === 'failed' ? ['failed'] : ['completed', 'failed']
+    const statuses = target === 'failed' ? ['failed', 'cancelled'] : ['completed', 'failed', 'cancelled']
     const runIdsToDelete = runs
       .filter((r) => statuses.includes(r.status))
       .map((r) => r.id)
@@ -116,7 +126,9 @@ export default function ExecutionHistory() {
       const deletedCount = result?.deleted ?? 0
 
       if (deletedCount > 0) {
-        setRuns((prev) => prev.filter((r) => !statuses.includes(r.status)))
+        // Refetch to get actual state from server instead of optimistic update
+        const updatedRuns = await runsApi.list({ limit: 100 })
+        setRuns(updatedRuns)
         const label = target === 'failed' ? 'failed run(s)' : 'completed/failed run(s)'
         notify.success(`Deleted ${deletedCount} ${label}`)
       } else {
@@ -126,6 +138,11 @@ export default function ExecutionHistory() {
       const message = err instanceof Error ? err.message : 'Bulk delete failed'
       setError(message)
       notify.error(message)
+      // Refetch to ensure UI matches actual state after error
+      try {
+        const freshRuns = await runsApi.list({ limit: 100 })
+        setRuns(freshRuns)
+      } catch { /* ignore refetch errors */ }
     } finally {
       setBulkDeleteTarget(null)
     }

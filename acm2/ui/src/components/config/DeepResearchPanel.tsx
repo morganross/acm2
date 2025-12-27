@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { Section } from '../ui/section'
 import { Slider } from '../ui/slider'
 import { Checkbox, CheckboxGroup } from '../ui/checkbox'
-import { Network, Cpu, GitBranch } from 'lucide-react'
+import { Network, Cpu, GitBranch, Settings, Clock } from 'lucide-react'
 import { useConfigStore } from '../../stores/config'
 import { useModelCatalog } from '../../stores/modelCatalog'
 
@@ -94,6 +94,65 @@ export function DeepResearchPanel() {
             step={1}
             displayValue={`${config.dr.concurrencyLimit} concurrent`}
           />
+        </div>
+
+        {/* Log Level Section */}
+        <div className="space-y-3 border-t border-gray-700 pt-4">
+          <h4 className="text-sm font-semibold text-gray-300 flex items-center gap-2">
+            <Settings className="w-4 h-4" /> Logging
+          </h4>
+          
+          <div>
+            <label className="text-sm font-medium text-gray-300 mb-2 block">
+              Log Level
+            </label>
+            <select
+              value={config.dr.logLevel}
+              onChange={(e) => config.updateDr({ logLevel: e.target.value })}
+              className="w-full bg-gray-800 border border-gray-700 text-gray-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="DEBUG">DEBUG - Most verbose</option>
+              <option value="INFO">INFO - Standard</option>
+              <option value="WARNING">WARNING - Warnings only</option>
+              <option value="ERROR">ERROR - Errors only</option>
+            </select>
+            <p className="text-xs text-gray-500 mt-1">
+              Controls Deep Research subprocess logging verbosity
+            </p>
+          </div>
+        </div>
+
+        {/* Timeout & Retry Section */}
+        <div className="space-y-3 border-t border-gray-700 pt-4">
+          <h4 className="text-sm font-semibold text-gray-300 flex items-center gap-2">
+            <Clock className="w-4 h-4" /> Timeout & Retry
+          </h4>
+          
+          <Slider
+            label="Subprocess Timeout"
+            value={config.dr.subprocessTimeoutMinutes}
+            onChange={(val) => config.updateDr({ subprocessTimeoutMinutes: val })}
+            min={10}
+            max={45}
+            step={5}
+            displayValue={`${config.dr.subprocessTimeoutMinutes} minutes`}
+          />
+          <p className="text-xs text-gray-500 -mt-2">
+            Kill hung Deep Research subprocess after this time (10-45 min)
+          </p>
+
+          <Slider
+            label="Timeout Retries"
+            value={config.dr.subprocessRetries}
+            onChange={(val) => config.updateDr({ subprocessRetries: val })}
+            min={0}
+            max={3}
+            step={1}
+            displayValue={`${config.dr.subprocessRetries} ${config.dr.subprocessRetries === 1 ? 'retry' : 'retries'}`}
+          />
+          <p className="text-xs text-gray-500 -mt-2">
+            Retry on timeout before marking as failed (0-3)
+          </p>
         </div>
       </CheckboxGroup>
     </Section>
