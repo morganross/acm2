@@ -1,30 +1,41 @@
 import { create } from 'zustand';
-import { modelsApi } from '../api/models';
+import { modelsApi, ModelInfo } from '../api/models';
 
 interface ModelCatalogState {
-  models: Record<string, string[]>; // provider:model -> [sections]
+  models: Record<string, ModelInfo>; // provider:model -> {sections: [...], max_output_tokens: int}
   isLoading: boolean;
   error: string | null;
   
   // Computed lists for convenience
   fpfModels: string[];
+  fpfFreeModels: string[];  // OpenRouter free tier models
   gptrModels: string[];
-  gptrDrModels: string[];
+  gptrFreeModels: string[];  // OpenRouter free tier models for GPT-R
+  drModels: string[];
+  drFreeModels: string[];  // OpenRouter free tier models for DR
   evalModels: string[];
+  evalFreeModels: string[];  // OpenRouter free tier models for Eval (uses fpf-free)
   combineModels: string[];
+  combineFreeModels: string[];  // OpenRouter free tier models for Combine (uses fpf-free)
 
   fetchModels: () => Promise<void>;
+  getMaxOutputTokens: (modelKey: string) => number | null;
 }
 
-export const useModelCatalog = create<ModelCatalogState>((set) => ({
+export const useModelCatalog = create<ModelCatalogState>((set, get) => ({
   models: {},
   isLoading: false,
   error: null,
   fpfModels: [],
+  fpfFreeModels: [],
   gptrModels: [],
-  gptrDrModels: [],
+  gptrFreeModels: [],
+  drModels: [],
+  drFreeModels: [],
   evalModels: [],
+  evalFreeModels: [],
   combineModels: [],
+  combineFreeModels: [],
 
   fetchModels: async () => {
     set({ isLoading: true, error: null });
@@ -32,27 +43,41 @@ export const useModelCatalog = create<ModelCatalogState>((set) => ({
       const response = await modelsApi.getModels();
       const models = response.models;
       
-      // Compute derived lists
-      const fpfModels = Object.keys(models).filter(m => models[m].includes('fpf'));
-      const gptrModels = Object.keys(models).filter(m => models[m].includes('gpt-r'));
-      // gpt-r-DR uses gpt-r list
-      const gptrDrModels = Object.keys(models).filter(m => models[m].includes('gpt-r'));
-      // eval and combine use fpf list
-      const evalModels = Object.keys(models).filter(m => models[m].includes('fpf'));
-      const combineModels = Object.keys(models).filter(m => models[m].includes('fpf'));
+      // Compute derived lists based on sections
+      const fpfModels = Object.keys(models).filter(m => models[m].sections.includes('fpf'));
+      const fpfFreeModels = Object.keys(models).filter(m => models[m].sections.includes('fpf-free'));
+      const gptrModels = Object.keys(models).filter(m => models[m].sections.includes('gpt-r'));
+      const gptrFreeModels = Object.keys(models).filter(m => models[m].sections.includes('gpt-r-free'));
+      const drModels = Object.keys(models).filter(m => models[m].sections.includes('dr'));
+      const drFreeModels = Object.keys(models).filter(m => models[m].sections.includes('dr-free'));
+      // eval and combine use fpf list (and fpf-free for free models)
+      const evalModels = Object.keys(models).filter(m => models[m].sections.includes('fpf'));
+      const evalFreeModels = Object.keys(models).filter(m => models[m].sections.includes('fpf-free'));
+      const combineModels = Object.keys(models).filter(m => models[m].sections.includes('fpf'));
+      const combineFreeModels = Object.keys(models).filter(m => models[m].sections.includes('fpf-free'));
 
       set({ 
         models, 
         fpfModels, 
-        gptrModels, 
-        gptrDrModels, 
-        evalModels, 
+        fpfFreeModels,
+        gptrModels,
+        gptrFreeModels,
+        drModels,
+        drFreeModels,
+        evalModels,
+        evalFreeModels,
         combineModels,
+        combineFreeModels,
         isLoading: false 
       });
     } catch (error) {
       console.error('Failed to fetch models:', error);
       set({ error: 'Failed to load model list', isLoading: false });
     }
-  }
+  },
+  
+  getMaxOutputTokens: (modelKey: string): number | null => {
+    const model = get().models[modelKey];
+    return model?.max_output_tokens ?? null;
+  },
 }));

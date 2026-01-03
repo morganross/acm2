@@ -69,7 +69,6 @@ class SingleEvalResponse(BaseModel):
     """Response for single-doc evaluation."""
     doc_id: str
     avg_score: float
-    weighted_avg_score: float
     scores: List[CriterionScoreResponse]
     num_evaluations: int
 
@@ -140,7 +139,6 @@ async def evaluate_single_docs(request: SingleEvalRequest) -> dict[str, SingleEv
         doc_id: SingleEvalResponse(
             doc_id=doc_id,
             avg_score=summary.avg_score,
-            weighted_avg_score=summary.weighted_avg_score,
             scores=[
                 CriterionScoreResponse(
                     criterion=crit,
@@ -240,7 +238,6 @@ async def evaluate_full(request: BatchEvalRequest) -> FullEvalResponse:
             single_responses[doc_id] = SingleEvalResponse(
                 doc_id=doc_id,
                 avg_score=summary.avg_score,
-                weighted_avg_score=summary.weighted_avg_score,
                 scores=[
                     CriterionScoreResponse(
                         criterion=crit,
@@ -336,18 +333,13 @@ async def get_eval_job_status(job_id: str) -> EvalJobStatus:
 @router.get("/criteria")
 async def get_evaluation_criteria() -> dict:
     """
-    Get the default evaluation criteria.
-    """
-    from ...evaluation import get_default_criteria
+    Get evaluation criteria.
     
-    criteria = get_default_criteria()
+    Note: Default criteria have been removed. Criteria must be configured
+    in the Content Library and referenced via eval_criteria_id in presets.
+    This endpoint now returns an empty list to indicate no defaults exist.
+    """
     return {
-        "criteria": [
-            {
-                "name": c.name,
-                "description": c.description,
-                "weight": c.weight,
-            }
-            for c in criteria
-        ]
+        "criteria": [],
+        "message": "No default criteria. Configure criteria in Content Library."
     }

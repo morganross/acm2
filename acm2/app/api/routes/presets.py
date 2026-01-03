@@ -531,6 +531,9 @@ async def update_preset(
     if data.eval_config is not None:
         overrides["eval"] = data.eval_config.model_dump()
         update_data["evaluation_enabled"] = data.eval_config.enabled
+        # Extract eval_retries to direct DB column
+        if hasattr(data.eval_config, 'retries') and data.eval_config.retries is not None:
+            update_data["eval_retries"] = data.eval_config.retries
     
     if data.pairwise_config is not None:
         overrides["pairwise"] = data.pairwise_config.model_dump()
@@ -541,6 +544,18 @@ async def update_preset(
     
     if data.concurrency_config is not None:
         overrides["concurrency"] = data.concurrency_config.model_dump()
+        # Extract concurrency settings to direct DB columns
+        cc = data.concurrency_config
+        if hasattr(cc, 'generation_concurrency') and cc.generation_concurrency is not None:
+            update_data["generation_concurrency"] = cc.generation_concurrency
+        if hasattr(cc, 'eval_concurrency') and cc.eval_concurrency is not None:
+            update_data["eval_concurrency"] = cc.eval_concurrency
+        if hasattr(cc, 'request_timeout') and cc.request_timeout is not None:
+            update_data["request_timeout"] = cc.request_timeout
+        if hasattr(cc, 'fpf_max_retries') and cc.fpf_max_retries is not None:
+            update_data["fpf_max_retries"] = cc.fpf_max_retries
+        if hasattr(cc, 'fpf_retry_delay') and cc.fpf_retry_delay is not None:
+            update_data["fpf_retry_delay"] = cc.fpf_retry_delay
     
     # Update generators from enabled flags
     generators = []
@@ -802,7 +817,9 @@ async def execute_preset(
     
     # Get eval config - REQUIRED only when evaluation is enabled
     eval_cfg = preset.config_overrides.get("eval", {}) if preset.config_overrides else {}
-    eval_enabled = eval_cfg.get("enabled") if eval_cfg.get("enabled") is not None else preset.evaluation_enabled
+    eval_enabled = eval_cfg.get("enabled")
+    if eval_enabled is None:
+        raise ValueError(f"Preset {preset.name} has no eval.enabled - set this in the GUI")
     eval_iterations = eval_cfg.get("iterations")
     if eval_iterations is None:
         raise ValueError(f"Preset {preset.name} has no eval_config.iterations - set this in the GUI")
@@ -827,9 +844,26 @@ async def execute_preset(
     if not preset.log_level:
         raise ValueError(f"Preset {preset.name} has no log_level - set this in the GUI")
     
+    logger.info(f"DEBUG EARLY: preset.config_overrides={preset.config_overrides}")
+    general_cfg = preset.config_overrides.get("general", {}) if preset.config_overrides else {}
     fpf_cfg = preset.config_overrides.get("fpf", {}) if preset.config_overrides else {}
+    logger.info(f"DEBUG EARLY: fpf_cfg={fpf_cfg}")
     gptr_cfg = preset.config_overrides.get("gptr", {}) if preset.config_overrides else {}
+    dr_cfg = preset.config_overrides.get("dr", {}) if preset.config_overrides else {}
     concurrency_cfg = preset.config_overrides.get("concurrency", {}) if preset.config_overrides else {}
+
+    # Extract FPF log settings from general config (where GUI saves them)
+    fpf_log_output = general_cfg.get("fpf_log_output")
+    fpf_log_file_path = general_cfg.get("fpf_log_file_path")
+    
+    # Extract per-generator model keys from config_overrides
+    fpf_model_keys = fpf_cfg.get("selected_models") if fpf_cfg.get("selected_models") else None
+    gptr_model_keys = gptr_cfg.get("selected_models") if gptr_cfg.get("selected_models") else None
+    dr_model_keys = dr_cfg.get("selected_models") if dr_cfg.get("selected_models") else None
+    
+    logger.info(f"DEBUG: preset.config_overrides type={type(preset.config_overrides)}")
+    logger.info(f"DEBUG: fpf_cfg={fpf_cfg}")
+    logger.info(f"DEBUG: fpf_model_keys={fpf_model_keys}")
 
     model_settings = {}
     model_names: list[str] = []
@@ -841,10 +875,7 @@ async def execute_preset(
         temperature = model_entry.get("temperature")
         max_tokens = model_entry.get("max_tokens")
 
-        if temperature is None:
-            temperature = fpf_cfg.get("temperature") or gptr_cfg.get("temperature")
-        if max_tokens is None:
-            max_tokens = fpf_cfg.get("max_tokens") or gptr_cfg.get("max_tokens")
+        # No fallbacks - temperature and max_tokens must be set per-model in the GUI
         if not provider or not base_model:
             raise ValueError(f"Model entry missing provider/model in preset {preset.name}: {model_entry}")
         if temperature is None:
@@ -861,16 +892,37 @@ async def execute_preset(
         }
         model_names.append(key)
 
-    eval_temperature = eval_cfg.get("temperature") or fpf_cfg.get("temperature")
-    eval_max_tokens = eval_cfg.get("max_tokens") or fpf_cfg.get("max_tokens")
-    eval_retries = eval_cfg.get("retries")
+    # MIGRATION: If per-generator model lists are empty but we have legacy models,
+    # use the legacy model_names for each enabled generator. This handles presets
+    # saved before per-generator model selection was implemented.
+    if model_names:
+        generators_list = preset.generators or []
+        if not fpf_model_keys and "fpf" in generators_list:
+            logger.info(f"MIGRATION: Using legacy models for FPF generator: {model_names}")
+            fpf_model_keys = model_names
+        if not gptr_model_keys and "gptr" in generators_list:
+            logger.info(f"MIGRATION: Using legacy models for GPTR generator: {model_names}")
+            gptr_model_keys = model_names
+        if not dr_model_keys and "dr" in generators_list:
+            logger.info(f"MIGRATION: Using legacy models for DR generator: {model_names}")
+            dr_model_keys = model_names
+
+    eval_temperature = eval_cfg.get("temperature")
+    eval_max_tokens = eval_cfg.get("max_tokens")
+    # Read eval_retries from preset's direct database column (set by GUI)
+    eval_retries = preset.eval_retries
     if eval_retries is None:
-        raise ValueError(f"Preset {preset.name} has no eval_config.retries - set this in the GUI")
-    if eval_temperature is None:
-        raise ValueError(f"Preset {preset.name} has no eval temperature configured")
-    if eval_max_tokens is None:
-        raise ValueError(f"Preset {preset.name} has no eval max_tokens configured")
-    eval_strict_json = eval_cfg.get("strict_json", True)
+        raise ValueError(f"Preset {preset.name} has no eval_retries - set this in the GUI")
+    # Only require eval temperature/max_tokens if eval is enabled
+    if eval_enabled:
+        if eval_temperature is None:
+            raise ValueError(f"Preset {preset.name} has no eval temperature configured")
+        if eval_max_tokens is None:
+            raise ValueError(f"Preset {preset.name} has no eval max_tokens configured")
+    eval_strict_json = eval_cfg.get("strict_json")
+    # Only require strict_json if eval is enabled
+    if eval_enabled and eval_strict_json is None:
+        raise ValueError(f"Preset {preset.name} has no eval strict_json configured - set this in the GUI")
     # NOTE: eval_enable_grounding removed - FPF always uses grounding
 
     gen_concurrency = concurrency_cfg.get("generation_concurrency") if concurrency_cfg else None
@@ -879,7 +931,9 @@ async def execute_preset(
     eval_timeout_val = eval_cfg.get("timeout_seconds")
     if eval_timeout_val is None and concurrency_cfg:
         eval_timeout_val = concurrency_cfg.get("eval_timeout")
-    if eval_timeout_val is None:
+    # Note: request_timeout, gen_concurrency, eval_concurrency can be None (no timeout/default)
+    # eval_timeout is required when eval is enabled
+    if eval_enabled and eval_timeout_val is None:
         raise ValueError(f"Preset {preset.name} has no eval timeout configured")
 
     config = RunConfig(
@@ -889,6 +943,9 @@ async def execute_preset(
         generators=[AdapterGeneratorType(g) for g in preset.generators],
         models=model_names,
         model_settings=model_settings,
+        fpf_models=fpf_model_keys,
+        gptr_models=gptr_model_keys,
+        dr_models=dr_model_keys,
         iterations=_derive_iterations(preset),
         enable_single_eval=eval_enabled,
         enable_pairwise=preset.pairwise_enabled,
@@ -903,15 +960,15 @@ async def execute_preset(
         combine_strategy=combine_strategy or "",
         combine_models=combine_models_list if combine_enabled else [],
         log_level=preset.log_level,
-        request_timeout=request_timeout_val or preset.request_timeout,
-        eval_timeout=eval_timeout_val or preset.eval_timeout,
-        generation_concurrency=gen_concurrency or preset.generation_concurrency,
-        eval_concurrency=eval_concurrency_val or preset.eval_concurrency,
-        fpf_log_output=preset.fpf_log_output or "file",
-        fpf_log_file_path=preset.fpf_log_file_path or f"logs/{run.id}/fpf_output.log",
-        fpf_max_retries=concurrency_cfg.get("fpf_max_retries", 3) if concurrency_cfg else 3,
-        fpf_retry_delay=concurrency_cfg.get("fpf_retry_delay", 1.0) if concurrency_cfg else 1.0,
-        post_combine_top_n=preset.post_combine_top_n,
+        request_timeout=request_timeout_val,
+        eval_timeout=eval_timeout_val,
+        generation_concurrency=gen_concurrency,
+        eval_concurrency=eval_concurrency_val,
+        fpf_log_output=fpf_log_output,
+        fpf_log_file_path=fpf_log_file_path,
+        fpf_max_retries=concurrency_cfg.get("fpf_max_retries"),
+        fpf_retry_delay=concurrency_cfg.get("fpf_retry_delay"),
+        post_combine_top_n=general_cfg.get("post_combine_top_n"),
         single_eval_instructions=single_eval_instructions,
         pairwise_eval_instructions=pairwise_eval_instructions,
         eval_criteria=eval_criteria,

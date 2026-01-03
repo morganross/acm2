@@ -32,15 +32,16 @@ Supported providers
   - OpenAI (Responses API) — allowed models: gpt-5, gpt-5-mini, gpt-5-nano, gpt-5.1, gpt-5.1-mini, gpt-5.1-preview, o4-mini, o3 (prefix-tolerant)
   - OpenAI Deep Research (openaidp family) — allowed models: o3-deep-research, o4-mini-deep-research (prefix-tolerant)
   - Google Gemini — allowed models: gemini-1.5-pro, gemini-1.5-flash, gemini-2.0-flash, gemini-2.5-flash, gemini-2.5-flash-lite, gemini-2.5-pro, gemini-3-pro-preview, gemini-pro-latest (prefix-tolerant)
-  - Tavily Research — allowed models: tavily/tvly-mini, tavily/tvly-pro, tavily/auto (normalized to mini/pro/auto)
-- fpf_main acts as a router so caller code doesn’t need per-model syntax knowledge.
+  - Tavily Research — allowed models: tavily/tvly-mini, tavily/tvly-pro, tavily/auto (normalized to mini/pro/auto)  - OpenRouter — gateway to 600+ models; grounding NOT enforced (REQUIRES_GROUNDING=False); model format: provider/model (e.g., openai/gpt-4o, anthropic/claude-sonnet-4)- fpf_main acts as a router so caller code doesn’t need per-model syntax knowledge.
 
 Key implementation details
 - Provider adapters always attach:
   - A web search tool (e.g., web_search_preview for OpenAI; google_search for Gemini)
   - A reasoning configuration appropriate to the model family
+  - Exception: OpenRouter does not enforce web search (most models don't support it)
 - Adapters expose execute_and_verify(...) and verify that the model actually used grounding and produced reasoning before returning.
 - A shared grounding_enforcer module asserts both signals (grounding + reasoning) across providers.
+- Providers can set REQUIRES_GROUNDING=False or REQUIRES_REASONING=False to skip enforcement.
 - file_handler calls provider.execute_and_verify when available; otherwise it posts and then runs grounding_enforcer.assert_grounding_and_reasoning. If verification fails, FPF errors and refuses to write a report.
 
 Configuration notes

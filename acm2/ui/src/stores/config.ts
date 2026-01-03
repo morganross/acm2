@@ -39,6 +39,8 @@ interface GptrConfig {
   maxSubtopics: number
   reportType: string
   reportSource: string
+  tone: string
+  retriever: string
   scrapeUrls: boolean
   addSourceUrls: boolean
   verboseMode: boolean
@@ -100,6 +102,9 @@ interface EvalConfig {
   judgeModels: string[]
   timeoutSeconds: number  // Per-call timeout for judge LLM
   retries: number  // Retry count for transient failures
+  temperature: number  // Temperature for judge LLM
+  maxTokens: number  // Max output tokens for judge LLM responses
+  strictJson: boolean  // Require strict JSON output from judge LLM
   enableSemanticSimilarity: boolean
   enableFactualAccuracy: boolean
   enableCoherence: boolean
@@ -121,6 +126,9 @@ interface ConcurrencyConfig {
   launchDelay: number
   enableRateLimiting: boolean
   requestTimeout: number | null
+  // FPF API retry settings (for transient errors like 429, 500s)
+  fpfMaxRetries: number
+  fpfRetryDelay: number
 }
 
 // ============================================================================
@@ -129,6 +137,7 @@ interface ConcurrencyConfig {
 interface CombineConfig {
   enabled: boolean
   selectedModels: string[]
+  maxTokens: number  // Max output tokens for combine LLM
   // Content Library instruction ID
   combineInstructionsId: string | null
   // Post-combine evaluation settings
@@ -144,6 +153,7 @@ interface GeneralConfig {
   enableLogging: boolean
   logLevel: string
   saveIntermediate: boolean
+  exposeCriteriaToGenerators: boolean  // When true, eval criteria appended to generation prompts
 }
 
 // ============================================================================
@@ -180,6 +190,7 @@ const defaultGeneral: GeneralConfig = {
   enableLogging: true,
   logLevel: 'INFO',
   saveIntermediate: true,
+  exposeCriteriaToGenerators: false,
 }
 
 const defaultFpf: FpfConfig = {
@@ -212,6 +223,8 @@ const defaultGptr: GptrConfig = {
   maxSubtopics: 5,
   reportType: 'research_report',
   reportSource: 'web',
+  tone: 'Objective',
+  retriever: 'tavily',
   scrapeUrls: true,
   addSourceUrls: true,
   verboseMode: false,
@@ -264,6 +277,9 @@ const defaultEval: EvalConfig = {
   judgeModels: [],  // REQUIRED from preset - no hardcoded default
   timeoutSeconds: 600,  // 10 min per-call timeout
   retries: 3,  // Retry count for transient failures
+  temperature: 0.3,  // Temperature for judge LLM
+  maxTokens: 16384,  // Max output tokens for judge LLM
+  strictJson: true,  // Require strict JSON output from judge LLM
   enableSemanticSimilarity: true,
   enableFactualAccuracy: true,
   enableCoherence: true,
@@ -281,11 +297,14 @@ const defaultConcurrency: ConcurrencyConfig = {
   launchDelay: 1.0,
   enableRateLimiting: true,
   requestTimeout: null,
+  fpfMaxRetries: 3,
+  fpfRetryDelay: 1.0,
 }
 
 const defaultCombine: CombineConfig = {
   enabled: true,
   selectedModels: [],  // REQUIRED from preset - no hardcoded default
+  maxTokens: 64000,  // Max output tokens for combine LLM
   combineInstructionsId: null,
   postCombineTopN: 5,
 }

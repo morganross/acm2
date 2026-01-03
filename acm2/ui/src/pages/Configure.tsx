@@ -95,6 +95,7 @@ function serializeConfigToPreset(
     fpf_log_output: concurrencySettings.fpfLogOutput,
     fpf_log_file_path: concurrencySettings.fpfLogFilePath,
     post_combine_top_n: config.combine.postCombineTopN,
+    expose_criteria_to_generators: config.general.exposeCriteriaToGenerators,
   };
 
   // Serialize FpfConfig
@@ -130,7 +131,8 @@ function serializeConfigToPreset(
     max_subtopics: config.gptr.maxSubtopics,
     report_type: config.gptr.reportType,
     report_source: config.gptr.reportSource,
-    tone: 'Objective',
+    tone: config.gptr.tone,
+    retriever: config.gptr.retriever,
     scrape_urls: config.gptr.scrapeUrls,
     add_source_urls: config.gptr.addSourceUrls,
     verbose_mode: config.gptr.verboseMode,
@@ -186,6 +188,9 @@ function serializeConfigToPreset(
     judge_models: config.eval.judgeModels,
     timeout_seconds: config.eval.timeoutSeconds,
     retries: config.eval.retries,
+    temperature: config.eval.temperature,
+    max_tokens: config.eval.maxTokens,
+    strict_json: config.eval.strictJson,
     enable_semantic_similarity: config.eval.enableSemanticSimilarity,
     enable_factual_accuracy: config.eval.enableFactualAccuracy,
     enable_coherence: config.eval.enableCoherence,
@@ -210,6 +215,7 @@ function serializeConfigToPreset(
     enabled: config.combine.enabled,
     selected_models: config.combine.selectedModels,
     strategy: 'merge',
+    max_tokens: config.combine.maxTokens,
   };
 
   return {
@@ -227,7 +233,8 @@ function serializeConfigToPreset(
     gptr_settings: {
       report_type: config.gptr.reportType,
       report_source: config.gptr.reportSource,
-      tone: 'Objective',
+      tone: config.gptr.tone,
+      retriever: config.gptr.retriever,
       max_search_results: config.gptr.maxSearchResultsPerQuery,
       total_words: config.gptr.totalWords,
       fast_llm: config.gptr.selectedModels.length > 0 ? parseModelString(config.gptr.selectedModels[0]).model : 'gpt-5-mini',
@@ -286,6 +293,7 @@ function deserializePresetToConfig(
       enableLogging: preset.general_config.enable_logging ?? config.general.enableLogging,
       logLevel: preset.general_config.log_level ?? config.general.logLevel,
       saveIntermediate: preset.general_config.save_intermediate ?? config.general.saveIntermediate,
+      exposeCriteriaToGenerators: (preset.general_config as any).expose_criteria_to_generators ?? config.general.exposeCriteriaToGenerators,
     });
   } else {
     // Fallback to legacy fields
@@ -340,6 +348,8 @@ function deserializePresetToConfig(
       maxSubtopics: preset.gptr_config.max_subtopics ?? config.gptr.maxSubtopics,
       reportType: preset.gptr_config.report_type ?? config.gptr.reportType,
       reportSource: preset.gptr_config.report_source ?? config.gptr.reportSource,
+      tone: preset.gptr_config.tone ?? config.gptr.tone,
+      retriever: preset.gptr_config.retriever ?? config.gptr.retriever,
       scrapeUrls: preset.gptr_config.scrape_urls ?? config.gptr.scrapeUrls,
       addSourceUrls: preset.gptr_config.add_source_urls ?? config.gptr.addSourceUrls,
       verboseMode: preset.gptr_config.verbose_mode ?? config.gptr.verboseMode,
@@ -354,6 +364,8 @@ function deserializePresetToConfig(
       enabled: preset.generators?.includes('gptr') ?? config.gptr.enabled,
       reportType: preset.gptr_settings?.report_type ?? config.gptr.reportType,
       reportSource: preset.gptr_settings?.report_source ?? config.gptr.reportSource,
+      tone: preset.gptr_settings?.tone ?? config.gptr.tone,
+      retriever: preset.gptr_settings?.retriever ?? config.gptr.retriever,
     });
   }
 
@@ -406,6 +418,9 @@ function deserializePresetToConfig(
       judgeModels: preset.eval_config.judge_models ?? config.eval.judgeModels,
       timeoutSeconds: preset.eval_config.timeout_seconds ?? config.eval.timeoutSeconds,
       retries: preset.eval_config.retries ?? config.eval.retries,
+      temperature: preset.eval_config.temperature ?? config.eval.temperature,
+      maxTokens: preset.eval_config.max_tokens ?? config.eval.maxTokens,
+      strictJson: preset.eval_config.strict_json ?? config.eval.strictJson,
       enableSemanticSimilarity: preset.eval_config.enable_semantic_similarity ?? config.eval.enableSemanticSimilarity,
       enableFactualAccuracy: preset.eval_config.enable_factual_accuracy ?? config.eval.enableFactualAccuracy,
       enableCoherence: preset.eval_config.enable_coherence ?? config.eval.enableCoherence,
@@ -443,6 +458,7 @@ function deserializePresetToConfig(
     config.updateCombine({
       enabled: preset.combine_config.enabled ?? config.combine.enabled,
       selectedModels: preset.combine_config.selected_models ?? config.combine.selectedModels,
+      maxTokens: preset.combine_config.max_tokens ?? config.combine.maxTokens,
       combineInstructionsId: (preset as any).combine_instructions_id ?? null,
       postCombineTopN: (preset.general_config as any)?.post_combine_top_n ?? config.combine.postCombineTopN,
     });

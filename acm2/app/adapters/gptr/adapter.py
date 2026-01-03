@@ -1,8 +1,10 @@
 import asyncio
 import json
 import os
+import subprocess
 import sys
 import logging
+import threading
 from typing import AsyncGenerator, Optional, Dict, Any, Tuple
 from pathlib import Path
 from datetime import datetime
@@ -54,7 +56,8 @@ class GptrAdapter(BaseAdapter):
 
     def __init__(self):
         self._entrypoint = Path(__file__).parent / "entrypoint.py"
-        self._active_tasks: Dict[str, asyncio.subprocess.Process] = {}
+        self._active_tasks: Dict[str, subprocess.Popen] = {}
+        self._cancel_events: Dict[str, threading.Event] = {}
 
     @property
     def name(self) -> GeneratorType:
@@ -75,6 +78,91 @@ class GptrAdapter(BaseAdapter):
         except ImportError:
             return False
 
+    def _run_subprocess_sync(
+        self,
+        cmd: list[str],
+        env: Dict[str, str],
+        task_id: str,
+        timeout_seconds: int,
+        cancel_event: threading.Event,
+    ) -> SubprocessResult:
+        """
+        Synchronous subprocess execution with timeout.
+        Runs in a thread via asyncio.to_thread() to avoid event loop issues on Windows.
+        """
+        process = None
+        try:
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+                text=False,  # Binary mode for proper decoding
+            )
+            
+            # Track for cancellation
+            self._active_tasks[task_id] = process
+            
+            logger.info(f"GPT-R subprocess started (PID {process.pid}), timeout={timeout_seconds}s ({timeout_seconds // 60}min)")
+            
+            try:
+                stdout_bytes, stderr_bytes = process.communicate(timeout=timeout_seconds)
+                
+                # Check if cancelled
+                if cancel_event.is_set():
+                    return SubprocessResult(
+                        stdout="",
+                        stderr="",
+                        return_code=-1,
+                        timed_out=False,
+                        error="Cancelled"
+                    )
+                
+                stdout_text = stdout_bytes.decode(errors='replace') if stdout_bytes else ""
+                stderr_text = stderr_bytes.decode(errors='replace') if stderr_bytes else ""
+                
+                logger.info(f"GPT-R subprocess completed with return code: {process.returncode}")
+                
+                return SubprocessResult(
+                    stdout=stdout_text,
+                    stderr=stderr_text,
+                    return_code=process.returncode,
+                    timed_out=False
+                )
+                
+            except subprocess.TimeoutExpired:
+                logger.warning(f"GPT-R subprocess timed out after {timeout_seconds}s (PID {process.pid}), killing...")
+                process.kill()
+                stdout_bytes, stderr_bytes = process.communicate(timeout=5)
+                stdout_text = stdout_bytes.decode(errors='replace') if stdout_bytes else ""
+                stderr_text = stderr_bytes.decode(errors='replace') if stderr_bytes else ""
+                
+                return SubprocessResult(
+                    stdout=stdout_text,
+                    stderr=stderr_text,
+                    return_code=-1,
+                    timed_out=True,
+                    error=f"Subprocess timed out after {timeout_seconds // 60} minutes"
+                )
+                
+        except Exception as e:
+            logger.exception(f"Error in subprocess execution: {e}")
+            
+            if process and process.poll() is None:
+                try:
+                    process.kill()
+                    process.wait(timeout=2)
+                except Exception:
+                    pass
+            
+            return SubprocessResult(
+                stdout="",
+                stderr="",
+                return_code=-1,
+                timed_out=False,
+                error=str(e)
+            )
+
     async def _run_subprocess_with_timeout(
         self,
         cmd: list[str],
@@ -84,135 +172,49 @@ class GptrAdapter(BaseAdapter):
         progress_callback: Optional[ProgressCallback] = None,
     ) -> SubprocessResult:
         """
-        Run a subprocess with timeout, streaming stdout/stderr.
+        Run a subprocess with timeout using asyncio.to_thread().
+        This avoids Windows event loop subprocess issues by running in a thread.
         
         Returns SubprocessResult with stdout, stderr, return_code, and timed_out flag.
         On timeout, kills the process and returns timed_out=True.
         """
-        process = None
-        stdout_lines = []
-        stderr_lines = []
+        cancel_event = threading.Event()
+        self._cancel_events[task_id] = cancel_event
         
         try:
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=env
+            # Run the synchronous subprocess in a thread
+            result = await asyncio.to_thread(
+                self._run_subprocess_sync,
+                cmd,
+                env,
+                task_id,
+                timeout_seconds,
+                cancel_event,
             )
             
-            self._active_tasks[task_id] = process
+            # Handle progress callback for stdout lines after completion
+            if progress_callback and result.stdout:
+                for line in result.stdout.split('\n'):
+                    await self._handle_progress_line(line, progress_callback)
             
-            async def _read_stdout():
-                """Read stdout in chunks to avoid LimitOverrunError on very long lines."""
-                buffer = ""
-                CHUNK_SIZE = 262144  # 256 KB per read
-                while True:
-                    try:
-                        chunk = await process.stdout.read(CHUNK_SIZE)
-                    except Exception:
-                        break
-                    if not chunk:
-                        # Flush remaining buffer
-                        if buffer:
-                            stdout_lines.append(buffer)
-                            await self._handle_progress_line(buffer, progress_callback)
-                        break
-
-                    decoded = chunk.decode(errors='replace')
-                    buffer += decoded
-
-                    # Split complete lines and keep remainder in buffer
-                    *lines, buffer = buffer.split('\n')
-                    for decoded_line in lines:
-                        stdout_lines.append(decoded_line)
-                        await self._handle_progress_line(decoded_line, progress_callback)
-
-            async def _read_stderr():
-                """Read stderr line by line."""
-                while True:
-                    try:
-                        line = await process.stderr.readline()
-                    except Exception:
-                        break
-                    if not line:
-                        break
-                    decoded = line.decode(errors='replace').rstrip('\n')
-                    stderr_lines.append(decoded)
-
-            # Create tasks for reading stdout/stderr
-            stdout_task = asyncio.create_task(_read_stdout())
-            stderr_task = asyncio.create_task(_read_stderr())
-
-            logger.info(f"GPT-R subprocess started (PID {process.pid}), timeout={timeout_seconds}s ({timeout_seconds // 60}min)")
+            return result
             
-            try:
-                # Wait for process with timeout
-                await asyncio.wait_for(process.wait(), timeout=timeout_seconds)
-                
-                # Process completed within timeout, wait for read tasks
-                await asyncio.wait_for(stdout_task, timeout=5.0)
-                await asyncio.wait_for(stderr_task, timeout=5.0)
-                
-                logger.info(f"GPT-R subprocess completed with return code: {process.returncode}")
-                
-                return SubprocessResult(
-                    stdout='\n'.join(stdout_lines),
-                    stderr='\n'.join(stderr_lines),
-                    return_code=process.returncode,
-                    timed_out=False
-                )
-                
-            except asyncio.TimeoutError:
-                # Process timed out - kill it
-                logger.warning(f"GPT-R subprocess timed out after {timeout_seconds}s (PID {process.pid}), killing...")
-                
-                # Cancel read tasks
-                stdout_task.cancel()
-                stderr_task.cancel()
-                
-                # Try graceful termination first
-                try:
-                    process.terminate()
-                    try:
-                        await asyncio.wait_for(process.wait(), timeout=5.0)
-                    except asyncio.TimeoutError:
-                        # Force kill if termination doesn't work
-                        logger.warning(f"GPT-R subprocess did not terminate gracefully, force killing (PID {process.pid})")
-                        process.kill()
-                        await asyncio.wait_for(process.wait(), timeout=2.0)
-                except Exception as kill_err:
-                    logger.error(f"Error killing subprocess: {kill_err}")
-                
-                return SubprocessResult(
-                    stdout='\n'.join(stdout_lines),
-                    stderr='\n'.join(stderr_lines),
-                    return_code=-1,
-                    timed_out=True,
-                    error=f"Subprocess timed out after {timeout_seconds // 60} minutes"
-                )
-                
+        except asyncio.CancelledError:
+            # Signal the thread to stop
+            cancel_event.set()
+            raise
         except Exception as e:
-            logger.exception(f"Error in subprocess execution: {e}")
-            
-            # Attempt to kill process if it exists
-            if process and process.returncode is None:
-                try:
-                    process.kill()
-                    await asyncio.wait_for(process.wait(), timeout=2.0)
-                except Exception:
-                    pass
-            
+            logger.exception(f"Error running subprocess via to_thread: {e}")
             return SubprocessResult(
-                stdout='\n'.join(stdout_lines),
-                stderr='\n'.join(stderr_lines),
+                stdout="",
+                stderr="",
                 return_code=-1,
                 timed_out=False,
                 error=str(e)
             )
         finally:
-            if task_id in self._active_tasks:
-                del self._active_tasks[task_id]
+            self._cancel_events.pop(task_id, None)
+            self._active_tasks.pop(task_id, None)
 
     async def _handle_progress_line(self, line: str, progress_callback: Optional[ProgressCallback]) -> None:
         """Parse a line for progress JSON and call progress_callback if applicable."""
@@ -525,18 +527,27 @@ class GptrAdapter(BaseAdapter):
         # Check for both direct task_id and attempt variants
         task_ids_to_check = [task_id] + [f"{task_id}-attempt{i}" for i in range(1, 5)]
         
+        cancelled = False
         for tid in task_ids_to_check:
+            # Signal cancel via event
+            cancel_event = self._cancel_events.get(tid)
+            if cancel_event:
+                cancel_event.set()
+                cancelled = True
+            
+            # Kill the subprocess if tracked
             if tid in self._active_tasks:
                 process = self._active_tasks[tid]
                 try:
                     process.terminate()
                     try:
-                        await asyncio.wait_for(process.wait(), timeout=2.0)
-                    except asyncio.TimeoutError:
+                        process.wait(timeout=2.0)
+                    except subprocess.TimeoutExpired:
                         process.kill()
+                        process.wait(timeout=1.0)
                     logger.info(f"Cancelled task {tid}")
-                    return True
+                    cancelled = True
                 except Exception as e:
                     logger.error(f"Failed to cancel task {tid}: {e}")
-                    return False
-        return False
+        
+        return cancelled

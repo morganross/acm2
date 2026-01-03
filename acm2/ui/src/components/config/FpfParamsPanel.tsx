@@ -1,14 +1,15 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Section } from '../ui/section'
 import { Slider } from '../ui/slider'
 import { Checkbox, CheckboxGroup } from '../ui/checkbox'
-import { FileText, Cpu, Zap, RefreshCw } from 'lucide-react'
+import { FileText, Cpu, Zap, RefreshCw, ChevronDown, ChevronRight, Gift } from 'lucide-react'
 import { useConfigStore } from '../../stores/config'
 import { useModelCatalog } from '../../stores/modelCatalog'
 
 export function FpfParamsPanel() {
   const config = useConfigStore()
-  const { fpfModels, isLoading, fetchModels } = useModelCatalog()
+  const { fpfModels, fpfFreeModels, models, isLoading, fetchModels } = useModelCatalog()
+  const [freeModelsExpanded, setFreeModelsExpanded] = useState(false)
 
   // Fetch models on mount if empty
   useEffect(() => {
@@ -16,6 +17,21 @@ export function FpfParamsPanel() {
       fetchModels()
     }
   }, [])
+
+  // Compute max output tokens based on selected models (use minimum across all selected)
+  const maxOutputTokensLimit = useMemo(() => {
+    if (config.fpf.selectedModels.length === 0) {
+      return 200000 // Default max when no models selected
+    }
+    const limits = config.fpf.selectedModels
+      .map(m => models[m]?.max_output_tokens)
+      .filter((limit): limit is number => limit !== null && limit !== undefined)
+    
+    if (limits.length === 0) {
+      return 200000 // Default if no limits found
+    }
+    return Math.min(...limits)
+  }, [config.fpf.selectedModels, models])
 
   return (
     <Section
@@ -59,6 +75,52 @@ export function FpfParamsPanel() {
           </div>
         </div>
 
+        {/* OpenRouter FREE Models - Collapsible Section */}
+        {fpfFreeModels.length > 0 && (
+          <div className="mb-4 border border-green-700/50 rounded-lg overflow-hidden">
+            <button
+              onClick={() => setFreeModelsExpanded(!freeModelsExpanded)}
+              className="w-full flex items-center gap-2 px-3 py-2 bg-green-900/30 hover:bg-green-900/50 transition-colors text-left"
+            >
+              {freeModelsExpanded ? (
+                <ChevronDown className="w-4 h-4 text-green-400" />
+              ) : (
+                <ChevronRight className="w-4 h-4 text-green-400" />
+              )}
+              <Gift className="w-4 h-4 text-green-400" />
+              <span className="text-sm font-semibold text-green-300">
+                OpenRouter FREE Models
+              </span>
+              <span className="ml-auto text-xs text-green-500">
+                {fpfFreeModels.filter(m => config.fpf.selectedModels.includes(m)).length} / {fpfFreeModels.length} selected
+              </span>
+            </button>
+            {freeModelsExpanded && (
+              <div className="p-3 bg-gray-800/50">
+                <p className="text-xs text-gray-400 mb-3">
+                  $0/M tokens - Community-provided free endpoints with rate limits
+                </p>
+                <div className="grid grid-cols-2 gap-2" data-section="fpf-free-models">
+                  {fpfFreeModels.map((model) => (
+                    <Checkbox
+                      key={model}
+                      checked={config.fpf.selectedModels.includes(model)}
+                      onChange={(checked) => {
+                        const selectedModels = checked
+                          ? [...config.fpf.selectedModels, model]
+                          : config.fpf.selectedModels.filter((m) => m !== model)
+                        config.updateFpf({ selectedModels })
+                      }}
+                      label={model.replace('openrouter:', '').replace(':free', ' 🆓')}
+                      dataTestId={`fpf-model-${model}`}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Parameter Sliders */}
         <div className="space-y-3 border-t border-gray-700 pt-4">
           <h4 className="text-sm font-semibold text-gray-300 flex items-center gap-2">
@@ -77,12 +139,12 @@ export function FpfParamsPanel() {
 
           <Slider
             label="Max Output Tokens"
-            value={config.fpf.maxTokens}
+            value={Math.min(config.fpf.maxTokens, maxOutputTokensLimit)}
             onChange={(val) => config.updateFpf({ maxTokens: val })}
             min={512}
-            max={200000}
+            max={maxOutputTokensLimit}
             step={256}
-            displayValue={config.fpf.maxTokens}
+            displayValue={`${config.fpf.maxTokens.toLocaleString()} (limit: ${maxOutputTokensLimit.toLocaleString()})`}
           />
 
           <Slider

@@ -517,6 +517,13 @@ def run(file_a: Optional[str] = None,
         LOG.info(f"Successfully loaded API key '{api_key_name}' (Length: {len(api_key_value)})")
     else:
         LOG.warning(f"Failed to load API key '{api_key_name}' from {env_file}")
+        # Fallback: openaidp can use OPENAI_API_KEY (same OpenAI API, different endpoint)
+        if provider_name == "openaidp":
+            fallback_key = "OPENAI_API_KEY"
+            LOG.info(f"Trying fallback key '{fallback_key}' for openaidp provider")
+            api_key_value = _read_key_from_env_file(env_file, fallback_key)
+            if api_key_value:
+                LOG.info(f"Successfully loaded fallback key '{fallback_key}' for openaidp (Length: {len(api_key_value)})")
 
     if api_key_value is None or api_key_value == "":
         LOG.error("API key '%s' not found in env file: %s", api_key_name, env_file)

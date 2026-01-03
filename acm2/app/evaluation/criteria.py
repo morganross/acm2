@@ -1,7 +1,11 @@
 """
 Evaluation criteria management for ACM2.
 
-Provides default criteria and utilities for loading/validating criteria.
+Provides utilities for loading/validating criteria from Content Library.
+
+IMPORTANT: No default criteria are provided. Criteria MUST be configured
+in the Content Library and referenced in the preset. This ensures all
+evaluation behavior is explicitly configured.
 """
 
 import os
@@ -14,81 +18,6 @@ import yaml
 from .models import EvaluationCriterion
 
 
-# Default criteria for document evaluation
-DEFAULT_CRITERIA: List[EvaluationCriterion] = [
-    EvaluationCriterion(
-        name="factuality",
-        description=(
-            "Accuracy of facts and data presented. "
-            "1=Contains fabrications or severe errors. "
-            "3=Mostly accurate with minor slips. "
-            "5=Perfect accuracy, zero hallucinations."
-        ),
-        weight=1.5,
-    ),
-    EvaluationCriterion(
-        name="relevance",
-        description=(
-            "Alignment with the user's query and intent. "
-            "1=Ignores instructions. "
-            "3=Follows general topic but misses constraints. "
-            "5=Follows every instruction perfectly."
-        ),
-        weight=1.2,
-    ),
-    EvaluationCriterion(
-        name="completeness",
-        description=(
-            "Coverage of all necessary aspects. "
-            "1=Fragmentary or missing major sections. "
-            "3=Covers basics but lacks depth. "
-            "5=Comprehensive, leaving no question unanswered."
-        ),
-        weight=1.0,
-    ),
-    EvaluationCriterion(
-        name="clarity",
-        description=(
-            "Readability, flow, and professional tone. "
-            "1=Incoherent or riddled with errors. "
-            "3=Readable but dry or awkward. "
-            "5=Masterful, compelling, and error-free."
-        ),
-        weight=0.8,
-    ),
-    EvaluationCriterion(
-        name="structure",
-        description=(
-            "Organization and logical flow. "
-            "1=Disorganized or missing structure. "
-            "3=Basic structure but inconsistent. "
-            "5=Perfect organization with clear sections."
-        ),
-        weight=0.8,
-    ),
-    EvaluationCriterion(
-        name="depth",
-        description=(
-            "Level of insight and critical analysis. "
-            "1=Surface level summary only. "
-            "3=Some analysis but mostly descriptive. "
-            "5=Deep, insightful analysis with nuance."
-        ),
-        weight=1.0,
-    ),
-]
-
-
-def get_default_criteria() -> List[EvaluationCriterion]:
-    """
-    Get the default evaluation criteria.
-    
-    Returns:
-        List of default EvaluationCriterion objects
-    """
-    return DEFAULT_CRITERIA.copy()
-
-
 def load_criteria_from_yaml(path: str) -> List[EvaluationCriterion]:
     """
     Load evaluation criteria from a YAML file.
@@ -98,7 +27,6 @@ def load_criteria_from_yaml(path: str) -> List[EvaluationCriterion]:
     criteria:
       - name: factuality
         description: "..."
-        weight: 1.5
       - name: relevance
         description: "..."
     ```
@@ -137,7 +65,6 @@ def load_criteria_from_yaml(path: str) -> List[EvaluationCriterion]:
             criteria.append(EvaluationCriterion(
                 name=item["name"],
                 description=item.get("description", f"Evaluate the {item['name']}."),
-                weight=float(item.get("weight", 1.0)),
             ))
         else:
             raise ValueError(f"Invalid criterion format: {item}")
@@ -158,7 +85,6 @@ def save_criteria_to_yaml(criteria: List[EvaluationCriterion], path: str) -> Non
             {
                 "name": c.name,
                 "description": c.description,
-                "weight": c.weight,
             }
             for c in criteria
         ]
@@ -181,19 +107,6 @@ def format_criteria_for_prompt(criteria: List[EvaluationCriterion]) -> str:
     """
     lines = [c.to_prompt_line() for c in criteria]
     return "\n".join(lines)
-
-
-def get_criteria_weights(criteria: List[EvaluationCriterion]) -> Dict[str, float]:
-    """
-    Extract weights mapping from criteria list.
-    
-    Args:
-        criteria: List of criteria
-        
-    Returns:
-        Dict mapping criterion name to weight
-    """
-    return {c.name: c.weight for c in criteria}
 
 
 def validate_criteria(criteria: List[EvaluationCriterion]) -> List[str]:
@@ -223,9 +136,6 @@ def validate_criteria(criteria: List[EvaluationCriterion]) -> List[str]:
         
         if not c.description:
             errors.append(f"Criterion '{c.name}' has empty description")
-        
-        if c.weight <= 0:
-            errors.append(f"Criterion '{c.name}' has invalid weight: {c.weight}")
     
     return errors
 
@@ -233,6 +143,9 @@ def validate_criteria(criteria: List[EvaluationCriterion]) -> List[str]:
 class CriteriaManager:
     """
     Manages evaluation criteria with caching and validation.
+    
+    IMPORTANT: No default criteria are provided. Criteria MUST be set
+    explicitly via set_criteria() or loaded from a YAML path.
     """
     
     def __init__(self, custom_path: Optional[str] = None):
@@ -250,20 +163,22 @@ class CriteriaManager:
         """
         Get the active criteria list.
         
-        Loads from custom path if set, otherwise uses defaults.
+        Loads from custom path if set. Raises error if no criteria configured.
         Results are cached.
+        
+        Raises:
+            RuntimeError: If no criteria have been configured
         """
         if self._criteria is None:
             if self._custom_path and os.path.exists(self._custom_path):
                 self._criteria = load_criteria_from_yaml(self._custom_path)
             else:
-                self._criteria = get_default_criteria()
+                raise RuntimeError(
+                    "No evaluation criteria configured. "
+                    "Criteria must be set from Content Library via eval_criteria_id in preset. "
+                    "Create criteria in Content Library and select them in your preset."
+                )
         return self._criteria
-    
-    @property
-    def weights(self) -> Dict[str, float]:
-        """Get criteria weights mapping."""
-        return get_criteria_weights(self.criteria)
     
     @property
     def names(self) -> List[str]:

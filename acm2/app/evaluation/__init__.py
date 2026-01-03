@@ -49,8 +49,6 @@ from .models import (
 # Criteria
 from .criteria import (
     CriteriaManager,
-    DEFAULT_CRITERIA,
-    get_default_criteria,
     load_criteria_from_yaml,
     save_criteria_to_yaml,
     format_criteria_for_prompt,
@@ -108,8 +106,6 @@ __all__ = [
     "EvaluationSummary",
     # Criteria
     "CriteriaManager",
-    "DEFAULT_CRITERIA",
-    "get_default_criteria",
     "load_criteria_from_yaml",
     "save_criteria_to_yaml",
     "format_criteria_for_prompt",

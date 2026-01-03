@@ -276,6 +276,7 @@ class Judge:
                 
                 # Call FPF for evaluation with hard timeout to prevent indefinite hangs
                 # Apply provider-level rate limiting before making API call
+                # NOTE: FPF has its own retry logic for API errors (429, 500s) - don't retry those here
                 try:
                     async with RateLimitedRequest(provider):
                         result = await asyncio.wait_for(
@@ -287,27 +288,47 @@ class Judge:
                         )
                 except asyncio.TimeoutError:
                     logger.error(f"[EVAL-DISPATCH] HARD TIMEOUT: FPF single_eval call for {eval_task_id} exceeded {self.config.timeout_seconds + 30}s")
+                    # Timeout is fatal - FPF already timed out internally, don't retry
                     raise RuntimeError(f"Single eval call timed out after {self.config.timeout_seconds + 30}s for {eval_task_id}")
+                except RuntimeError as fpf_err:
+                    # RuntimeError from FPF means API failure after FPF's own retries - don't retry again
+                    logger.error(f"[EVAL-DISPATCH] FPF API error (not retriable): {fpf_err}")
+                    if self.stats:
+                        self.stats.record_failure(str(fpf_err))
+                    raise
                 
                 logger.info(f"[EVAL-DISPATCH] FPF single_eval completed for {eval_task_id}")
                 
                 raw_response = result.content
                 
-                # Parse JSON response
-                data = _parse_json_response(raw_response)
-                
-                # Extract scores
-                evaluations = data.get("evaluations", [])
-                if not evaluations:
-                    raise ValueError("No evaluations in response")
-                
-                scores = []
-                for eval_item in evaluations:
-                    scores.append(CriterionScore(
-                        criterion=eval_item["criterion"],
-                        score=int(eval_item["score"]),
-                        reason=eval_item.get("reason", ""),
-                    ))
+                # Parse JSON response - THESE errors ARE retriable (malformed LLM output)
+                try:
+                    data = _parse_json_response(raw_response)
+                    
+                    # Extract scores
+                    evaluations = data.get("evaluations", [])
+                    if not evaluations:
+                        raise ValueError("No evaluations in response")
+                    
+                    scores = []
+                    for eval_item in evaluations:
+                        scores.append(CriterionScore(
+                            criterion=eval_item["criterion"],
+                            score=int(eval_item["score"]),
+                            reason=eval_item.get("reason", ""),
+                        ))
+                except (ValueError, KeyError, TypeError, json.JSONDecodeError) as parse_err:
+                    # Parse/validation errors - these ARE retriable at eval level
+                    last_error = parse_err
+                    if attempt < self.config.retries:
+                        if self.stats:
+                            self.stats.record_retry(attempt + 1, f"Parse error: {parse_err}")
+                        logger.warning(f"Single eval attempt {attempt + 1} parse error for {doc_id}: {parse_err}")
+                        continue  # Retry with a fresh FPF call
+                    else:
+                        if self.stats:
+                            self.stats.record_failure(f"Parse error: {parse_err}")
+                        raise RuntimeError(f"Single evaluation failed after {self.config.retries + 1} attempts: {parse_err}")
                 
                 # Track success
                 if self.stats:
@@ -325,19 +346,15 @@ class Judge:
                     raw_response=raw_response,
                 )
                 
+            except RuntimeError:
+                # Already handled above - propagate up
+                raise
             except Exception as e:
-                last_error = e
-                # Track retry (if not last attempt) or failure (if last attempt)
-                if attempt < self.config.retries:
-                    if self.stats:
-                        self.stats.record_retry(attempt + 1, str(e))
-                else:
-                    if self.stats:
-                        self.stats.record_failure(str(e))
-                logger.warning(
-                    f"Single eval attempt {attempt + 1} failed for {doc_id}: {e}"
-                )
-                continue
+                # Unexpected errors - log and propagate
+                logger.error(f"Unexpected error in single_eval for {doc_id}: {e}")
+                if self.stats:
+                    self.stats.record_failure(str(e))
+                raise
         
         raise RuntimeError(
             f"Single evaluation failed after {self.config.retries + 1} attempts: {last_error}"
@@ -436,6 +453,7 @@ class Judge:
                 
                 # Call FPF for pairwise evaluation with hard timeout
                 # Apply provider-level rate limiting before making API call
+                # NOTE: FPF has its own retry logic for API errors (429, 500s) - don't retry those here
                 try:
                     async with RateLimitedRequest(provider):
                         result = await asyncio.wait_for(
@@ -447,23 +465,43 @@ class Judge:
                         )
                 except asyncio.TimeoutError:
                     logger.error(f"[EVAL-DISPATCH] HARD TIMEOUT: FPF pairwise_eval call for {pairwise_task_id} exceeded {self.config.timeout_seconds + 30}s")
+                    # Timeout is fatal - FPF already timed out internally, don't retry
                     raise RuntimeError(f"Pairwise eval call timed out after {self.config.timeout_seconds + 30}s for {pairwise_task_id}")
+                except RuntimeError as fpf_err:
+                    # RuntimeError from FPF means API failure after FPF's own retries - don't retry again
+                    logger.error(f"[EVAL-DISPATCH] FPF API error (not retriable): {fpf_err}")
+                    if self.stats:
+                        self.stats.record_failure(str(fpf_err))
+                    raise
                 
                 logger.info(f"[EVAL-DISPATCH] FPF pairwise_eval completed for {pairwise_task_id}")
                 
                 raw_response = result.content
                 
-                # Parse JSON response
-                data = _parse_json_response(raw_response)
-                
-                # Extract winner
-                winner_letter = data.get("winner", "").upper()
-                if winner_letter not in ("A", "B"):
-                    raise ValueError(f"Invalid winner: {winner_letter}")
-                
-                # Map A/B back to actual doc IDs
-                winner_doc_id = doc_id_1 if winner_letter == "A" else doc_id_2
-                reason = data.get("reason", "")
+                # Parse JSON response - THESE errors ARE retriable (malformed LLM output)
+                try:
+                    data = _parse_json_response(raw_response)
+                    
+                    # Extract winner
+                    winner_letter = data.get("winner", "").upper()
+                    if winner_letter not in ("A", "B"):
+                        raise ValueError(f"Invalid winner: {winner_letter}")
+                    
+                    # Map A/B back to actual doc IDs
+                    winner_doc_id = doc_id_1 if winner_letter == "A" else doc_id_2
+                    reason = data.get("reason", "")
+                except (ValueError, KeyError, TypeError, json.JSONDecodeError) as parse_err:
+                    # Parse/validation errors - these ARE retriable at eval level
+                    last_error = parse_err
+                    if attempt < self.config.retries:
+                        if self.stats:
+                            self.stats.record_retry(attempt + 1, f"Parse error: {parse_err}")
+                        logger.warning(f"Pairwise eval attempt {attempt + 1} parse error: {parse_err}")
+                        continue  # Retry with a fresh FPF call
+                    else:
+                        if self.stats:
+                            self.stats.record_failure(f"Parse error: {parse_err}")
+                        raise RuntimeError(f"Pairwise evaluation failed after {self.config.retries + 1} attempts: {parse_err}")
                 
                 # Track success
                 if self.stats:
@@ -483,19 +521,15 @@ class Judge:
                     raw_response=raw_response,
                 )
                 
+            except RuntimeError:
+                # Already handled above - propagate up
+                raise
             except Exception as e:
-                last_error = e
-                logger.warning(
-                    f"Pairwise eval attempt {attempt + 1} failed: {e}"
-                )
-                # Track retry or failure
-                if attempt < self.config.retries:
-                    if self.stats:
-                        self.stats.record_retry(attempt + 1, str(e))
-                else:
-                    if self.stats:
-                        self.stats.record_failure(str(e))
-                continue
+                # Unexpected errors - log and propagate
+                logger.error(f"Unexpected error in pairwise_eval: {e}")
+                if self.stats:
+                    self.stats.record_failure(str(e))
+                raise
         
         raise RuntimeError(
             f"Pairwise evaluation failed after {self.config.retries + 1} attempts: {last_error}"

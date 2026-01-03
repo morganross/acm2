@@ -15,6 +15,7 @@ export interface GptrSettings {
   report_type: string;
   report_source: string;
   tone: string;
+  retriever: string;
   max_search_results: number;
   total_words: number;
   fast_llm: string;
@@ -72,6 +73,7 @@ export interface GptrConfigComplete {
   report_type: string;
   report_source: string;
   tone: string;
+  retriever: string;
   scrape_urls: boolean;
   add_source_urls: boolean;
   verbose_mode: boolean;
@@ -124,6 +126,9 @@ export interface EvalConfigComplete {
   judge_models: string[];
   timeout_seconds: number | null;  // Per-call timeout for judge LLM
   retries: number;  // Retry count for transient failures
+  temperature: number;  // Temperature for judge LLM
+  max_tokens: number;  // Max output tokens for judge LLM responses
+  strict_json: boolean;  // Require strict JSON output from judge LLM
   enable_semantic_similarity: boolean;
   enable_factual_accuracy: boolean;
   enable_coherence: boolean;
@@ -141,6 +146,7 @@ export interface CombineConfigComplete {
   enabled: boolean;
   selected_models: string[];
   strategy: string;
+  max_tokens: number;  // Max output tokens for combine LLM
 }
 
 export interface GeneralConfigComplete {
@@ -153,6 +159,7 @@ export interface GeneralConfigComplete {
   fpf_log_output: string;
   fpf_log_file_path: string | null;
   post_combine_top_n: number | null;
+  expose_criteria_to_generators: boolean;
 }
 
 export interface ConcurrencyConfigComplete {

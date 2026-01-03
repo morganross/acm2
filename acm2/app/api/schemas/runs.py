@@ -194,6 +194,9 @@ class EvalConfigComplete(BaseModel):
     judge_models: list[str] = Field(default_factory=list, description="REQUIRED from preset")
     timeout_seconds: int = Field(600, ge=60, le=3600, description="Per-call timeout for judge LLM")
     retries: int = Field(3, ge=0, le=10, description="Retry count for transient failures")
+    temperature: float = Field(0.3, ge=0.0, le=2.0, description="Temperature for judge LLM")
+    max_tokens: int = Field(16384, ge=1024, le=128000, description="Max output tokens for judge LLM")
+    strict_json: bool = Field(True, description="Require strict JSON output from judge LLM")
     enable_semantic_similarity: bool = True
     enable_factual_accuracy: bool = True
     enable_coherence: bool = True
@@ -227,6 +230,12 @@ class GeneralConfigComplete(BaseModel):
     
     # Post-combine settings
     post_combine_top_n: Optional[int] = Field(None, ge=2, description="Optional limit for post-combine eval comparison")
+    
+    # Criteria exposure
+    expose_criteria_to_generators: bool = Field(
+        False, 
+        description="If true, evaluation criteria are appended to generation instructions so generators know what they'll be judged on"
+    )
     
     # Legacy fields
     output_dir: str = Field("./output", description="Deprecated")

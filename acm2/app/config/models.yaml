@@ -1,56 +1,288 @@
 # ACM Model Configuration
-# Format: "provider:model": [list, of, gui, sections]
-# Sections: fpf, gpt-r
+# Format: "provider:model":
+#   sections: [list, of, gui, sections]  # fpf, gpt-r
+#   max_output_tokens: <limit>  # Provider max output tokens (from documentation)
 # Note: eval and combine use fpf list. gpt-r-DR uses gpt-r list.
 
+# =============================================================================
 # OpenAI - GPT-4 Family
-openai:gpt-4o: [fpf, gpt-r]
-openai:gpt-4o-mini: [fpf, gpt-r]
-openai:gpt-4-turbo: [fpf, gpt-r]
-openai:gpt-4.1: [fpf, gpt-r]
-openai:gpt-4.1-mini: [fpf, gpt-r]
-openai:gpt-4.1-nano: [fpf]
+# =============================================================================
+openai:gpt-4.1:
+  sections: [fpf, gpt-r]
+  max_output_tokens: 32768  # OpenAI docs: 32,768 output limit
+openai:gpt-4.1-mini:
+  sections: [fpf, gpt-r]
+  max_output_tokens: 32768
+openai:gpt-4.1-nano:
+  sections: [fpf]
+  max_output_tokens: 16384
 
+# =============================================================================
 # OpenAI - GPT-5 Family
-openai:gpt-5: [fpf, gpt-r]
-openai:gpt-5-mini: [fpf, gpt-r]
-openai:gpt-5-nano: [fpf]
-openai:gpt-5.1: [fpf, gpt-r]
-openai:gpt-5.1-mini: [fpf]
-openai:gpt-5.1-preview: [fpf]
-openai:gpt-5.2: [fpf, gpt-r]
-openai:o4-mini: [fpf, gpt-r]
-openai:o3: [fpf, gpt-r]
+# =============================================================================
+openai:gpt-5:
+  sections: [fpf, gpt-r]
+  max_output_tokens: 128000  # OpenAI docs: 128,000 output limit
+openai:gpt-5-mini:
+  sections: [fpf, gpt-r]
+  max_output_tokens: 128000
+openai:gpt-5-nano:
+  sections: [fpf]
+  max_output_tokens: 64000
+openai:gpt-5.1:
+  sections: [fpf, gpt-r]
+  max_output_tokens: 128000
+openai:gpt-5.2:
+  sections: [fpf, gpt-r]
+  max_output_tokens: 128000
 
+# =============================================================================
+# OpenAI - Reasoning Models (o-series)
+# Note: max_output_tokens includes BOTH visible output AND hidden reasoning tokens
+# =============================================================================
+openai:o4-mini:
+  sections: [fpf, gpt-r]
+  max_output_tokens: 100000  # OpenAI docs: 100,000 output limit (includes reasoning)
+openai:o3:
+  sections: [fpf, gpt-r]
+  max_output_tokens: 100000  # OpenAI docs: 100,000 output limit (includes reasoning)
+
+# =============================================================================
 # OpenAI Deep Research
-openaidp:o3-deep-research: [fpf]
-openaidp:o4-mini-deep-research: [fpf]
+# =============================================================================
+openaidp:o3-deep-research:
+  sections: [fpf]
+  max_output_tokens: 100000
+openaidp:o4-mini-deep-research:
+  sections: [fpf]
+  max_output_tokens: 100000
 
-# Google
-google:gemini-3-pro-preview: [fpf, gpt-r]
-google:gemini-3-flash: [fpf, gpt-r]
-google:gemini-2.5-pro: [fpf, gpt-r]
-google:gemini-2.5-flash: [fpf]
-google:gemini-2.5-flash-lite: [fpf]
-google:gemini-2.0-flash: [fpf]
-google:gemini-1.5-pro: [fpf]
-google:gemini-1.5-flash: [fpf]
-google:gemini-pro-latest: [fpf]
+# =============================================================================
+# Google - Gemini 3 Family
+# =============================================================================
+google:gemini-3-pro-preview:
+  sections: [fpf, gpt-r]
+  max_output_tokens: 64000  # Google docs: 64k output, 1M context
+google:gemini-3-flash-preview:
+  sections: [fpf, gpt-r]
+  max_output_tokens: 64000
 
-# Tavily (Research API)
-tavily:tvly-mini: [fpf]
-tavily:tvly-pro: [fpf]
+# =============================================================================
+# Google - Gemini 2.5 Family
+# =============================================================================
+google:gemini-2.5-pro:
+  sections: [fpf, gpt-r]
+  max_output_tokens: 65536  # Google docs: 65,536 output, 1M context
+google:gemini-2.5-flash:
+  sections: [fpf]
+  max_output_tokens: 65536
+google:gemini-2.5-flash-lite:
+  sections: [fpf]
+  max_output_tokens: 32768
 
+# =============================================================================
+# Tavily (Research API) - Token limits not applicable
+# =============================================================================
+tavily:tvly-mini:
+  sections: [fpf]
+  max_output_tokens: 16384
+tavily:tvly-pro:
+  sections: [fpf]
+  max_output_tokens: 32768
 
-# Anthropic (Claude)
+# =============================================================================
+# Anthropic (Claude) - All current models support 64k output, 200k context
+# =============================================================================
+anthropic:claude-opus-4-5-20251101:
+  sections: [fpf]
+  max_output_tokens: 64000  # Anthropic docs: 64k output, 200k context
+anthropic:claude-haiku-4-5-20251001:
+  sections: [fpf]
+  max_output_tokens: 64000
+anthropic:claude-sonnet-4-5-20250929:
+  sections: [fpf]
+  max_output_tokens: 64000
+anthropic:claude-opus-4-1-20250805:
+  sections: [fpf]
+  max_output_tokens: 64000
+anthropic:claude-opus-4-20250514:
+  sections: [fpf]
+  max_output_tokens: 64000
+anthropic:claude-sonnet-4-20250514:
+  sections: [fpf]
+  max_output_tokens: 64000
+anthropic:claude-3-7-sonnet-20250219:
+  sections: [fpf]
+  max_output_tokens: 64000
+anthropic:claude-3-5-haiku-20241022:
+  sections: [fpf]
+  max_output_tokens: 32768
 
-anthropic:claude-opus-4-5-20251101: [fpf]
-anthropic:claude-haiku-4-5-20251001: [fpf]
-anthropic:claude-sonnet-4-5-20250929: [fpf]
-anthropic:claude-opus-4-1-20250805: [fpf]
-anthropic:claude-opus-4-20250514: [fpf]
-anthropic:claude-sonnet-4-20250514: [fpf]
-anthropic:claude-3-7-sonnet-20250219: [fpf]
-anthropic:claude-3-5-haiku-20241022: [fpf]
-anthropic:claude-3-haiku-20240307: [fpf]
-anthropic:claude-3-opus-20240229: [fpf]
+# =============================================================================
+# OpenRouter - Gateway to 600+ models (grounding NOT enforced)
+# Model format: openrouter:provider/model
+# =============================================================================
+
+# OpenAI models via OpenRouter
+openrouter:openai/gpt-4o:
+  sections: [fpf, gpt-r, dr]
+  max_output_tokens: 16384
+openrouter:openai/gpt-4o-mini:
+  sections: [fpf, gpt-r, dr]
+  max_output_tokens: 16384
+openrouter:openai/gpt-4.1:
+  sections: [fpf, gpt-r, dr]
+  max_output_tokens: 32768
+openrouter:openai/o3:
+  sections: [fpf, gpt-r, dr]
+  max_output_tokens: 100000
+openrouter:openai/o4-mini:
+  sections: [fpf, gpt-r, dr]
+  max_output_tokens: 100000
+
+# Anthropic models via OpenRouter
+openrouter:anthropic/claude-sonnet-4:
+  sections: [fpf, gpt-r, dr]
+  max_output_tokens: 64000
+openrouter:anthropic/claude-opus-4:
+  sections: [fpf, gpt-r, dr]
+  max_output_tokens: 64000
+openrouter:anthropic/claude-3.7-sonnet:
+  sections: [fpf, gpt-r, dr]
+  max_output_tokens: 64000
+openrouter:anthropic/claude-3.5-haiku:
+  sections: [fpf, gpt-r, dr]
+  max_output_tokens: 32768
+
+# DeepSeek (reasoning models)
+openrouter:deepseek/deepseek-r1:
+  sections: [fpf, gpt-r, dr]
+  max_output_tokens: 64000
+openrouter:deepseek/deepseek-chat:
+  sections: [fpf, gpt-r, dr]
+  max_output_tokens: 64000
+
+# Perplexity (built-in web search)
+openrouter:perplexity/sonar-pro:
+  sections: [fpf, gpt-r, dr]
+  max_output_tokens: 32768
+openrouter:perplexity/sonar:
+  sections: [fpf, gpt-r, dr]
+  max_output_tokens: 16384
+
+# Meta Llama
+openrouter:meta-llama/llama-3.1-405b-instruct:
+  sections: [fpf, gpt-r, dr]
+  max_output_tokens: 32768
+openrouter:meta-llama/llama-3.1-70b-instruct:
+  sections: [fpf, gpt-r, dr]
+  max_output_tokens: 32768
+
+# Google models via OpenRouter
+openrouter:google/gemini-2.5-pro:
+  sections: [fpf, gpt-r, dr]
+  max_output_tokens: 65536
+openrouter:google/gemini-2.5-flash:
+  sections: [fpf, gpt-r, dr]
+  max_output_tokens: 65536
+
+# Mistral (corrected model IDs for OpenRouter)
+openrouter:mistralai/mistral-large-2411:
+  sections: [fpf, gpt-r, dr]
+  max_output_tokens: 131072
+openrouter:mistralai/mistral-small-3.1-24b-instruct:
+  sections: [fpf, gpt-r, dr]
+  max_output_tokens: 32768
+
+# =============================================================================
+# OpenRouter FREE Models - $0/M input & output tokens
+# These are community-provided free endpoints with rate limits
+# Model IDs verified from OpenRouter API 2026-01-01
+# =============================================================================
+
+# Flagship Free Models (Large)
+openrouter:meta-llama/llama-3.1-405b-instruct:free:
+  sections: [fpf-free, gpt-r-free, dr-free]
+  max_output_tokens: 32768
+openrouter:nousresearch/hermes-3-llama-3.1-405b:free:
+  sections: [fpf-free, gpt-r-free, dr-free]
+  max_output_tokens: 32768
+openrouter:deepseek/deepseek-r1-0528:free:
+  sections: [fpf-free, gpt-r-free, dr-free]
+  max_output_tokens: 64000
+openrouter:qwen/qwen3-coder:free:
+  sections: [fpf-free, gpt-r-free, dr-free]
+  max_output_tokens: 32768
+
+# Xiaomi (Top SWE-Bench model)
+openrouter:xiaomi/mimo-v2-flash:free:
+  sections: [fpf-free, gpt-r-free, dr-free]
+  max_output_tokens: 32768
+
+# Mistral Free
+openrouter:mistralai/devstral-2512:free:
+  sections: [fpf-free, gpt-r-free, dr-free]
+  max_output_tokens: 32768
+openrouter:mistralai/mistral-small-3.1-24b-instruct:free:
+  sections: [fpf-free, gpt-r-free, dr-free]
+  max_output_tokens: 32768
+
+# Google Gemini & Gemma Free
+openrouter:google/gemini-2.0-flash-exp:free:
+  sections: [fpf-free, gpt-r-free, dr-free]
+  max_output_tokens: 65536
+openrouter:google/gemma-3-27b-it:free:
+  sections: [fpf-free, gpt-r-free, dr-free]
+  max_output_tokens: 32768
+openrouter:google/gemma-3n-e4b-it:free:
+  sections: [fpf-free, gpt-r-free, dr-free]
+  max_output_tokens: 8192
+openrouter:google/gemma-3n-e2b-it:free:
+  sections: [fpf-free, gpt-r-free, dr-free]
+  max_output_tokens: 4096
+
+# Meta Llama Free
+openrouter:meta-llama/llama-3.3-70b-instruct:free:
+  sections: [fpf-free, gpt-r-free, dr-free]
+  max_output_tokens: 32768
+openrouter:meta-llama/llama-3.2-3b-instruct:free:
+  sections: [fpf-free, gpt-r-free, dr-free]
+  max_output_tokens: 16384
+
+# NVIDIA Nemotron Free
+openrouter:nvidia/nemotron-nano-12b-v2-vl:free:
+  sections: [fpf-free, gpt-r-free, dr-free]
+  max_output_tokens: 16384
+openrouter:nvidia/nemotron-nano-9b-v2:free:
+  sections: [fpf-free, gpt-r-free, dr-free]
+  max_output_tokens: 16384
+
+# AllenAI Olmo Free
+openrouter:allenai/olmo-3.1-32b-think:free:
+  sections: [fpf-free, gpt-r-free, dr-free]
+  max_output_tokens: 32768
+openrouter:allenai/olmo-3-32b-think:free:
+  sections: [fpf-free, gpt-r-free, dr-free]
+  max_output_tokens: 32768
+
+# TNG DeepSeek Chimera Models Free
+openrouter:tngtech/deepseek-r1t2-chimera:free:
+  sections: [fpf-free, gpt-r-free, dr-free]
+  max_output_tokens: 32768
+openrouter:tngtech/deepseek-r1t-chimera:free:
+  sections: [fpf-free, gpt-r-free, dr-free]
+  max_output_tokens: 32768
+openrouter:tngtech/tng-r1t-chimera:free:
+  sections: [fpf-free, gpt-r-free, dr-free]
+  max_output_tokens: 32768
+
+# Other Free Models
+openrouter:nex-agi/deepseek-v3.1-nex-n1:free:
+  sections: [fpf-free, gpt-r-free, dr-free]
+  max_output_tokens: 32768
+openrouter:arcee-ai/trinity-mini:free:
+  sections: [fpf-free, gpt-r-free, dr-free]
+  max_output_tokens: 16384
+openrouter:kwaipilot/kat-coder-pro:free:
+  sections: [fpf-free, gpt-r-free, dr-free]
+  max_output_tokens: 32768

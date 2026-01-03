@@ -26,7 +26,10 @@ columns_to_add = [
     ('eval_iterations', 'INTEGER NOT NULL DEFAULT 1'),
     ('fpf_log_output', 'TEXT NOT NULL DEFAULT "file"'),
     ('fpf_log_file_path', 'TEXT'),
-    ('post_combine_top_n', 'INTEGER')
+    ('post_combine_top_n', 'INTEGER'),
+    ('fpf_max_retries', 'INTEGER NOT NULL DEFAULT 3'),
+    ('fpf_retry_delay', 'REAL NOT NULL DEFAULT 1.0'),
+    ('eval_retries', 'INTEGER NOT NULL DEFAULT 3'),
 ]
 
 for col_name, col_type in columns_to_add:

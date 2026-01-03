@@ -78,6 +78,13 @@ class Preset(Base):
     request_timeout: Mapped[int] = mapped_column(Integer, default=600)
     eval_timeout: Mapped[int] = mapped_column(Integer, default=600)
     
+    # FPF API retry settings (for transient errors like 429, 500s)
+    fpf_max_retries: Mapped[int] = mapped_column(Integer, default=3)
+    fpf_retry_delay: Mapped[float] = mapped_column(default=1.0)
+    
+    # Eval parse retry settings (for JSON parse failures, not API errors)
+    eval_retries: Mapped[int] = mapped_column(Integer, default=3)
+    
     # Concurrency Configuration
     generation_concurrency: Mapped[int] = mapped_column(Integer, default=5)
     eval_concurrency: Mapped[int] = mapped_column(Integer, default=5)

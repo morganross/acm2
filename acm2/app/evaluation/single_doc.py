@@ -8,13 +8,19 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
+
+import yaml
 
 from .criteria import CriteriaManager
 from .judge import Judge, JudgeConfig, FpfStatsTracker
 from .models import CriterionScore, EvaluationCriterion, SingleEvalResult
 
 logger = logging.getLogger(__name__)
+
+# Callback fired after each individual judge evaluation completes
+# Args: (doc_id, model, trial, result)
+EvalCompleteCallback = Callable[[str, str, int, SingleEvalResult], Awaitable[None]]
 
 
 @dataclass
@@ -63,7 +69,6 @@ class SingleEvalSummary:
     
     doc_id: str
     avg_score: float
-    weighted_avg_score: float
     scores_by_criterion: Dict[str, float]
     num_evaluations: int
     results: List[SingleEvalResult]
@@ -73,7 +78,6 @@ class SingleEvalSummary:
         cls,
         doc_id: str,
         results: List[SingleEvalResult],
-        weights: Optional[Dict[str, float]] = None,
     ) -> "SingleEvalSummary":
         """
         Create summary from list of evaluation results.
@@ -81,7 +85,6 @@ class SingleEvalSummary:
         Args:
             doc_id: Document identifier
             results: List of evaluation results
-            weights: Optional criterion weights
             
         Returns:
             Summary with aggregated statistics
@@ -90,7 +93,6 @@ class SingleEvalSummary:
             return cls(
                 doc_id=doc_id,
                 avg_score=0.0,
-                weighted_avg_score=0.0,
                 scores_by_criterion={},
                 num_evaluations=0,
                 results=[],
@@ -114,22 +116,9 @@ class SingleEvalSummary:
         all_scores = [s for scores in criterion_scores.values() for s in scores]
         avg_score = sum(all_scores) / len(all_scores) if all_scores else 0.0
         
-        # Calculate weighted average
-        if weights:
-            weighted_sum = 0.0
-            total_weight = 0.0
-            for crit, avg in scores_by_criterion.items():
-                w = weights.get(crit, 1.0)
-                weighted_sum += avg * w
-                total_weight += w
-            weighted_avg_score = weighted_sum / total_weight if total_weight > 0 else avg_score
-        else:
-            weighted_avg_score = avg_score
-        
         return cls(
             doc_id=doc_id,
             avg_score=avg_score,
-            weighted_avg_score=weighted_avg_score,
             scores_by_criterion=scores_by_criterion,
             num_evaluations=len(results),
             results=results,
@@ -166,6 +155,29 @@ class SingleDocEvaluator:
         self.stats = stats_tracker
         self._judges: Dict[str, Judge] = {}
         
+        # Parse custom_criteria YAML string from Content Library if provided
+        if self.config.custom_criteria:
+            try:
+                data = yaml.safe_load(self.config.custom_criteria)
+                if data and "criteria" in data:
+                    parsed_criteria = []
+                    for item in data["criteria"]:
+                        if isinstance(item, str):
+                            parsed_criteria.append(EvaluationCriterion(
+                                name=item,
+                                description=f"Evaluate the {item} of the document.",
+                            ))
+                        elif isinstance(item, dict) and "name" in item:
+                            parsed_criteria.append(EvaluationCriterion(
+                                name=item["name"],
+                                description=item.get("description", f"Evaluate the {item['name']}."),
+                            ))
+                    if parsed_criteria:
+                        self.criteria.set_criteria(parsed_criteria)
+                        logger.info(f"Loaded {len(parsed_criteria)} criteria from Content Library custom_criteria")
+            except Exception as e:
+                logger.error(f"Failed to parse custom_criteria YAML: {e}")
+        
         # DEBUG: Log stats tracker initialization
         logger.info(f"[STATS-DEBUG] SingleDocEvaluator.__init__ stats_tracker={stats_tracker is not None}")
     
@@ -186,6 +198,7 @@ class SingleDocEvaluator:
         self,
         doc: DocumentInput,
         progress_callback: Optional[ProgressCallback] = None,
+        on_eval_complete: Optional[EvalCompleteCallback] = None,
     ) -> SingleEvalSummary:
         """
         Evaluate a single document.
@@ -195,6 +208,7 @@ class SingleDocEvaluator:
         Args:
             doc: Document to evaluate
             progress_callback: Optional callback for progress updates
+            on_eval_complete: Optional async callback fired after each judge evaluation
             
         Returns:
             Summary of evaluation results
@@ -218,6 +232,13 @@ class SingleDocEvaluator:
                         f"Single eval completed: {doc.doc_id} | "
                         f"model={model} trial={trial} avg={result.average_score:.2f}"
                     )
+                    
+                    # Fire per-judge callback if provided
+                    if on_eval_complete:
+                        try:
+                            await on_eval_complete(doc.doc_id, model, trial, result)
+                        except Exception as e:
+                            logger.error(f"on_eval_complete callback failed: {e}")
                 except Exception as e:
                     logger.error(
                         f"Single eval failed: {doc.doc_id} | "
@@ -234,13 +255,13 @@ class SingleDocEvaluator:
         return SingleEvalSummary.from_results(
             doc_id=doc.doc_id,
             results=results,
-            weights=self.criteria.weights,
         )
     
     async def evaluate_documents(
         self,
         docs: List[DocumentInput],
         progress_callback: Optional[Callable[[str, int, int, int, int], None]] = None,
+        on_eval_complete: Optional[EvalCompleteCallback] = None,
     ) -> Dict[str, SingleEvalSummary]:
         """
         Evaluate multiple documents with concurrency control.
@@ -248,6 +269,7 @@ class SingleDocEvaluator:
         Args:
             docs: List of documents to evaluate
             progress_callback: Callback(doc_id, doc_completed, total_docs, eval_completed, total_evals)
+            on_eval_complete: Optional async callback fired after each individual judge evaluation
             
         Returns:
             Dict mapping doc_id to evaluation summary
@@ -260,7 +282,7 @@ class SingleDocEvaluator:
         async def eval_with_limit(doc: DocumentInput) -> tuple[str, SingleEvalSummary]:
             nonlocal completed_docs
             async with semaphore:
-                summary = await self.evaluate_document(doc)
+                summary = await self.evaluate_document(doc, on_eval_complete=on_eval_complete)
                 completed_docs += 1
                 if progress_callback:
                     try:
@@ -286,21 +308,19 @@ class SingleDocEvaluator:
     def rank_documents(
         self,
         summaries: Dict[str, SingleEvalSummary],
-        use_weighted: bool = True,
     ) -> List[tuple[str, float]]:
         """
         Rank documents by their evaluation scores.
         
         Args:
             summaries: Dict mapping doc_id to summary
-            use_weighted: Use weighted average (True) or simple average (False)
             
         Returns:
             List of (doc_id, score) tuples sorted by score descending
         """
         rankings = []
         for doc_id, summary in summaries.items():
-            score = summary.weighted_avg_score if use_weighted else summary.avg_score
+            score = summary.avg_score
             rankings.append((doc_id, score))
         
         rankings.sort(key=lambda x: x[1], reverse=True)
@@ -310,7 +330,6 @@ class SingleDocEvaluator:
         self,
         summaries: Dict[str, SingleEvalSummary],
         n: int,
-        use_weighted: bool = True,
     ) -> List[str]:
         """
         Get top N document IDs by score.
@@ -318,10 +337,9 @@ class SingleDocEvaluator:
         Args:
             summaries: Dict mapping doc_id to summary
             n: Number of top documents to return
-            use_weighted: Use weighted average
             
         Returns:
             List of top N doc_ids
         """
-        rankings = self.rank_documents(summaries, use_weighted)
+        rankings = self.rank_documents(summaries)
         return [doc_id for doc_id, _ in rankings[:n]]

@@ -242,7 +242,7 @@ class EvaluationService:
             # Filter to top N if single eval was done
             if single_summaries and self.config.pairwise_top_n:
                 scores = {
-                    doc_id: summary.weighted_avg_score
+                    doc_id: summary.avg_score
                     for doc_id, summary in single_summaries.items()
                 }
                 doc_ids = self._pairwise_eval.filter_top_n(
@@ -317,7 +317,7 @@ class EvaluationService:
         
         Priority:
         1. Elo rating from pairwise (if available)
-        2. Weighted average from single eval
+        2. Average score from single eval
         """
         rankings: List[DocumentRanking] = []
         
@@ -331,7 +331,7 @@ class EvaluationService:
         score_lookup: Dict[str, float] = {}
         if single_summaries:
             for doc_id, summary in single_summaries.items():
-                score_lookup[doc_id] = summary.weighted_avg_score
+                score_lookup[doc_id] = summary.avg_score
         
         # Create rankings for all docs
         for doc_id in doc_ids:

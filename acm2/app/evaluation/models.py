@@ -19,16 +19,14 @@ class EvaluationType(str, Enum):
 @dataclass
 class EvaluationCriterion:
     """
-    A single evaluation criterion with name, description, and optional weight.
+    A single evaluation criterion with name and description.
     
     Attributes:
         name: Short identifier (e.g., "factuality", "relevance")
         description: Full description including scoring guidance
-        weight: Optional weight for weighted averaging (default 1.0)
     """
     name: str
     description: str
-    weight: float = 1.0
     
     def to_prompt_line(self) -> str:
         """Format criterion for inclusion in LLM prompt."""
@@ -82,33 +80,10 @@ class SingleEvalResult:
     
     @property
     def average_score(self) -> float:
-        """Calculate unweighted average across all criteria."""
+        """Calculate average across all criteria."""
         if not self.scores:
             return 0.0
         return sum(s.score for s in self.scores) / len(self.scores)
-    
-    def weighted_average(self, weights: Dict[str, float]) -> float:
-        """
-        Calculate weighted average using provided weights.
-        
-        Args:
-            weights: Mapping of criterion name to weight
-            
-        Returns:
-            Weighted average score
-        """
-        if not self.scores:
-            return 0.0
-        
-        total_weight = 0.0
-        weighted_sum = 0.0
-        
-        for s in self.scores:
-            w = weights.get(s.criterion, 1.0)
-            weighted_sum += s.score * w
-            total_weight += w
-        
-        return weighted_sum / total_weight if total_weight > 0 else 0.0
 
 
 @dataclass

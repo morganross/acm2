@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { 
   Play, Square, AlertCircle, Activity, Clock,
   FileText, Users, ChevronDown, Calendar, Target, Timer,
-  XCircle, CheckCircle, Loader2
+  XCircle, CheckCircle, Loader2, RefreshCw
 } from 'lucide-react';
 import LogViewer from '../components/execution/LogViewer';
 import type { Run } from '../api';
@@ -37,6 +37,7 @@ export default function Execute() {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [currentRun, setCurrentRun] = useState<Run | null>(null);
   const [isRunning, setIsRunning] = useState(false);
+  const [isReevaluating, setIsReevaluating] = useState(false);
   const [runningRunsCount, setRunningRunsCount] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<'evaluation' | 'pairwise' | 'timeline'>('evaluation');
   const [error, setError] = useState<string | null>(null);
@@ -272,6 +273,40 @@ export default function Execute() {
     setIsRunning(false);
   };
 
+  const reevaluateRun = async () => {
+    if (!currentRun?.id) return;
+    
+    setIsReevaluating(true);
+    setError(null);
+    
+    try {
+      const response = await fetch(`/api/v1/runs/${currentRun.id}/reevaluate`, {
+        method: 'POST'
+      });
+      
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.detail || 'Failed to start re-evaluation');
+      }
+      
+      // Poll for updated run data after a short delay
+      setTimeout(async () => {
+        try {
+          const updatedRun = await runsApi.get(currentRun.id);
+          setCurrentRun(updatedRun);
+        } catch (err) {
+          console.error('Failed to refresh run:', err);
+        }
+        setIsReevaluating(false);
+      }, 5000); // Wait 5s before first check
+      
+    } catch (err) {
+      console.error('Failed to re-evaluate:', err);
+      setError(err instanceof Error ? err.message : 'Failed to re-evaluate');
+      setIsReevaluating(false);
+    }
+  };
+
   const getStatusIcon = () => {
     if (!currentRun) return <Activity size={20} />;
     switch (currentRun.status) {
@@ -347,6 +382,29 @@ export default function Execute() {
               >
                 <Play size={18} />
                 Start Execution
+              </button>
+            )}
+            {/* Re-evaluate button - shown when run is completed/failed */}
+            {currentRun && (currentRun.status === 'completed' || currentRun.status === 'failed') && (
+              <button
+                onClick={reevaluateRun}
+                disabled={isReevaluating}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '10px 20px',
+                  backgroundColor: isReevaluating ? '#374151' : '#6366f1',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: isReevaluating ? 'not-allowed' : 'pointer',
+                  fontSize: '14px',
+                  opacity: isReevaluating ? 0.7 : 1
+                }}
+              >
+                <RefreshCw size={18} className={isReevaluating ? 'animate-spin' : ''} />
+                {isReevaluating ? 'Re-evaluating...' : 'Re-evaluate'}
               </button>
             )}
           </div>

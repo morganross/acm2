@@ -1,14 +1,15 @@
 """
 Provider-Aware Rate Limiter.
 
-Implements global rate limiting at the ACM level to prevent 429 errors
-from LLM providers. Each provider can have different limits:
-- max_concurrent: Maximum concurrent requests (semaphore-based)
-- min_delay_seconds: Minimum delay between requests (timestamp-based)
+Implements per-provider delay enforcement to prevent hammering LLM APIs.
+Each provider can have different min_delay_seconds settings.
 
-This module provides a centralized way to throttle API calls before
-spawning FPF subprocesses, ensuring we respect provider rate limits
-across all concurrent tasks.
+Concurrency is controlled globally by the preset's generation_concurrency
+setting (in run_executor.py), NOT here. This module only handles:
+- min_delay_seconds: Minimum delay between requests per provider
+
+This module provides a centralized way to add delays between API calls,
+ensuring we don't spam providers even when running many concurrent tasks.
 """
 
 import asyncio
@@ -26,15 +27,12 @@ class ProviderConfig:
     """Configuration for a single provider's rate limits."""
     
     name: str
-    max_concurrent: int = 10  # Max concurrent requests allowed
     min_delay_seconds: float = 0.0  # Min seconds between requests
     
     # Tracking state (not config, but easier to keep here)
     last_request_time: float = 0.0  # Unix timestamp of last request start
     
     def __post_init__(self):
-        if self.max_concurrent < 1:
-            raise ValueError(f"max_concurrent must be >= 1, got {self.max_concurrent}")
         if self.min_delay_seconds < 0:
             raise ValueError(f"min_delay_seconds must be >= 0, got {self.min_delay_seconds}")
 
@@ -44,116 +42,83 @@ class ProviderRateLimiter:
     """
     Rate limiter for a single provider.
     
-    Uses an asyncio Semaphore for concurrency limiting and timestamp
-    tracking for delay enforcement.
+    Uses timestamp tracking for delay enforcement between requests.
+    Concurrency is handled globally by the preset's generation_concurrency.
     """
     
     config: ProviderConfig
-    _semaphore: asyncio.Semaphore = field(init=False)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    _in_flight: int = field(default=0, init=False)
-    
-    def __post_init__(self):
-        self._semaphore = asyncio.Semaphore(self.config.max_concurrent)
-        self._in_flight = 0
     
     async def acquire(self) -> None:
         """
-        Acquire a slot for making a request.
+        Acquire permission to make a request.
         
         This will:
-        1. Wait for a semaphore slot (concurrency limiting)
-        2. Wait for min_delay since last request (rate limiting)
-        3. Update tracking state
+        1. Wait for min_delay since last request (rate limiting)
+        2. Update tracking state
         """
-        # 1. Acquire semaphore slot
-        await self._semaphore.acquire()
-        
-        try:
-            # 2. Enforce minimum delay between requests
-            async with self._lock:
-                now = time.time()
-                elapsed = now - self.config.last_request_time
-                
-                if elapsed < self.config.min_delay_seconds:
-                    wait_time = self.config.min_delay_seconds - elapsed
-                    logger.info(
-                        f"[RATE-LIMIT] Provider {self.config.name}: "
-                        f"Waiting {wait_time:.1f}s (min_delay={self.config.min_delay_seconds}s, "
-                        f"elapsed={elapsed:.1f}s)"
-                    )
-                    # Release lock during sleep so other tasks can check timing
-                    # They'll also need to wait, but at least they can queue up
-                    
-                # We'll wait outside the lock to avoid blocking
-                wait_time_needed = max(0, self.config.min_delay_seconds - elapsed)
+        # Enforce minimum delay between requests
+        async with self._lock:
+            now = time.time()
+            elapsed = now - self.config.last_request_time
             
-            # Sleep outside lock if needed
-            if wait_time_needed > 0:
-                await asyncio.sleep(wait_time_needed)
-            
-            # 3. Update tracking state
-            async with self._lock:
-                self.config.last_request_time = time.time()
-                self._in_flight += 1
+            if elapsed < self.config.min_delay_seconds:
+                wait_time = self.config.min_delay_seconds - elapsed
                 logger.info(
                     f"[RATE-LIMIT] Provider {self.config.name}: "
-                    f"ACQUIRED slot (in_flight={self._in_flight}/{self.config.max_concurrent})"
+                    f"Waiting {wait_time:.1f}s (min_delay={self.config.min_delay_seconds}s, "
+                    f"elapsed={elapsed:.1f}s)"
                 )
-        except Exception:
-            # If anything fails, release the semaphore
-            self._semaphore.release()
-            raise
+                
+            # Calculate wait time needed
+            wait_time_needed = max(0, self.config.min_delay_seconds - elapsed)
+        
+        # Sleep outside lock if needed
+        if wait_time_needed > 0:
+            await asyncio.sleep(wait_time_needed)
+        
+        # Update tracking state
+        async with self._lock:
+            self.config.last_request_time = time.time()
+            logger.info(
+                f"[RATE-LIMIT] Provider {self.config.name}: ACQUIRED (delay enforced)"
+            )
     
     def release(self) -> None:
-        """Release a request slot after completion."""
-        self._in_flight = max(0, self._in_flight - 1)
-        self._semaphore.release()
-        logger.info(
-            f"[RATE-LIMIT] Provider {self.config.name}: "
-            f"RELEASED slot (in_flight={self._in_flight}/{self.config.max_concurrent})"
+        """Release after request completion (no-op, kept for API compatibility)."""
+        logger.debug(
+            f"[RATE-LIMIT] Provider {self.config.name}: RELEASED"
         )
-    
-    @property
-    def in_flight_count(self) -> int:
-        """Number of currently active requests."""
-        return self._in_flight
 
 
 class ProviderRegistry:
     """
     Singleton registry of all provider rate limiters.
     
-    Provides a central place to manage rate limits for all providers.
-    Default limits are conservative for Tier 1 API access.
+    Provides a central place to manage per-provider delay settings.
+    Concurrency is controlled by the preset's generation_concurrency.
     """
     
     _instance: Optional["ProviderRegistry"] = None
     _lock: asyncio.Lock = None
     
-    # Default provider configurations
-    # These are conservative defaults for Tier 1 API access
+    # Default provider configurations (delay only, no concurrency limits)
     DEFAULT_CONFIGS: Dict[str, Dict] = {
         "anthropic": {
-            "max_concurrent": 1,  # Serial execution
-            "min_delay_seconds": 61.0,  # 61s between calls (safe for 30k tokens/min)
+            "min_delay_seconds": 1.0,  # Small delay between calls
         },
         "openai": {
-            "max_concurrent": 5,  # OpenAI has higher limits
-            "min_delay_seconds": 1.0,
+            "min_delay_seconds": 0.5,
         },
         "google": {
-            "max_concurrent": 5,
-            "min_delay_seconds": 1.0,
+            "min_delay_seconds": 0.5,
         },
         "openrouter": {
-            "max_concurrent": 3,
-            "min_delay_seconds": 2.0,
+            "min_delay_seconds": 0.5,
         },
         # Default for unknown providers
         "_default": {
-            "max_concurrent": 2,
-            "min_delay_seconds": 5.0,
+            "min_delay_seconds": 1.0,
         },
     }
     
@@ -185,14 +150,13 @@ class ProviderRegistry:
                 continue
             config = ProviderConfig(
                 name=provider_name,
-                max_concurrent=config_dict["max_concurrent"],
                 min_delay_seconds=config_dict["min_delay_seconds"],
             )
             self._limiters[provider_name] = ProviderRateLimiter(config)
         
         logger.info(
             f"[RATE-LIMIT] Initialized ProviderRegistry with {len(self._limiters)} providers: "
-            f"{list(self._limiters.keys())}"
+            f"{list(self._limiters.keys())} (delay-only mode, concurrency controlled by preset)"
         )
     
     async def get_limiter(self, provider: str) -> ProviderRateLimiter:
@@ -209,14 +173,12 @@ class ProviderRegistry:
                 default_config = self.DEFAULT_CONFIGS.get("_default", {})
                 config = ProviderConfig(
                     name=provider_lower,
-                    max_concurrent=default_config.get("max_concurrent", 2),
-                    min_delay_seconds=default_config.get("min_delay_seconds", 5.0),
+                    min_delay_seconds=default_config.get("min_delay_seconds", 1.0),
                 )
                 self._limiters[provider_lower] = ProviderRateLimiter(config)
                 logger.warning(
                     f"[RATE-LIMIT] Unknown provider '{provider}', "
-                    f"using default limits: max_concurrent={config.max_concurrent}, "
-                    f"min_delay={config.min_delay_seconds}s"
+                    f"using default delay: min_delay={config.min_delay_seconds}s"
                 )
             
             return self._limiters[provider_lower]

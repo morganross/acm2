@@ -15,7 +15,7 @@ import traceback
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 from uuid import uuid4
 
 from ..adapters.fpf.adapter import FpfAdapter
@@ -38,6 +38,13 @@ from ..evaluation import (
     PairwiseSummary,
     FpfStatsTracker,
 )
+from ..evaluation.single_doc import EvalCompleteCallback
+from ..evaluation.models import SingleEvalResult, EvaluationCriterion
+from ..evaluation.criteria import CriteriaManager
+
+# Callback fired after each document generation completes
+# Args: (doc_id, model, generator, source_doc_id, iteration)
+OnGenCompleteCallback = Callable[[str, str, str, str, int], Awaitable[None]]
 
 
 class RunPhase(str, Enum):
@@ -79,7 +86,7 @@ class RunConfig:
     
     # Generators - REQUIRED (no defaults)
     generators: List[GeneratorType]
-    models: List[str]  # Model names to use
+    models: List[str]  # Model names to use (legacy, used if per-generator not set)
     model_settings: Dict[str, Dict[str, Any]]  # REQUIRED per-model settings
     
     # Iterations - REQUIRED (no defaults)
@@ -95,8 +102,16 @@ class RunConfig:
     # Logging - REQUIRED (no defaults)
     log_level: str
     
+    # Per-generator model lists (override global models if set) - Optional with defaults
+    fpf_models: Optional[List[str]] = None
+    gptr_models: Optional[List[str]] = None
+    dr_models: Optional[List[str]] = None
+    
     # Instructions - Validated based on enabled features (optional but validated in __post_init__)
     instructions: Optional[str] = None  # REQUIRED if FPF generator enabled
+    
+    # Expose evaluation criteria to generators (helps them know what they're judged on)
+    expose_criteria_to_generators: bool = False
     
     # Evaluation - Defaults provided
     enable_single_eval: bool = True
@@ -119,6 +134,7 @@ class RunConfig:
     combine_strategy: str = ""  # REQUIRED if combine enabled
     combine_models: List[str] = field(default_factory=list)  # REQUIRED if combine enabled
     combine_instructions: Optional[str] = None  # REQUIRED if combine enabled
+    combine_max_tokens: Optional[int] = None  # Max output tokens for combine phase
     
     # FPF Logging - Defaults provided
     fpf_log_output: str = "file"  # REQUIRED: 'stream', 'file', or 'none'
@@ -133,6 +149,8 @@ class RunConfig:
     
     # Callbacks
     on_progress: Optional[Callable[[str, float, str], None]] = None
+    on_gen_complete: Optional[OnGenCompleteCallback] = None  # Fires after each doc generation
+    on_eval_complete: Optional[EvalCompleteCallback] = None  # Fires after each judge eval
     
     def __post_init__(self):
         """Validate all required fields and conditional requirements."""
@@ -258,12 +276,43 @@ class RunConfig:
                 )
             if not self.combine_strategy:
                 raise ValueError("Combine enabled but no strategy provided")
+            if self.combine_max_tokens is None:
+                raise ValueError("Combine enabled but no combine_max_tokens provided in preset")
         
         # Validate optional top-N settings
         if self.pairwise_top_n is not None and self.pairwise_top_n < 2:
             raise ValueError("pairwise_top_n must be >= 2 or None")
         if self.post_combine_top_n is not None and self.post_combine_top_n < 2:
             raise ValueError("post_combine_top_n must be >= 2 or None")
+
+        # If a generator is enabled but has no models, treat it as disabled (remove from generators list)
+        # This allows users to enable a generator in the GUI without selecting models = effectively disabled
+        if GeneratorType.FPF in self.generators and not self.fpf_models:
+            self.generators = [g for g in self.generators if g != GeneratorType.FPF]
+        if GeneratorType.GPTR in self.generators and not self.gptr_models:
+            self.generators = [g for g in self.generators if g != GeneratorType.GPTR]
+        if GeneratorType.DR in self.generators and not self.dr_models:
+            self.generators = [g for g in self.generators if g != GeneratorType.DR]
+        
+        # Must have at least one generator with models after filtering
+        if not self.generators:
+            raise ValueError("No generators with models configured - enable at least one generator and select models")
+    
+    def get_models_for_generator(self, generator: GeneratorType) -> List[str]:
+        """Get the model list for a specific generator without fallbacks."""
+        if generator == GeneratorType.FPF:
+            if self.fpf_models:
+                return self.fpf_models
+            raise ValueError("FPF generator enabled but fpf_models are missing")
+        elif generator == GeneratorType.GPTR:
+            if self.gptr_models:
+                return self.gptr_models
+            raise ValueError("GPTR generator enabled but gptr_models are missing")
+        elif generator == GeneratorType.DR:
+            if self.dr_models:
+                return self.dr_models
+            raise ValueError("DR generator enabled but dr_models are missing")
+        raise ValueError(f"Unknown generator: {generator}")
 
 
 @dataclass
@@ -607,9 +656,7 @@ class RunExecutor:
                 # Find doc with highest average score from single eval
                 doc_scores = {}
                 for doc_id, summary in result.single_eval_results.items():
-                    if hasattr(summary, 'weighted_avg_score') and summary.weighted_avg_score is not None:
-                        doc_scores[doc_id] = summary.weighted_avg_score
-                    elif hasattr(summary, 'avg_score') and summary.avg_score is not None:
+                    if hasattr(summary, 'avg_score') and summary.avg_score is not None:
                         doc_scores[doc_id] = summary.avg_score
                 
                 if doc_scores:
@@ -732,7 +779,9 @@ class RunExecutor:
         tasks = []
         for doc_id in config.document_ids:
             for generator in config.generators:
-                for model in config.models:
+                # Use per-generator model list if available
+                generator_models = config.get_models_for_generator(generator)
+                for model in generator_models:
                     for iteration in range(1, config.iterations + 1):
                         tasks.append((doc_id, generator, model, iteration))
 
@@ -881,6 +930,8 @@ class RunExecutor:
                     log_level=config.log_level,
                     run_id=run_id,
                     timeout=config.request_timeout,
+                    eval_criteria=config.eval_criteria,
+                    expose_criteria=config.expose_criteria_to_generators,
                 )
                 
                 if gen_result:
@@ -920,6 +971,23 @@ class RunExecutor:
                         details={"doc_id": gen_result.doc_id},
                     )
                     
+                    # Fire on_gen_complete callback to save generated_docs incrementally
+                    if config.on_gen_complete:
+                        try:
+                            self.logger.info(f"Calling on_gen_complete for {gen_result.doc_id}")
+                            await config.on_gen_complete(
+                                gen_result.doc_id,
+                                model,
+                                generator.value,
+                                doc_id,  # source_doc_id
+                                iteration,
+                            )
+                            self.logger.info(f"on_gen_complete succeeded for {gen_result.doc_id}")
+                        except Exception as e:
+                            self.logger.exception(f"on_gen_complete callback failed: {e}")
+                    else:
+                        self.logger.warning("config.on_gen_complete is None, cannot save generated_docs incrementally")
+                    
                     # 2. Single eval IMMEDIATELY (streaming)
                     if single_evaluator and gen_result.content:
                         try:
@@ -928,7 +996,10 @@ class RunExecutor:
                                 content=gen_result.content,
                             )
                             eval_started_at = datetime.utcnow()
-                            summary = await single_evaluator.evaluate_document(eval_input)
+                            summary = await single_evaluator.evaluate_document(
+                                eval_input,
+                                on_eval_complete=config.on_eval_complete,
+                            )
                             result.single_eval_results[gen_result.doc_id] = summary
                             eval_completed_at = datetime.utcnow()
                             
@@ -1032,6 +1103,8 @@ class RunExecutor:
         log_level: str = "INFO",
         run_id: Optional[str] = None,
         timeout: Optional[int] = None,
+        eval_criteria: Optional[str] = None,
+        expose_criteria: bool = False,
     ) -> Optional[GeneratedDocument]:
         """Generate a single document."""
         started_at = datetime.utcnow()
@@ -1087,6 +1160,18 @@ class RunExecutor:
                         "This should have been caught in RunConfig validation."
                     )
                 
+                # Build FPF instructions with optional criteria exposure
+                fpf_instructions = instructions
+                if expose_criteria and eval_criteria:
+                    criteria_header = """
+
+=== EVALUATION CRITERIA (Your output will be judged on these) ===
+The following criteria will be used to evaluate your output. 
+Optimize your response to score highly on each criterion:
+
+"""
+                    fpf_instructions = instructions + criteria_header + eval_criteria
+                
                 # Use configured FPF log settings from preset
                 fpf_log_output = self.config.fpf_log_output
                 fpf_log_file = self.config.fpf_log_file_path
@@ -1106,7 +1191,7 @@ class RunExecutor:
                 # Apply provider-level rate limiting before making API call
                 async with RateLimitedRequest(provider):
                     gen_result = await adapter.generate(
-                        query=instructions,  # No fallback - already validated
+                        query=fpf_instructions,  # Use instructions with optional criteria
                         config=gen_config,
                         document_content=content,
                         progress_callback=progress_callback,
@@ -1116,10 +1201,32 @@ class RunExecutor:
                     )
             else:
                 # GPTR and others use query as the research topic
+                # Build the full query with optional instructions and criteria
+                query_parts = []
+                
+                # Prepend instructions if provided
+                if instructions:
+                    query_parts.append(instructions)
+                
+                # Append evaluation criteria if expose_criteria flag is set
+                if expose_criteria and eval_criteria:
+                    criteria_header = """
+=== EVALUATION CRITERIA (Your output will be judged on these) ===
+The following criteria will be used to evaluate your research report. 
+Optimize your output to score highly on each criterion:
+
+"""
+                    query_parts.append(criteria_header + eval_criteria)
+                
+                # Add the actual content/topic
+                query_parts.append(content)
+                
+                full_query = "\n\n".join(query_parts)
+                
                 # Apply provider-level rate limiting before making API call
                 async with RateLimitedRequest(provider):
                     gen_result = await adapter.generate(
-                        query=content,
+                        query=full_query,
                         config=gen_config,
                         progress_callback=progress_callback,
                 )
@@ -1187,7 +1294,33 @@ class RunExecutor:
             custom_instructions=config.pairwise_eval_instructions,
             concurrent_limit=config.eval_concurrency,
         )
-        evaluator = PairwiseEvaluator(pairwise_config, stats_tracker=self._fpf_stats)
+        
+        # Create CriteriaManager with criteria from Content Library (same as single eval)
+        criteria_manager = CriteriaManager()
+        if config.eval_criteria:
+            try:
+                import yaml
+                data = yaml.safe_load(config.eval_criteria)
+                if data and "criteria" in data:
+                    parsed_criteria = []
+                    for item in data["criteria"]:
+                        if isinstance(item, str):
+                            parsed_criteria.append(EvaluationCriterion(
+                                name=item,
+                                description=f"Evaluate the {item} of the document.",
+                            ))
+                        elif isinstance(item, dict) and "name" in item:
+                            parsed_criteria.append(EvaluationCriterion(
+                                name=item["name"],
+                                description=item.get("description", f"Evaluate the {item['name']}."),
+                            ))
+                    if parsed_criteria:
+                        criteria_manager.set_criteria(parsed_criteria)
+                        self.logger.info(f"Pairwise: Loaded {len(parsed_criteria)} criteria from Content Library")
+            except Exception as e:
+                self.logger.error(f"Failed to parse pairwise eval_criteria YAML: {e}")
+        
+        evaluator = PairwiseEvaluator(pairwise_config, criteria_manager=criteria_manager, stats_tracker=self._fpf_stats)
         
         # Collect doc IDs and contents, filtering out empty content
         # Note: All docs in generated_docs are successful (failed generations return None and aren't added)
@@ -1206,7 +1339,7 @@ class RunExecutor:
         scores = None
         if result.single_eval_results and config.pairwise_top_n:
             scores = {
-                doc_id: summary.weighted_avg_score
+                doc_id: summary.avg_score
                 for doc_id, summary in result.single_eval_results.items()
             }
             doc_ids = evaluator.filter_top_n(doc_ids, scores, config.pairwise_top_n)
@@ -1334,10 +1467,13 @@ class RunExecutor:
                 combine_gen_config = GenerationConfig(
                     provider=provider,
                     model=model_name,
-                    extra={"task_id": combine_task_id},
+                    extra={
+                        "task_id": combine_task_id,
+                        "max_completion_tokens": config.combine_max_tokens,
+                    },
                 )
                 
-                self.logger.info(f"Combining with model {combine_model} ({model_idx + 1}/{len(config.combine_models)})")
+                self.logger.info(f"Combining with model {combine_model} ({model_idx + 1}/{len(config.combine_models)}) max_tokens={config.combine_max_tokens}")
                 
                 # Single attempt per model - FPF handles transient HTTP retries internally
                 combine_started_at = datetime.utcnow()

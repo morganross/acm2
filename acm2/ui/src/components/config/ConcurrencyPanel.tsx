@@ -1,7 +1,7 @@
 import { Section } from '../ui/section'
 import { Slider } from '../ui/slider'
 import { Checkbox } from '../ui/checkbox'
-import { Zap, Clock, Timer } from 'lucide-react'
+import { Zap, Clock, Timer, RefreshCw } from 'lucide-react'
 import { useConfigStore } from '../../stores/config'
 
 export function ConcurrencyPanel() {
@@ -90,6 +90,34 @@ export function ConcurrencyPanel() {
             />
             <p className="text-xs text-gray-500">Timeout for generation requests (blank = no limit)</p>
           </div>
+        </div>
+
+        {/* FPF API Retry Settings */}
+        <div className="space-y-3 border-t border-gray-700 pt-4">
+          <h4 className="text-sm font-semibold text-gray-300 flex items-center gap-2">
+            <RefreshCw className="w-4 h-4" /> FPF API Retry Settings
+          </h4>
+          <p className="text-xs text-gray-500">Retries for transient API errors (429 rate limits, 500s server errors)</p>
+
+          <Slider
+            label="Max Retries"
+            value={config.concurrency.fpfMaxRetries}
+            onChange={(val) => config.updateConcurrency({ fpfMaxRetries: val })}
+            min={0}
+            max={10}
+            step={1}
+            displayValue={`${config.concurrency.fpfMaxRetries} retries`}
+          />
+
+          <Slider
+            label="Retry Delay (seconds)"
+            value={config.concurrency.fpfRetryDelay}
+            onChange={(val) => config.updateConcurrency({ fpfRetryDelay: val })}
+            min={0.5}
+            max={121}
+            step={0.5}
+            displayValue={`${config.concurrency.fpfRetryDelay.toFixed(1)}s`}
+          />
         </div>
 
 

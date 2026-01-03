@@ -1,14 +1,15 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { Section } from '../ui/section'
 import { Checkbox, CheckboxGroup } from '../ui/checkbox'
-import { Combine as CombineIcon, Cpu, FileText, ExternalLink, Scale } from 'lucide-react'
+import { Combine as CombineIcon, Cpu, FileText, ExternalLink, Scale, Sliders, Gift, ChevronDown, ChevronRight } from 'lucide-react'
 import { useConfigStore } from '../../stores/config'
 import { useModelCatalog } from '../../stores/modelCatalog'
 import { contentsApi, type ContentSummary } from '../../api/contents'
 
 export function CombinePanel() {
   const config = useConfigStore()
-  const { combineModels, fetchModels } = useModelCatalog()
+  const { combineModels, combineFreeModels, models, fetchModels } = useModelCatalog()
+  const [freeModelsExpanded, setFreeModelsExpanded] = useState(false)
   
   // Content Library items for combine instructions
   const [combineInstructionContents, setCombineInstructionContents] = useState<ContentSummary[]>([])
@@ -28,6 +29,21 @@ export function CombinePanel() {
     }
     loadContents()
   }, [])
+
+  // Compute max output tokens based on selected combine models (use minimum across all selected)
+  const maxOutputTokensLimit = useMemo(() => {
+    if (config.combine.selectedModels.length === 0) {
+      return 128000 // Default max when no models selected
+    }
+    const limits = config.combine.selectedModels
+      .map(m => models[m]?.max_output_tokens)
+      .filter((limit): limit is number => limit !== null && limit !== undefined)
+    
+    if (limits.length === 0) {
+      return 128000 // Default if no limits found
+    }
+    return Math.min(...limits)
+  }, [config.combine.selectedModels, models])
 
   return (
     <Section
@@ -65,6 +81,73 @@ export function CombinePanel() {
                 dataTestId={`combine-model-${model}`}
               />
             ))}
+          </div>
+          
+          {/* OpenRouter FREE Models - Collapsible */}
+          {combineFreeModels.length > 0 && (
+            <div className="mt-3 border border-green-700 rounded-lg overflow-hidden" data-section="combine-free-models">
+              <button
+                onClick={() => setFreeModelsExpanded(!freeModelsExpanded)}
+                className="w-full flex items-center justify-between p-2 bg-green-900/30 hover:bg-green-900/50 transition-colors"
+              >
+                <div className="flex items-center gap-2 text-green-400">
+                  <Gift className="w-4 h-4" />
+                  <span className="text-sm font-medium">OpenRouter FREE Models</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-green-500">
+                    {config.combine.selectedModels.filter((m: string) => combineFreeModels.includes(m)).length} / {combineFreeModels.length} selected
+                  </span>
+                  {freeModelsExpanded ? (
+                    <ChevronDown className="w-4 h-4 text-green-400" />
+                  ) : (
+                    <ChevronRight className="w-4 h-4 text-green-400" />
+                  )}
+                </div>
+              </button>
+              {freeModelsExpanded && (
+                <div className="p-3 bg-gray-800/50">
+                  <div className="grid grid-cols-2 gap-2">
+                    {combineFreeModels.map((model) => (
+                      <Checkbox
+                        key={model}
+                        checked={config.combine.selectedModels.includes(model)}
+                        onChange={(checked) => {
+                          const models = checked
+                            ? [...config.combine.selectedModels, model]
+                            : config.combine.selectedModels.filter((m: string) => m !== model)
+                          config.updateCombine({ selectedModels: models })
+                        }}
+                        label={`🆓 ${model}`}
+                        dataTestId={`combine-model-${model}`}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Max Tokens Slider */}
+        <div className="border-t border-gray-700 pt-4 mt-4" data-section="combine-max-tokens">
+          <h4 className="text-sm font-semibold text-gray-300 mb-2 flex items-center gap-2">
+            <Sliders className="w-4 h-4" /> Max Output Tokens
+          </h4>
+          <p className="text-xs text-gray-500 mb-2">
+            Maximum tokens for the combine model output (includes reasoning tokens for reasoning models). Limit: {maxOutputTokensLimit.toLocaleString()}
+          </p>
+          <div className="flex items-center gap-4">
+            <input
+              type="range"
+              min="4000"
+              max={maxOutputTokensLimit}
+              step="1000"
+              value={Math.min(config.combine.maxTokens, maxOutputTokensLimit)}
+              onChange={(e) => config.updateCombine({ maxTokens: parseInt(e.target.value) })}
+              className="flex-1"
+            />
+            <span className="text-sm text-gray-300 w-20 text-right">{config.combine.maxTokens.toLocaleString()}</span>
           </div>
         </div>
 

@@ -7,11 +7,12 @@ import logging
 import os
 import subprocess
 import tempfile
+import threading
 import time
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 from ..base import (
     BaseAdapter,
@@ -45,7 +46,8 @@ class FpfAdapter(BaseAdapter):
     """
 
     def __init__(self):
-        self._active_tasks: dict[str, asyncio.subprocess.Process] = {}
+        self._active_tasks: Dict[str, subprocess.Popen] = {}
+        self._cancel_events: Dict[str, threading.Event] = {}
 
     @property
     def name(self) -> GeneratorType:
@@ -127,34 +129,37 @@ class FpfAdapter(BaseAdapter):
 
             # Prepare environment - inherit current env to pass API keys
             env = os.environ.copy()
+            fpf_cwd = self._get_fpf_directory()
+            actual_timeout = timeout_val if timeout_val else 1200  # 20 min default
             
-            proc = await asyncio.create_subprocess_exec(
-                *fpf_cmd,
-                cwd=self._get_fpf_directory(),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=env,
-            )
-
-            self._active_tasks[task_id] = proc
-
+            # Create cancel event for this task
+            cancel_event = threading.Event()
+            self._cancel_events[task_id] = cancel_event
+            
             try:
-                if timeout_val:
-                    stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=timeout_val)
-                else:
-                    stdout_bytes, stderr_bytes = await proc.communicate()
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
-                raise FpfTimeoutError(f"FPF task {task_id} exceeded timeout {timeout_val}s")
+                # Run subprocess in thread to avoid Windows event loop issues
+                result = await asyncio.to_thread(
+                    self._run_subprocess_sync,
+                    fpf_cmd,
+                    env,
+                    fpf_cwd,
+                    task_id,
+                    actual_timeout,
+                    cancel_event,
+                )
             finally:
+                self._cancel_events.pop(task_id, None)
                 self._active_tasks.pop(task_id, None)
-
-            if proc.returncode != 0:
-                stdout_str = (stdout_bytes or b"").decode("utf-8", errors="replace")
-                stderr_str = (stderr_bytes or b"").decode("utf-8", errors="replace")
-                error_msg = stderr_str or stdout_str or f"Return code {proc.returncode}"
-                logger.error(f"FPF failed with return code {proc.returncode}: {error_msg}")
+            
+            if result.get("cancelled"):
+                raise FpfExecutionError(f"FPF task {task_id} was cancelled")
+            
+            if result.get("timed_out"):
+                raise FpfTimeoutError(f"FPF task {task_id} exceeded timeout {actual_timeout}s")
+            
+            if result["return_code"] != 0:
+                error_msg = result["stderr"] or result["stdout"] or f"Return code {result['return_code']}"
+                logger.error(f"FPF failed with return code {result['return_code']}: {error_msg}")
                 raise FpfExecutionError(f"FPF execution failed: {error_msg}")
 
             # Parse results
@@ -184,19 +189,112 @@ class FpfAdapter(BaseAdapter):
 
     async def cancel(self, task_id: str) -> bool:
         """Cancel a running FPF subprocess."""
+        # Signal cancel via event
+        cancel_event = self._cancel_events.get(task_id)
+        if cancel_event:
+            cancel_event.set()
+        
+        # Kill the subprocess if tracked
         proc = self._active_tasks.get(task_id)
-        if not proc:
-            return False
-        try:
-            proc.terminate()
+        if proc:
             try:
-                await asyncio.wait_for(proc.wait(), timeout=2.0)
-            except asyncio.TimeoutError:
-                proc.kill()
-            return True
+                proc.terminate()
+                # Give it a moment to terminate
+                try:
+                    proc.wait(timeout=2.0)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=1.0)
+                logger.info(f"Cancelled FPF task {task_id}")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to cancel FPF task {task_id}: {e}")
+                return False
+        
+        # If we only had the cancel event, that's still a success
+        return cancel_event is not None
+    
+    def _run_subprocess_sync(
+        self,
+        cmd: list[str],
+        env: Dict[str, str],
+        cwd: str,
+        task_id: str,
+        timeout_seconds: int,
+        cancel_event: threading.Event,
+    ) -> Dict[str, Any]:
+        """
+        Synchronous subprocess execution with timeout.
+        Runs in a thread via asyncio.to_thread() to avoid event loop issues on Windows.
+        """
+        process = None
+        try:
+            process = subprocess.Popen(
+                cmd,
+                cwd=cwd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+                text=False,
+            )
+            
+            # Track for cancellation
+            self._active_tasks[task_id] = process
+            
+            logger.info(f"FPF subprocess started (PID {process.pid}), timeout={timeout_seconds}s ({timeout_seconds // 60}min)")
+            
+            try:
+                stdout_bytes, stderr_bytes = process.communicate(timeout=timeout_seconds)
+                
+                if cancel_event.is_set():
+                    return {"cancelled": True, "stdout": "", "stderr": "", "return_code": -1}
+                
+                stdout_text = stdout_bytes.decode(errors='replace') if stdout_bytes else ""
+                stderr_text = stderr_bytes.decode(errors='replace') if stderr_bytes else ""
+                
+                logger.info(f"FPF subprocess completed with return code: {process.returncode}")
+                
+                return {
+                    "stdout": stdout_text,
+                    "stderr": stderr_text,
+                    "return_code": process.returncode,
+                    "timed_out": False,
+                    "cancelled": False,
+                }
+                
+            except subprocess.TimeoutExpired:
+                logger.warning(f"FPF subprocess timed out after {timeout_seconds}s (PID {process.pid}), killing...")
+                process.kill()
+                stdout_bytes, stderr_bytes = process.communicate(timeout=5)
+                stdout_text = stdout_bytes.decode(errors='replace') if stdout_bytes else ""
+                stderr_text = stderr_bytes.decode(errors='replace') if stderr_bytes else ""
+                
+                return {
+                    "stdout": stdout_text,
+                    "stderr": stderr_text,
+                    "return_code": -1,
+                    "timed_out": True,
+                    "cancelled": False,
+                }
+                
         except Exception as e:
-            logger.error(f"Failed to cancel FPF task {task_id}: {e}")
-            return False
+            logger.exception(f"Error in FPF subprocess execution: {e}")
+            
+            if process and process.poll() is None:
+                try:
+                    process.kill()
+                    process.wait(timeout=2)
+                except Exception:
+                    pass
+            
+            return {
+                "stdout": "",
+                "stderr": "",
+                "return_code": -1,
+                "timed_out": False,
+                "cancelled": False,
+                "error": str(e),
+            }
 
     def _build_fpf_command(
         self,
@@ -213,7 +311,10 @@ class FpfAdapter(BaseAdapter):
         model = config.model
         provider = config.provider
         
-        if ":" in model:
+        # Only parse provider:model format if provider is not already set
+        # This avoids double-parsing models like "meta-llama/llama-3.1-405b:free"
+        # which have a colon for the :free suffix, not provider:model format
+        if not provider and ":" in model:
             parts = model.split(":", 1)
             provider = parts[0]
             model = parts[1]

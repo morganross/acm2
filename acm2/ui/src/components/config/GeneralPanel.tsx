@@ -2,7 +2,7 @@ import { Section } from '../ui/section'
 import { Slider } from '../ui/slider'
 import { Checkbox } from '../ui/checkbox'
 import { Select } from '../ui/select'
-import { Settings, FolderOpen, ScrollText } from 'lucide-react'
+import { Settings, FolderOpen, ScrollText, Target } from 'lucide-react'
 import { useConfigStore } from '../../stores/config'
 
 export function GeneralPanel() {
@@ -30,6 +30,23 @@ export function GeneralPanel() {
             step={1}
             displayValue={`${config.general.iterations} iterations`}
           />
+        </div>
+
+        {/* Generation Quality Settings */}
+        <div className="space-y-3 border-t border-gray-700 pt-4">
+          <h4 className="text-sm font-semibold text-gray-300 flex items-center gap-2">
+            <Target className="w-4 h-4" /> Generation Quality
+          </h4>
+
+          <Checkbox
+            checked={config.general.exposeCriteriaToGenerators}
+            onChange={(val) => config.updateGeneral({ exposeCriteriaToGenerators: val })}
+            label="Expose Evaluation Criteria to Generators"
+          />
+          <p className="text-xs text-gray-500 ml-6">
+            When enabled, generators will see the evaluation criteria they'll be judged on, 
+            helping them optimize output quality.
+          </p>
         </div>
 
         {/* Output Settings */}

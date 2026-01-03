@@ -785,27 +785,55 @@ def assert_grounding_and_reasoning(raw_json: Dict[str, Any], provider: Optional[
     """
     Assert both grounding and reasoning are present; raise RuntimeError if either is missing.
     EXTREME LOGGING: Full validation summary saved before raising.
+    
+    Provider-level override:
+    - If provider has REQUIRES_GROUNDING = False, grounding check is skipped.
+    - Reasoning check still applies unless provider has REQUIRES_REASONING = False.
     """
     LOG.info("=" * 80)
     LOG.info("VALIDATION CHECKPOINT: assert_grounding_and_reasoning")
     LOG.info("=" * 80)
     
-    g = detect_grounding(raw_json)
-    r = detect_reasoning(raw_json, provider=provider)
+    # Check provider-level flags for grounding/reasoning requirements
+    requires_grounding = getattr(provider, "REQUIRES_GROUNDING", True)
+    requires_reasoning = getattr(provider, "REQUIRES_REASONING", True)
+    
+    provider_name = getattr(provider, "__name__", str(provider)) if provider else "unknown"
+    LOG.info("Provider: %s | REQUIRES_GROUNDING=%s | REQUIRES_REASONING=%s", 
+             provider_name, requires_grounding, requires_reasoning)
+    
+    # Detect grounding only if required
+    if requires_grounding:
+        g = detect_grounding(raw_json)
+    else:
+        g = True  # Skip grounding check
+        LOG.info("Grounding check SKIPPED for provider: %s", provider_name)
+    
+    # Detect reasoning only if required
+    if requires_reasoning:
+        r = detect_reasoning(raw_json, provider=provider)
+    else:
+        r = True  # Skip reasoning check
+        LOG.info("Reasoning check SKIPPED for provider: %s", provider_name)
     
     # Log final summary
     validation_summary = {
         "timestamp": datetime.utcnow().isoformat(),
         "run_context": _serialize_for_json(_get_context_as_dict()),
-        "grounding_detected": g,
-        "reasoning_detected": r,
+        "provider": provider_name,
+        "requires_grounding": requires_grounding,
+        "requires_reasoning": requires_reasoning,
+        "grounding_detected": g if requires_grounding else "skipped",
+        "reasoning_detected": r if requires_reasoning else "skipped",
         "validation_passed": g and r
     }
     
     _log_validation_detail("summary", "final", g and r, validation_summary)
     
-    LOG.info("VALIDATION SUMMARY: grounding=%s reasoning=%s PASSED=%s", g, r, g and r)
-    print(f"\n{'='*80}\n[VALIDATION SUMMARY] grounding={g} reasoning={r} PASSED={g and r}\n{'='*80}\n", flush=True)
+    grounding_status = g if requires_grounding else "skipped"
+    reasoning_status = r if requires_reasoning else "skipped"
+    LOG.info("VALIDATION SUMMARY: grounding=%s reasoning=%s PASSED=%s", grounding_status, reasoning_status, g and r)
+    print(f"\n{'='*80}\n[VALIDATION SUMMARY] grounding={grounding_status} reasoning={reasoning_status} PASSED={g and r}\n{'='*80}\n", flush=True)
     
     missing = []
     if not g:

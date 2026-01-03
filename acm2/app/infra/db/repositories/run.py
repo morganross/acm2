@@ -235,3 +235,32 @@ class RunRepository(BaseRepository[Run]):
             await self.session.refresh(run)
             return run
         return None
+
+    async def append_generated_doc(self, id: str, doc_info: dict) -> Optional[Run]:
+        """Append a generated doc to results_summary.generated_docs.
+        
+        This allows progressive generated_docs updates during execution without
+        overwriting other fields like timeline_events.
+        """
+        run = await self.get_by_id(id)
+        if run:
+            # Initialize results_summary if needed
+            if run.results_summary is None:
+                run.results_summary = {}
+            
+            # Initialize generated_docs array if needed
+            if "generated_docs" not in run.results_summary:
+                run.results_summary["generated_docs"] = []
+            
+            # Append the new doc info
+            run.results_summary["generated_docs"].append(doc_info)
+            run.results_summary["generated_count"] = len(run.results_summary["generated_docs"])
+            
+            # Mark the JSON field as modified (SQLAlchemy doesn't detect in-place mutations)
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(run, "results_summary")
+            
+            await self.session.commit()
+            await self.session.refresh(run)
+            return run
+        return None
