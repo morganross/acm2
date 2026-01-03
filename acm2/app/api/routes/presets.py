@@ -268,6 +268,11 @@ def _preset_to_response(preset) -> PresetResponse:
         concurrency_config=concurrency_config,
         # Logging
         log_level=getattr(preset, 'log_level', None) or "INFO",
+        # GitHub input source configuration
+        input_source_type=getattr(preset, 'input_source_type', None) or 'database',
+        github_connection_id=getattr(preset, 'github_connection_id', None),
+        github_input_paths=getattr(preset, 'github_input_paths', None) or [],
+        github_output_path=getattr(preset, 'github_output_path', None),
         # Legacy fields (backward compatibility)
         generators=[GeneratorType(g) for g in (preset.generators or ["gptr"])],
         models=[ModelConfig(**m) for m in (preset.models or [])],
@@ -414,6 +419,11 @@ async def create_preset(
         generation_instructions_id=data.generation_instructions_id,
         # Logging
         log_level=log_level,
+        # GitHub input source configuration
+        input_source_type=data.input_source_type or 'database',
+        github_connection_id=data.github_connection_id,
+        github_input_paths=data.github_input_paths or [],
+        github_output_path=data.github_output_path,
     )
     
     return _preset_to_response(preset)
@@ -602,6 +612,16 @@ async def update_preset(
         update_data["combine_instructions_id"] = data.combine_instructions_id
     if data.generation_instructions_id is not None:
         update_data["generation_instructions_id"] = data.generation_instructions_id
+    
+    # Handle GitHub input source configuration
+    if data.input_source_type is not None:
+        update_data["input_source_type"] = data.input_source_type
+    if data.github_connection_id is not None:
+        update_data["github_connection_id"] = data.github_connection_id
+    if data.github_input_paths is not None:
+        update_data["github_input_paths"] = data.github_input_paths
+    if data.github_output_path is not None:
+        update_data["github_output_path"] = data.github_output_path
     
     # Save config_overrides if modified
     if overrides:

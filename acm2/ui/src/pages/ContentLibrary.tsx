@@ -16,10 +16,16 @@ import {
   Scroll,
   GitBranch,
   ChevronRight,
+  Github,
+  Folder,
+  ArrowLeft,
+  RefreshCw,
+  Download,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { contentsApi, ContentType, ContentTypeCounts } from '@/api/contents'
+import { githubApi, type GitHubConnectionSummary, type GitHubFileInfo } from '@/api/github'
 
 // Content type metadata for display
 const contentTypeInfo: Record<ContentType, { label: string; icon: React.ReactNode; description: string }> = {
@@ -97,6 +103,7 @@ export default function ContentLibrary() {
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedContentId, setSelectedContentId] = useState<string | null>(null)
   const [isCreating, setIsCreating] = useState(false)
+  const [showGitHubImport, setShowGitHubImport] = useState(false)
   const [editForm, setEditForm] = useState<{
     name: string
     content_type: ContentType
@@ -294,14 +301,23 @@ export default function ContentLibrary() {
             <h2 className="font-semibold text-sm text-foreground">
               {selectedType === 'all' ? 'All Content' : contentTypeInfo[selectedType].label}
             </h2>
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<Plus className="h-4 w-4" />}
-              onClick={() => setIsCreating(true)}
-            >
-              New
-            </Button>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<Github className="h-4 w-4" />}
+                onClick={() => setShowGitHubImport(true)}
+                title="Import from GitHub"
+              />
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<Plus className="h-4 w-4" />}
+                onClick={() => setIsCreating(true)}
+              >
+                New
+              </Button>
+            </div>
           </div>
           <div className="relative">
             <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -521,6 +537,267 @@ export default function ContentLibrary() {
             </div>
           </div>
         )}
+      </div>
+
+      {/* GitHub Import Modal */}
+      {showGitHubImport && (
+        <GitHubImportModal
+          defaultContentType={selectedType === 'all' ? 'input_document' : selectedType}
+          onClose={() => setShowGitHubImport(false)}
+          onImported={(contentId) => {
+            queryClient.invalidateQueries({ queryKey: ['contents'] })
+            queryClient.invalidateQueries({ queryKey: ['contentCounts'] })
+            setShowGitHubImport(false)
+            setSelectedContentId(contentId)
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+// ============================================================================
+// GitHub Import Modal Component
+// ============================================================================
+
+function GitHubImportModal({
+  defaultContentType,
+  onClose,
+  onImported,
+}: {
+  defaultContentType: ContentType
+  onClose: () => void
+  onImported: (contentId: string) => void
+}) {
+  const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null)
+  const [currentPath, setCurrentPath] = useState('/')
+  const [pathHistory, setPathHistory] = useState<string[]>(['/'])
+  const [selectedFile, setSelectedFile] = useState<GitHubFileInfo | null>(null)
+  const [importContentType, setImportContentType] = useState<ContentType>(defaultContentType)
+  const [importName, setImportName] = useState('')
+  const [isImporting, setIsImporting] = useState(false)
+
+  // Fetch available connections
+  const { data: connections } = useQuery({
+    queryKey: ['github-connections'],
+    queryFn: () => githubApi.list(),
+  })
+
+  // Fetch directory contents
+  const { data: browseData, isLoading: isBrowsing } = useQuery({
+    queryKey: ['github-browse', selectedConnectionId, currentPath],
+    queryFn: () => selectedConnectionId ? githubApi.browse(selectedConnectionId, currentPath) : null,
+    enabled: !!selectedConnectionId,
+  })
+
+  const navigateTo = (path: string) => {
+    setPathHistory([...pathHistory, path])
+    setCurrentPath(path)
+    setSelectedFile(null)
+  }
+
+  const navigateBack = () => {
+    if (pathHistory.length > 1) {
+      const newHistory = pathHistory.slice(0, -1)
+      setPathHistory(newHistory)
+      setCurrentPath(newHistory[newHistory.length - 1])
+      setSelectedFile(null)
+    }
+  }
+
+  const handleImport = async () => {
+    if (!selectedConnectionId || !selectedFile) return
+    
+    setIsImporting(true)
+    try {
+      const result = await githubApi.importFile(selectedConnectionId, {
+        path: selectedFile.path,
+        content_type: importContentType,
+        name: importName || selectedFile.name.replace(/\.[^.]+$/, ''),
+      })
+      onImported(result.id)
+    } catch (error) {
+      console.error('Import failed:', error)
+      alert(`Import failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    } finally {
+      setIsImporting(false)
+    }
+  }
+
+  const contentTypeOptions = Object.entries(contentTypeInfo) as [ContentType, typeof contentTypeInfo[ContentType]][]
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-card border rounded-lg w-full max-w-3xl max-h-[85vh] flex flex-col">
+        <div className="p-4 border-b flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Github className="h-5 w-5 text-foreground" />
+            <div>
+              <h2 className="font-semibold text-foreground">Import from GitHub</h2>
+              <p className="text-sm text-muted-foreground">Select a file to import into Content Library</p>
+            </div>
+          </div>
+          <Button variant="ghost" size="sm" icon={<X className="h-4 w-4" />} onClick={onClose} />
+        </div>
+
+        <div className="flex-1 flex overflow-hidden">
+          {/* Left side: File browser */}
+          <div className="w-2/3 border-r flex flex-col">
+            {/* Connection selector */}
+            <div className="p-3 border-b bg-muted/30">
+              <label className="block text-xs text-muted-foreground mb-1">Connection</label>
+              <select
+                value={selectedConnectionId || ''}
+                onChange={(e) => {
+                  setSelectedConnectionId(e.target.value || null)
+                  setCurrentPath('/')
+                  setPathHistory(['/'])
+                  setSelectedFile(null)
+                }}
+                className="w-full px-3 py-2 border rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm"
+              >
+                <option value="">-- Select Connection --</option>
+                {connections?.items.map((conn: GitHubConnectionSummary) => (
+                  <option key={conn.id} value={conn.id}>
+                    {conn.name} ({conn.repo})
+                  </option>
+                ))}
+              </select>
+              {!connections?.items.length && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  No connections. <a href="/github" className="text-primary hover:underline">Add one first</a>
+                </p>
+              )}
+            </div>
+
+            {/* Path breadcrumb */}
+            {selectedConnectionId && (
+              <div className="px-3 py-2 border-b bg-muted/20 flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={<ArrowLeft className="h-4 w-4" />}
+                  onClick={navigateBack}
+                  disabled={pathHistory.length <= 1}
+                />
+                <span className="font-mono text-xs text-muted-foreground truncate">{currentPath}</span>
+              </div>
+            )}
+
+            {/* File list */}
+            <div className="flex-1 overflow-y-auto">
+              {!selectedConnectionId ? (
+                <div className="p-8 text-center text-muted-foreground">
+                  <Github className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">Select a connection to browse</p>
+                </div>
+              ) : isBrowsing ? (
+                <div className="p-8 text-center text-muted-foreground">
+                  <RefreshCw className="h-6 w-6 animate-spin mx-auto mb-2" />
+                  Loading...
+                </div>
+              ) : !browseData?.contents.length ? (
+                <div className="p-8 text-center text-muted-foreground">
+                  Empty directory
+                </div>
+              ) : (
+                <div className="divide-y">
+                  {browseData.contents
+                    .sort((a: GitHubFileInfo, b: GitHubFileInfo) => {
+                      if (a.type === 'dir' && b.type !== 'dir') return -1
+                      if (a.type !== 'dir' && b.type === 'dir') return 1
+                      return a.name.localeCompare(b.name)
+                    })
+                    .map((item: GitHubFileInfo) => (
+                      <button
+                        key={item.path}
+                        onClick={() => {
+                          if (item.type === 'dir') {
+                            navigateTo(item.path)
+                          } else {
+                            setSelectedFile(item)
+                            setImportName(item.name.replace(/\.[^.]+$/, ''))
+                          }
+                        }}
+                        className={cn(
+                          'w-full text-left px-3 py-2 flex items-center gap-2 hover:bg-accent/50 transition-colors text-sm',
+                          selectedFile?.path === item.path && 'bg-primary/20'
+                        )}
+                      >
+                        {item.type === 'dir' ? (
+                          <Folder className="h-4 w-4 text-blue-400 flex-shrink-0" />
+                        ) : (
+                          <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                        )}
+                        <span className="flex-1 text-foreground truncate">{item.name}</span>
+                        {item.type === 'dir' && (
+                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                        )}
+                      </button>
+                    ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Right side: Import options */}
+          <div className="w-1/3 p-4 flex flex-col">
+            <h3 className="font-medium text-foreground mb-4">Import Options</h3>
+            
+            {selectedFile ? (
+              <div className="space-y-4 flex-1">
+                <div className="p-3 bg-muted/30 rounded-md">
+                  <p className="text-xs text-muted-foreground">Selected file</p>
+                  <p className="font-mono text-sm text-foreground truncate">{selectedFile.name}</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-1">Name</label>
+                  <input
+                    type="text"
+                    value={importName}
+                    onChange={(e) => setImportName(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-md bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-1">Content Type</label>
+                  <select
+                    value={importContentType}
+                    onChange={(e) => setImportContentType(e.target.value as ContentType)}
+                    className="w-full px-3 py-2 border rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring text-sm"
+                  >
+                    {contentTypeOptions.map(([type, info]) => (
+                      <option key={type} value={type}>{info.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            ) : (
+              <div className="flex-1 flex items-center justify-center text-center text-muted-foreground">
+                <div>
+                  <FileText className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">Select a file to import</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="p-4 border-t bg-muted/30 flex items-center justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button
+            variant="primary"
+            icon={<Download className="h-4 w-4" />}
+            onClick={handleImport}
+            disabled={!selectedFile || isImporting}
+            loading={isImporting}
+          >
+            Import
+          </Button>
+        </div>
       </div>
     </div>
   )

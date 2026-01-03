@@ -202,6 +202,12 @@ export interface PresetCreate {
   combine_instructions_id?: string;
   generation_instructions_id?: string;
   
+  // GitHub input source configuration
+  input_source_type?: 'database' | 'github';
+  github_connection_id?: string;
+  github_input_paths?: string[];
+  github_output_path?: string;
+  
   // Legacy fields (backward compatibility)
   generators?: string[];
   models?: ModelConfig[];
@@ -234,6 +240,12 @@ export interface PresetUpdate {
   eval_criteria_id?: string;
   combine_instructions_id?: string;
   generation_instructions_id?: string;
+  
+  // GitHub input source configuration
+  input_source_type?: 'database' | 'github';
+  github_connection_id?: string;
+  github_input_paths?: string[];
+  github_output_path?: string;
   
   // Logging configuration
   log_level?: string;
@@ -274,6 +286,12 @@ export interface PresetResponse {
   eval_criteria_id?: string;
   combine_instructions_id?: string;
   generation_instructions_id?: string;
+  
+  // GitHub input source configuration
+  input_source_type?: 'database' | 'github';
+  github_connection_id?: string;
+  github_input_paths?: string[];
+  github_output_path?: string;
   
   // Legacy fields
   generators: string[];

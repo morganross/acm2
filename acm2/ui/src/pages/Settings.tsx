@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Save, RotateCcw, Key, Database, Zap, Info } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Save, RotateCcw, Key, Database, Zap, Info, Github, ExternalLink } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { notify } from '@/stores/notifications'
 
@@ -87,6 +88,24 @@ export default function Settings() {
             Save
           </button>
         </div>
+      </div>
+
+      {/* GitHub Connection Link */}
+      <div className="bg-card border rounded-lg p-4 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <Github className="h-6 w-6 text-foreground" />
+          <div>
+            <h3 className="font-medium text-foreground">GitHub Connections</h3>
+            <p className="text-sm text-muted-foreground">Manage repository connections for importing documents</p>
+          </div>
+        </div>
+        <Link
+          to="/github"
+          className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors"
+        >
+          <ExternalLink className="h-4 w-4" />
+          Manage Connections
+        </Link>
       </div>
 
       {/* Tabs */}

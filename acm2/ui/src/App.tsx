@@ -8,6 +8,7 @@ import Settings from './pages/Settings'
 import Configure from './pages/Configure'
 import Evaluation from './pages/Evaluation'
 import ContentLibrary from './pages/ContentLibrary'
+import GitHubConnections from './pages/GitHubConnections'
 import { NotificationContainer } from './components/ui/notification'
 
 function App() {
@@ -25,6 +26,7 @@ function App() {
           <Route path="history/:id" element={<ExecutionDetail />} />
           <Route path="evaluation" element={<Evaluation />} />
           <Route path="settings" element={<Settings />} />
+          <Route path="github" element={<GitHubConnections />} />
         </Route>
       </Routes>
     </>

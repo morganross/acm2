@@ -1,11 +1,14 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Save, RotateCcw, Sliders, Play, FileText, Library, ExternalLink } from 'lucide-react'
+import { Save, RotateCcw, Sliders, Play, FileText, Library, ExternalLink, Github, Folder, ChevronRight, RefreshCw, X } from 'lucide-react'
 import { Button } from '../components/ui/button'
 import { useConfigStore } from '../stores/config'
 import { notify } from '@/stores/notifications'
 import { runsApi } from '@/api/runs'
 import { contentsApi, type ContentSummary } from '@/api/contents'
+import { githubApi } from '@/api/github'
+import { useQuery } from '@tanstack/react-query'
+import { cn } from '@/lib/utils'
 import { getConcurrencySettings } from '@/hooks/useSettings'
 import { 
   listPresets, 
@@ -36,6 +39,9 @@ import {
   ConcurrencyPanel,
 } from '../components/config'
 
+// Input source type
+type InputSourceType = 'database' | 'github'
+
 // Helper to parse model string "provider:model"
 function parseModelString(modelStr: string): { provider: string; model: string } {
   if (modelStr.includes(':')) {
@@ -55,12 +61,20 @@ function formatModelString(provider: string, model: string): string {
 // ============================================================================
 type ConfigStore = ReturnType<typeof useConfigStore.getState>;
 
+interface GitHubInputConfig {
+  inputSourceType: InputSourceType;
+  githubConnectionId: string | null;
+  githubInputPaths: string[];
+  githubOutputPath: string | null;
+}
+
 function serializeConfigToPreset(
   config: ConfigStore,
   presetName: string,
   selectedInputDocIds: string[],
   fpfInstructions: string,
-  selectedInstructionId: string | null
+  selectedInstructionId: string | null,
+  githubConfig: GitHubInputConfig
 ): PresetCreate {
   // Build models array from FPF selected models
   const models: ModelConfig[] = config.fpf.selectedModels.map(m => {
@@ -273,6 +287,11 @@ function serializeConfigToPreset(
     eval_criteria_id: config.eval.evalCriteriaId || undefined,
     combine_instructions_id: config.combine.combineInstructionsId || undefined,
     generation_instructions_id: selectedInstructionId || undefined,
+    // GitHub input source configuration
+    input_source_type: githubConfig.inputSourceType,
+    github_connection_id: githubConfig.githubConnectionId || undefined,
+    github_input_paths: githubConfig.githubInputPaths.length > 0 ? githubConfig.githubInputPaths : undefined,
+    github_output_path: githubConfig.githubOutputPath || undefined,
     // Logging - also at top level for backend
     log_level: config.general.logLevel,
   };
@@ -284,7 +303,14 @@ function serializeConfigToPreset(
 function deserializePresetToConfig(
   preset: PresetResponse,
   config: ConfigStore
-): { fpfInstructions: string; generationInstructionsId: string | null } {
+): { 
+  fpfInstructions: string; 
+  generationInstructionsId: string | null;
+  inputSourceType: InputSourceType;
+  githubConnectionId: string | null;
+  githubInputPaths: string[];
+  githubOutputPath: string | null;
+} {
   // Load GeneralConfig
   if (preset.general_config) {
     config.updateGeneral({
@@ -468,6 +494,11 @@ function deserializePresetToConfig(
   return {
     fpfInstructions: preset.fpf_settings?.prompt_template ?? preset.fpf_config?.prompt_template ?? '',
     generationInstructionsId: (preset as any).generation_instructions_id ?? null,
+    // GitHub input source fields
+    inputSourceType: (preset.input_source_type as InputSourceType) ?? 'database',
+    githubConnectionId: preset.github_connection_id ?? null,
+    githubInputPaths: preset.github_input_paths ?? [],
+    githubOutputPath: preset.github_output_path ?? null,
   };
 }
 
@@ -491,6 +522,21 @@ export default function Configure() {
   const [selectedInstructionId, setSelectedInstructionId] = useState<string | null>(null)
   const [inputDocuments, setInputDocuments] = useState<ContentSummary[]>([])
   const [selectedInputDocIds, setSelectedInputDocIds] = useState<string[]>([])
+
+  // GitHub Input Source State
+  const [inputSourceType, setInputSourceType] = useState<InputSourceType>('database')
+  const [githubConnectionId, setGithubConnectionId] = useState<string | null>(null)
+  const [githubInputPaths, setGithubInputPaths] = useState<string[]>([])
+  const [githubOutputPath, setGithubOutputPath] = useState<string | null>(null)
+  const [showGitHubFileBrowser, setShowGitHubFileBrowser] = useState(false)
+  const [githubBrowsePurpose, setGithubBrowsePurpose] = useState<'input' | 'output'>('input')
+
+  // Load GitHub connections for input source dropdown
+  const { data: githubConnectionsData } = useQuery({
+    queryKey: ['github-connections'],
+    queryFn: () => githubApi.list(),
+  })
+  const githubConnections = githubConnectionsData?.items ?? []
 
   // Load presets and content library on mount
   useEffect(() => {
@@ -564,7 +610,13 @@ export default function Configure() {
 
     try {
       // Use the new complete serialization function
-      const presetData = serializeConfigToPreset(config, presetName, selectedInputDocIds, fpfInstructions, selectedInstructionId);
+      const githubConfig: GitHubInputConfig = {
+        inputSourceType,
+        githubConnectionId,
+        githubInputPaths,
+        githubOutputPath,
+      };
+      const presetData = serializeConfigToPreset(config, presetName, selectedInputDocIds, fpfInstructions, selectedInstructionId, githubConfig);
       
       // Check if we are updating an existing preset (by name match or ID)
       const existing = presets.find(p => p.id === selectedPresetId)
@@ -612,6 +664,11 @@ export default function Configure() {
       setSelectedInstructionId(null)
       setSelectedInputDocIds([])
       setFpfInstructions('')
+      // Reset GitHub input source state
+      setInputSourceType('database')
+      setGithubConnectionId(null)
+      setGithubInputPaths([])
+      setGithubOutputPath(null)
       config.resetToDefaults()
       return
     }
@@ -628,9 +685,22 @@ export default function Configure() {
       setSelectedInputDocIds(preset.documents || [])
       
       // Use the new complete deserialization function
-      const { fpfInstructions: loadedFpfInstructions, generationInstructionsId } = deserializePresetToConfig(preset, config);
+      const { 
+        fpfInstructions: loadedFpfInstructions, 
+        generationInstructionsId,
+        inputSourceType: loadedInputSource,
+        githubConnectionId: loadedGithubConnId,
+        githubInputPaths: loadedGithubInputPaths,
+        githubOutputPath: loadedGithubOutputPath,
+      } = deserializePresetToConfig(preset, config);
       setFpfInstructions(loadedFpfInstructions);
       setSelectedInstructionId(generationInstructionsId);
+      
+      // Set GitHub input source state
+      setInputSourceType(loadedInputSource);
+      setGithubConnectionId(loadedGithubConnId);
+      setGithubInputPaths(loadedGithubInputPaths);
+      setGithubOutputPath(loadedGithubOutputPath);
       
     } catch (err) {
       console.error('Failed to load preset:', err)
@@ -876,60 +946,194 @@ export default function Configure() {
                 </div>
               </div>
 
-              {/* Input Documents Section */}
+              {/* Input Source Section */}
               <div className="bg-gray-800 border border-gray-700 rounded-lg overflow-hidden">
-                <div className="p-4 border-b border-gray-700 flex items-center justify-between">
+                <div className="p-4 border-b border-gray-700">
                   <div className="flex items-center gap-3">
-                    <FileText className="w-5 h-5 text-blue-400" />
+                    <Folder className="w-5 h-5 text-green-400" />
                     <div>
-                      <h3 className="font-medium">Input Documents</h3>
-                      <p className="text-sm text-gray-400">Select documents to process</p>
+                      <h3 className="font-medium">Input Source</h3>
+                      <p className="text-sm text-gray-400">Where to load documents from</p>
                     </div>
                   </div>
-                  <a 
-                    href="/content" 
-                    target="_blank"
-                    className="inline-flex items-center gap-2 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-sm transition-colors"
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                    Add Documents
-                  </a>
+                  
+                  {/* Source Type Toggle */}
+                  <div className="flex gap-2 mt-3">
+                    <button
+                      onClick={() => setInputSourceType('database')}
+                      className={cn(
+                        'flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded text-sm font-medium transition-colors',
+                        inputSourceType === 'database'
+                          ? 'bg-green-500/20 text-green-400 border border-green-500'
+                          : 'bg-gray-700 text-gray-400 border border-transparent hover:bg-gray-600'
+                      )}
+                    >
+                      <FileText className="w-4 h-4" />
+                      Content Library
+                    </button>
+                    <button
+                      onClick={() => setInputSourceType('github')}
+                      className={cn(
+                        'flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded text-sm font-medium transition-colors',
+                        inputSourceType === 'github'
+                          ? 'bg-green-500/20 text-green-400 border border-green-500'
+                          : 'bg-gray-700 text-gray-400 border border-transparent hover:bg-gray-600'
+                      )}
+                    >
+                      <Github className="w-4 h-4" />
+                      GitHub
+                    </button>
+                  </div>
                 </div>
 
                 <div className="p-4">
-                  {inputDocuments.length === 0 ? (
-                    <div className="text-center py-6 text-gray-400">
-                      <FileText className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                      <p className="text-sm">No input documents in library</p>
-                      <a href="/content" className="text-blue-400 hover:text-blue-300 text-sm mt-1 inline-block">
-                        Create one in Content Library →
-                      </a>
-                    </div>
-                  ) : (
-                    <div className="grid gap-2 max-h-48 overflow-y-auto">
-                      {inputDocuments.map((doc) => (
-                        <label
-                          key={doc.id}
-                          data-testid={`input-doc-${doc.id}`}
-                          className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors ${
-                            selectedInputDocIds.includes(doc.id)
-                              ? 'bg-blue-500/20 border border-blue-500'
-                              : 'bg-gray-700/50 border border-transparent hover:bg-gray-700'
-                          }`}
+                  {inputSourceType === 'database' ? (
+                    // Content Library Selection
+                    <>
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-sm text-gray-400">Select documents to process</span>
+                        <a 
+                          href="/content" 
+                          target="_blank"
+                          className="inline-flex items-center gap-2 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-sm transition-colors"
                         >
-                          <input
-                            type="checkbox"
-                            checked={selectedInputDocIds.includes(doc.id)}
-                            onChange={() => toggleInputDoc(doc.id)}
-                            className="w-4 h-4 rounded border-gray-600 text-blue-600 focus:ring-blue-500 bg-gray-700"
-                          />
-                          <FileText className="w-5 h-5 text-blue-400" />
-                          <div className="flex-1 min-w-0">
-                            <div className="font-medium text-gray-200">{doc.name}</div>
-                            <div className="text-xs text-gray-500 line-clamp-1">{doc.body_preview}</div>
+                          <ExternalLink className="w-4 h-4" />
+                          Add Documents
+                        </a>
+                      </div>
+                      {inputDocuments.length === 0 ? (
+                        <div className="text-center py-6 text-gray-400">
+                          <FileText className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                          <p className="text-sm">No input documents in library</p>
+                          <a href="/content" className="text-blue-400 hover:text-blue-300 text-sm mt-1 inline-block">
+                            Create one in Content Library →
+                          </a>
+                        </div>
+                      ) : (
+                        <div className="grid gap-2 max-h-48 overflow-y-auto">
+                          {inputDocuments.map((doc) => (
+                            <label
+                              key={doc.id}
+                              data-testid={`input-doc-${doc.id}`}
+                              className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors ${
+                                selectedInputDocIds.includes(doc.id)
+                                  ? 'bg-blue-500/20 border border-blue-500'
+                                  : 'bg-gray-700/50 border border-transparent hover:bg-gray-700'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selectedInputDocIds.includes(doc.id)}
+                                onChange={() => toggleInputDoc(doc.id)}
+                                className="w-4 h-4 rounded border-gray-600 text-blue-600 focus:ring-blue-500 bg-gray-700"
+                              />
+                              <FileText className="w-5 h-5 text-blue-400" />
+                              <div className="flex-1 min-w-0">
+                                <div className="font-medium text-gray-200">{doc.name}</div>
+                                <div className="text-xs text-gray-500 line-clamp-1">{doc.body_preview}</div>
+                              </div>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    // GitHub Configuration
+                    <div className="space-y-4">
+                      {/* Connection Selector */}
+                      <div>
+                        <label className="block text-sm text-gray-400 mb-1">GitHub Connection</label>
+                        {githubConnections.length === 0 ? (
+                          <div className="text-center py-4 text-gray-400 bg-gray-700/50 rounded">
+                            <Github className="w-6 h-6 mx-auto mb-2 opacity-50" />
+                            <p className="text-sm">No GitHub connections</p>
+                            <a href="/github" className="text-blue-400 hover:text-blue-300 text-sm mt-1 inline-block">
+                              Add one in Settings →
+                            </a>
                           </div>
-                        </label>
-                      ))}
+                        ) : (
+                          <select
+                            value={githubConnectionId || ''}
+                            onChange={(e) => setGithubConnectionId(e.target.value || null)}
+                            className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-green-500"
+                          >
+                            <option value="">-- Select Connection --</option>
+                            {githubConnections.map((conn) => (
+                              <option key={conn.id} value={conn.id}>
+                                {conn.repo} ({conn.branch})
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
+
+                      {/* Input Paths */}
+                      {githubConnectionId && (
+                        <>
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <label className="text-sm text-gray-400">Input Files/Folders</label>
+                              <button
+                                onClick={() => {
+                                  setGithubBrowsePurpose('input');
+                                  setShowGitHubFileBrowser(true);
+                                }}
+                                className="text-xs text-blue-400 hover:text-blue-300"
+                              >
+                                Browse...
+                              </button>
+                            </div>
+                            {githubInputPaths.length === 0 ? (
+                              <p className="text-xs text-gray-500 italic">No paths selected</p>
+                            ) : (
+                              <div className="space-y-1 max-h-24 overflow-y-auto">
+                                {githubInputPaths.map((p, i) => (
+                                  <div key={i} className="flex items-center gap-2 text-sm bg-gray-700 px-2 py-1 rounded">
+                                    <Folder className="w-3 h-3 text-gray-400" />
+                                    <span className="flex-1 truncate">{p}</span>
+                                    <button
+                                      onClick={() => setGithubInputPaths(prev => prev.filter((_, idx) => idx !== i))}
+                                      className="text-gray-500 hover:text-red-400"
+                                    >
+                                      <X className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Output Path */}
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <label className="text-sm text-gray-400">Output Folder (optional)</label>
+                              <button
+                                onClick={() => {
+                                  setGithubBrowsePurpose('output');
+                                  setShowGitHubFileBrowser(true);
+                                }}
+                                className="text-xs text-blue-400 hover:text-blue-300"
+                              >
+                                Browse...
+                              </button>
+                            </div>
+                            {githubOutputPath ? (
+                              <div className="flex items-center gap-2 text-sm bg-gray-700 px-2 py-1 rounded">
+                                <Folder className="w-3 h-3 text-gray-400" />
+                                <span className="flex-1 truncate">{githubOutputPath}</span>
+                                <button
+                                  onClick={() => setGithubOutputPath(null)}
+                                  className="text-gray-500 hover:text-red-400"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </div>
+                            ) : (
+                              <p className="text-xs text-gray-500 italic">Results saved to database only</p>
+                            )}
+                          </div>
+                        </>
+                      )}
                     </div>
                   )}
                 </div>
@@ -956,6 +1160,183 @@ export default function Configure() {
           </div>
         </div>
       </div>
+
+      {/* GitHub File Browser Modal */}
+      {showGitHubFileBrowser && githubConnectionId && (
+        <GitHubFileBrowserModal
+          connectionId={githubConnectionId}
+          purpose={githubBrowsePurpose}
+          onSelect={(path) => {
+            if (githubBrowsePurpose === 'input') {
+              setGithubInputPaths(prev => prev.includes(path) ? prev : [...prev, path]);
+            } else {
+              setGithubOutputPath(path);
+            }
+          }}
+          onClose={() => setShowGitHubFileBrowser(false)}
+        />
+      )}
     </div>
   )
+}
+
+// GitHub File Browser Modal Component
+function GitHubFileBrowserModal({
+  connectionId,
+  purpose,
+  onSelect,
+  onClose,
+}: {
+  connectionId: string;
+  purpose: 'input' | 'output';
+  onSelect: (path: string) => void;
+  onClose: () => void;
+}) {
+  const [currentPath, setCurrentPath] = useState('');
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+
+  const { data: browseData, isLoading } = useQuery({
+    queryKey: ['github-browse', connectionId, currentPath],
+    queryFn: () => githubApi.browse(connectionId, currentPath || undefined),
+  });
+
+  const handleNavigate = (path: string) => {
+    setCurrentPath(path);
+    setSelectedPath(null);
+  };
+
+  const handleSelect = (path: string, isDirectory: boolean) => {
+    if (purpose === 'output' && !isDirectory) {
+      // For output, only allow directories
+      return;
+    }
+    setSelectedPath(path);
+  };
+
+  const handleConfirm = () => {
+    if (selectedPath) {
+      onSelect(selectedPath);
+      onClose();
+    }
+  };
+
+  const pathParts = currentPath.split('/').filter(Boolean);
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-gray-800 border border-gray-700 rounded-lg w-full max-w-2xl max-h-[80vh] flex flex-col">
+        {/* Header */}
+        <div className="p-4 border-b border-gray-700 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Github className="w-5 h-5 text-white" />
+            <h2 className="font-semibold">
+              {purpose === 'input' ? 'Select Input Files/Folders' : 'Select Output Folder'}
+            </h2>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-white">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Breadcrumb Navigation */}
+        <div className="px-4 py-2 border-b border-gray-700 flex items-center gap-1 text-sm overflow-x-auto">
+          <button
+            onClick={() => handleNavigate('')}
+            className="text-blue-400 hover:text-blue-300 flex items-center gap-1"
+          >
+            <Folder className="w-4 h-4" />
+            root
+          </button>
+          {pathParts.map((part, i) => (
+            <span key={i} className="flex items-center gap-1">
+              <ChevronRight className="w-4 h-4 text-gray-500" />
+              <button
+                onClick={() => handleNavigate(pathParts.slice(0, i + 1).join('/'))}
+                className="text-blue-400 hover:text-blue-300"
+              >
+                {part}
+              </button>
+            </span>
+          ))}
+        </div>
+
+        {/* File List */}
+        <div className="flex-1 overflow-y-auto p-2">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <RefreshCw className="w-6 h-6 animate-spin text-gray-400" />
+            </div>
+          ) : browseData?.contents.length === 0 ? (
+            <div className="text-center py-8 text-gray-400">
+              <Folder className="w-8 h-8 mx-auto mb-2 opacity-50" />
+              <p>Empty directory</p>
+            </div>
+          ) : (
+            <div className="space-y-1">
+              {browseData?.contents.map((item) => {
+                const isDir = item.type === 'dir';
+                const isSelectable = purpose === 'input' || isDir;
+                return (
+                  <div
+                    key={item.path}
+                    className={cn(
+                      'flex items-center gap-3 p-2 rounded cursor-pointer transition-colors',
+                      selectedPath === item.path
+                        ? 'bg-blue-500/20 border border-blue-500'
+                        : isSelectable
+                        ? 'hover:bg-gray-700'
+                        : 'opacity-50 cursor-not-allowed'
+                    )}
+                    onClick={() => {
+                      if (isDir) {
+                        // Double-click to navigate (single click to select)
+                        if (selectedPath === item.path) {
+                          handleNavigate(item.path);
+                        } else {
+                          handleSelect(item.path, true);
+                        }
+                      } else if (isSelectable) {
+                        handleSelect(item.path, false);
+                      }
+                    }}
+                  >
+                    {isDir ? (
+                      <Folder className="w-5 h-5 text-yellow-400" />
+                    ) : (
+                      <FileText className="w-5 h-5 text-gray-400" />
+                    )}
+                    <span className="flex-1">{item.name}</span>
+                    {isDir && (
+                      <ChevronRight className="w-4 h-4 text-gray-500" />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="p-4 border-t border-gray-700 flex items-center justify-between">
+          <div className="text-sm text-gray-400">
+            {selectedPath ? (
+              <span>Selected: <code className="bg-gray-700 px-1 rounded">{selectedPath}</code></span>
+            ) : (
+              <span>{purpose === 'output' ? 'Click folder to select, double-click to enter' : 'Click to select, double-click folder to enter'}</span>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={onClose}>Cancel</Button>
+            <Button 
+              variant="primary" 
+              onClick={handleConfirm}
+              disabled={!selectedPath}
+            >
+              Select
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }

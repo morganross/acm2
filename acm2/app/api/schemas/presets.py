@@ -55,6 +55,12 @@ class PresetCreate(BaseModel):
     # VERBOSE captures FPF output to file for debugging
     log_level: str = Field(default="INFO", description="Log level for run execution")
     
+    # GitHub input source configuration
+    input_source_type: Optional[str] = Field(None, description="Input source: 'database' or 'github'")
+    github_connection_id: Optional[str] = Field(None, description="GitHub connection ID for input")
+    github_input_paths: Optional[list[str]] = Field(default=None, description="Paths in GitHub repo to use as input")
+    github_output_path: Optional[str] = Field(None, description="Path in GitHub repo for output")
+    
     # Legacy fields (backward compatibility)
     generators: Optional[list[GeneratorType]] = Field(
         default=None,
@@ -99,6 +105,12 @@ class PresetUpdate(BaseModel):
     # Logging configuration
     log_level: Optional[str] = Field(None, description="Log level for run execution")
     
+    # GitHub input source configuration
+    input_source_type: Optional[str] = Field(None, description="Input source: 'database' or 'github'")
+    github_connection_id: Optional[str] = Field(None, description="GitHub connection ID for input")
+    github_input_paths: Optional[list[str]] = Field(default=None, description="Paths in GitHub repo to use as input")
+    github_output_path: Optional[str] = Field(None, description="Path in GitHub repo for output")
+    
     # Legacy fields (backward compatibility)
     generators: Optional[list[GeneratorType]] = None
     models: Optional[list[ModelConfig]] = None
@@ -142,6 +154,12 @@ class PresetResponse(BaseModel):
     
     # Logging configuration
     log_level: str = "INFO"
+    
+    # GitHub input source configuration
+    input_source_type: Optional[str] = None
+    github_connection_id: Optional[str] = None
+    github_input_paths: Optional[list[str]] = None
+    github_output_path: Optional[str] = None
     
     # Legacy fields (backward compatibility)
     generators: list[GeneratorType] = Field(default_factory=list)

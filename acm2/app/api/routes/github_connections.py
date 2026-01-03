@@ -75,7 +75,10 @@ async def _test_github_connection(token: str, repo: str, branch: str) -> tuple[b
     try:
         from github import Github
         from github.GithubException import GithubException, BadCredentialsException
-        
+    except ImportError:
+        return False, "PyGithub not installed"
+    
+    try:
         g = Github(token)
         
         # Test authentication
@@ -97,8 +100,6 @@ async def _test_github_connection(token: str, repo: str, branch: str) -> tuple[b
         if e.status == 404:
             return False, f"Repository '{repo}' not found or no access"
         return False, f"GitHub API error: {e.data.get('message', str(e))}"
-    except ImportError:
-        return False, "PyGithub not installed"
     except Exception as e:
         return False, f"Connection error: {str(e)}"
 
