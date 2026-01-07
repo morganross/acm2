@@ -264,3 +264,136 @@ class RunRepository(BaseRepository[Run]):
             await self.session.refresh(run)
             return run
         return None
+
+    async def append_source_doc_generated_doc(self, id: str, source_doc_id: str, doc_info: dict) -> Optional[Run]:
+        """Append a generated doc to results_summary.source_doc_results[source_doc_id].generated_docs."""
+        run = await self.get_by_id(id)
+        if run:
+            if run.results_summary is None:
+                run.results_summary = {}
+
+            if "source_doc_results" not in run.results_summary or not isinstance(run.results_summary.get("source_doc_results"), dict):
+                run.results_summary["source_doc_results"] = {}
+
+            sdr = run.results_summary["source_doc_results"].get(source_doc_id)
+            if not isinstance(sdr, dict):
+                sdr = {
+                    "source_doc_id": source_doc_id,
+                    "source_doc_name": source_doc_id,
+                    "status": "pending",
+                    "generated_docs": [],
+                    "single_eval_results": {},
+                    "pairwise_results": None,
+                    "winner_doc_id": None,
+                    "combined_doc": None,
+                    "timeline_events": [],
+                    "errors": [],
+                    "cost_usd": 0.0,
+                    "duration_seconds": 0.0,
+                }
+
+            if "generated_docs" not in sdr or not isinstance(sdr.get("generated_docs"), list):
+                sdr["generated_docs"] = []
+
+            sdr["generated_docs"].append(doc_info)
+            run.results_summary["source_doc_results"][source_doc_id] = sdr
+
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(run, "results_summary")
+
+            await self.session.commit()
+            await self.session.refresh(run)
+            return run
+        return None
+
+    async def upsert_source_doc_single_eval_result(
+        self,
+        id: str,
+        source_doc_id: str,
+        gen_doc_id: str,
+        summary: dict,
+    ) -> Optional[Run]:
+        """Upsert results_summary.source_doc_results[source_doc_id].single_eval_results[gen_doc_id].
+
+        The stored value should be a dict-like summary containing at least avg_score,
+        so the API layer can derive SourceDocResultResponse.single_eval_scores.
+        """
+        run = await self.get_by_id(id)
+        if run:
+            if run.results_summary is None:
+                run.results_summary = {}
+
+            if "source_doc_results" not in run.results_summary or not isinstance(run.results_summary.get("source_doc_results"), dict):
+                run.results_summary["source_doc_results"] = {}
+
+            sdr = run.results_summary["source_doc_results"].get(source_doc_id)
+            if not isinstance(sdr, dict):
+                sdr = {
+                    "source_doc_id": source_doc_id,
+                    "source_doc_name": source_doc_id,
+                    "status": "pending",
+                    "generated_docs": [],
+                    "single_eval_results": {},
+                    "pairwise_results": None,
+                    "winner_doc_id": None,
+                    "combined_doc": None,
+                    "timeline_events": [],
+                    "errors": [],
+                    "cost_usd": 0.0,
+                    "duration_seconds": 0.0,
+                }
+
+            if "single_eval_results" not in sdr or not isinstance(sdr.get("single_eval_results"), dict):
+                sdr["single_eval_results"] = {}
+
+            sdr["single_eval_results"][gen_doc_id] = summary
+            run.results_summary["source_doc_results"][source_doc_id] = sdr
+
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(run, "results_summary")
+
+            await self.session.commit()
+            await self.session.refresh(run)
+            return run
+        return None
+
+    async def append_source_doc_timeline_event(self, id: str, source_doc_id: str, event: dict) -> Optional[Run]:
+        """Append a timeline event to results_summary.source_doc_results[source_doc_id].timeline_events."""
+        run = await self.get_by_id(id)
+        if run:
+            if run.results_summary is None:
+                run.results_summary = {}
+
+            if "source_doc_results" not in run.results_summary or not isinstance(run.results_summary.get("source_doc_results"), dict):
+                run.results_summary["source_doc_results"] = {}
+
+            sdr = run.results_summary["source_doc_results"].get(source_doc_id)
+            if not isinstance(sdr, dict):
+                sdr = {
+                    "source_doc_id": source_doc_id,
+                    "source_doc_name": source_doc_id,
+                    "status": "pending",
+                    "generated_docs": [],
+                    "single_eval_results": {},
+                    "pairwise_results": None,
+                    "winner_doc_id": None,
+                    "combined_doc": None,
+                    "timeline_events": [],
+                    "errors": [],
+                    "cost_usd": 0.0,
+                    "duration_seconds": 0.0,
+                }
+
+            if "timeline_events" not in sdr or not isinstance(sdr.get("timeline_events"), list):
+                sdr["timeline_events"] = []
+
+            sdr["timeline_events"].append(event)
+            run.results_summary["source_doc_results"][source_doc_id] = sdr
+
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(run, "results_summary")
+
+            await self.session.commit()
+            await self.session.refresh(run)
+            return run
+        return None

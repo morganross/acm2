@@ -8,7 +8,7 @@ import { contentsApi, type ContentSummary } from '../../api/contents'
 
 export function CombinePanel() {
   const config = useConfigStore()
-  const { combineModels, combineFreeModels, models, fetchModels } = useModelCatalog()
+  const { combineModels, combineFreeModels, models, fetchModels, formatPricing } = useModelCatalog()
   const [freeModelsExpanded, setFreeModelsExpanded] = useState(false)
   
   // Content Library items for combine instructions
@@ -66,7 +66,7 @@ export function CombinePanel() {
           <h4 className="text-sm font-semibold text-gray-300 mb-2 flex items-center gap-2">
             <Cpu className="w-4 h-4" /> Combine Model
           </h4>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 gap-1">
             {combineModels.map((model) => (
               <Checkbox
                 key={model}
@@ -78,6 +78,7 @@ export function CombinePanel() {
                   config.updateCombine({ selectedModels: models })
                 }}
                 label={model}
+                priceSuffix={formatPricing(model)}
                 dataTestId={`combine-model-${model}`}
               />
             ))}
@@ -107,7 +108,7 @@ export function CombinePanel() {
               </button>
               {freeModelsExpanded && (
                 <div className="p-3 bg-gray-800/50">
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 gap-1">
                     {combineFreeModels.map((model) => (
                       <Checkbox
                         key={model}
@@ -119,6 +120,7 @@ export function CombinePanel() {
                           config.updateCombine({ selectedModels: models })
                         }}
                         label={`🆓 ${model}`}
+                        priceSuffix="FREE"
                         dataTestId={`combine-model-${model}`}
                       />
                     ))}

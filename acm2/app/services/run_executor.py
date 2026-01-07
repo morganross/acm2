@@ -56,6 +56,7 @@ class RunPhase(str, Enum):
     COMBINING = "combining"
     POST_COMBINE_EVAL = "post_combine_eval"
     COMPLETED = "completed"
+    COMPLETED_WITH_ERRORS = "completed_with_errors"  # Some source docs failed, others succeeded
     FAILED = "failed"
     CANCELLED = "cancelled"
 
@@ -146,6 +147,12 @@ class RunConfig:
     
     # Post-Combine Configuration - Optional
     post_combine_top_n: Optional[int] = None  # Optional limit for post-combine eval
+    
+    # Document names for UI display (doc_id -> human-readable name)
+    document_names: Dict[str, str] = field(default_factory=dict)
+    
+    # Max concurrent pipelines (limits how many source docs process simultaneously)
+    max_concurrent_pipelines: int = 5
     
     # Callbacks
     on_progress: Optional[Callable[[str, float, str], None]] = None
@@ -331,19 +338,71 @@ class RunProgress:
 
 
 @dataclass
+class SourceDocResult:
+    """Result for a single source document's pipeline execution.
+    
+    Each input document runs through its own isolated pipeline:
+    Generation → Single Eval → Pairwise → Combine → Output
+    
+    Documents never compete across source doc boundaries.
+    """
+    source_doc_id: str
+    source_doc_name: str
+    status: RunPhase  # Per-document status
+    
+    # Generated variations for this source doc
+    generated_docs: List[GeneratedDocument] = field(default_factory=list)
+    
+    # Evaluation results (only for this source doc's generated docs)
+    single_eval_results: Dict[str, SingleEvalSummary] = field(default_factory=dict)
+    pairwise_results: Optional[PairwiseSummary] = None
+    
+    # Winner and combined output for this source doc
+    winner_doc_id: Optional[str] = None
+    combined_doc: Optional[GeneratedDocument] = None  # Legacy: first combined doc
+    combined_docs: List[GeneratedDocument] = field(default_factory=list)  # All combined docs
+    
+    # Post-combine evaluation for this source doc
+    post_combine_eval_results: Optional[PairwiseSummary] = None
+    
+    # Timeline events specific to this source doc
+    timeline_events: List[Dict[str, Any]] = field(default_factory=list)
+    
+    # Per-document errors
+    errors: List[str] = field(default_factory=list)
+    
+    # Per-document stats
+    cost_usd: float = 0.0
+    duration_seconds: float = 0.0
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+
+@dataclass
 class RunResult:
-    """Result of a completed run."""
+    """Result of a completed run.
+    
+    For multi-document runs, results are organized per source document in source_doc_results.
+    The legacy flat fields (generated_docs, single_eval_results, etc.) are kept for 
+    backward compatibility with single-document runs.
+    """
     run_id: str
     status: RunPhase
     
-    # Generated documents
-    generated_docs: List[GeneratedDocument]
+    # === NEW: Per-source-document results ===
+    # Each source document has its own isolated pipeline results
+    source_doc_results: Dict[str, SourceDocResult] = field(default_factory=dict)
     
-    # Evaluation results
+    # === LEGACY: Flat structure for backward compatibility ===
+    # These are still populated for single-doc runs and old code paths
+    # Generated documents (all, across all source docs for legacy compatibility)
+    generated_docs: List[GeneratedDocument] = field(default_factory=list)
+    
+    # Evaluation results (legacy: global, not per-source-doc)
     single_eval_results: Optional[Dict[str, SingleEvalSummary]] = None
     pairwise_results: Optional[PairwiseSummary] = None
     
-    # Final output
+    # Final output (legacy: single winner across all docs)
     winner_doc_id: Optional[str] = None
     combined_docs: List[GeneratedDocument] = field(default_factory=list)  # All combined docs
     
@@ -357,7 +416,7 @@ class RunResult:
     completed_at: Optional[datetime] = None
     fpf_stats: Optional[Dict[str, Any]] = None  # Live FPF call statistics
     
-    # Errors
+    # Errors (run-level)
     errors: List[str] = field(default_factory=list)
 
 
@@ -557,7 +616,13 @@ class RunExecutor:
     
     async def execute(self, run_id: str, config: RunConfig) -> RunResult:
         """
-        Execute a full run.
+        Execute a full run with per-source-document pipelines.
+        
+        Each source document runs through its own isolated pipeline:
+        Generation → Single Eval → Pairwise → Combine → Post-Combine Eval
+        
+        Documents NEVER compete across source doc boundaries.
+        Multiple pipelines run concurrently with shared API semaphore.
         
         Args:
             run_id: Unique run identifier
@@ -583,6 +648,7 @@ class RunExecutor:
             run_id=run_id,
             status=RunPhase.GENERATING,
             generated_docs=[],
+            source_doc_results={},
             started_at=started_at,
         )
         
@@ -613,131 +679,16 @@ class RunExecutor:
         )
         
         try:
-            # Phase 1: Generation + Streaming Single Eval
-            self.logger.info(f"Run {run_id}: Starting generation phase")
-            await self._run_generation_with_eval(run_id, config, result)
-            
-            if self._cancelled:
-                result.status = RunPhase.CANCELLED
-                # Ensure stats are included even if cancelled
-                try:
-                    result.fpf_stats = self._fpf_stats.to_dict()
-                except Exception:
-                    pass
-                return result
-            
-            # Phase 2: Pairwise Evaluation (batch, after all single evals)
-            if config.enable_pairwise and len(result.generated_docs) >= 2:
-                self.logger.info(f"Run {run_id}: Starting pairwise phase")
-                result.status = RunPhase.PAIRWISE_EVAL
-                if getattr(self, '_run_store', None):
-                    try:
-                        self._run_store.update(run_id, current_phase=result.status.value)
-                        if getattr(self, '_run_ws_manager', None):
-                            try:
-                                await self._run_ws_manager.broadcast(run_id, {"event": "phase", "phase": result.status.value, "run": self._run_store.get(run_id)})
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
-                await self._run_pairwise(config, result)
-            
-            if self._cancelled:
-                result.status = RunPhase.CANCELLED
-                # Ensure stats are included even if cancelled
-                try:
-                    result.fpf_stats = self._fpf_stats.to_dict()
-                except Exception:
-                    pass
-                return result
-            
-            # If pairwise was disabled but we have single eval results, determine winner from scores
-            if not result.winner_doc_id and result.single_eval_results and config.enable_combine:
-                # Find doc with highest average score from single eval
-                doc_scores = {}
-                for doc_id, summary in result.single_eval_results.items():
-                    if hasattr(summary, 'avg_score') and summary.avg_score is not None:
-                        doc_scores[doc_id] = summary.avg_score
-                
-                if doc_scores:
-                    result.winner_doc_id = max(doc_scores, key=doc_scores.get)
-                    self.logger.info(f"Run {run_id}: Winner determined from single eval scores: {result.winner_doc_id} (score: {doc_scores[result.winner_doc_id]:.2f})")
-                    if getattr(self, '_run_store', None):
-                        try:
-                            self._run_store.update(run_id, winner_doc_id=result.winner_doc_id)
-                        except Exception:
-                            pass
-            
-            # Phase 3: Combine (optional)
-            self.logger.info(f"Run {run_id}: Combine check - enable_combine={config.enable_combine}, winner_doc_id={result.winner_doc_id}")
-            if config.enable_combine and result.winner_doc_id:
-                self.logger.info(f"Run {run_id}: Starting combine phase")
-                result.status = RunPhase.COMBINING
-                if getattr(self, '_run_store', None):
-                    try:
-                        self._run_store.update(run_id, current_phase=result.status.value)
-                        if getattr(self, '_run_ws_manager', None):
-                            try:
-                                await self._run_ws_manager.broadcast(run_id, {"event": "phase", "phase": result.status.value, "run": self._run_store.get(run_id)})
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
-                await self._run_combine(config, result)
-            
-            # Phase 4: Post-Combine Eval (optional)
-            self.logger.debug(f"Post-combine eval check: enable_combine={config.enable_combine}, combined_docs={len(result.combined_docs)}, enable_pairwise={config.enable_pairwise}")
-            if config.enable_combine and result.combined_docs and config.enable_pairwise:
-                self.logger.info(f"Run {run_id}: Starting post-combine eval phase")
-                result.status = RunPhase.POST_COMBINE_EVAL
-                if getattr(self, '_run_store', None):
-                    try:
-                        self._run_store.update(run_id, current_phase=result.status.value)
-                        if getattr(self, '_run_ws_manager', None):
-                            try:
-                                await self._run_ws_manager.broadcast(run_id, {"event": "phase", "phase": result.status.value, "run": self._run_store.get(run_id)})
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
-                await self._run_post_combine_eval(config, result)
-
-            # Done
-            result.status = RunPhase.COMPLETED
-            result.completed_at = datetime.utcnow()
-            result.duration_seconds = (result.completed_at - started_at).total_seconds()
-            
-            # Include FPF stats in result
-            try:
-                result.fpf_stats = self._fpf_stats.to_dict()
-                self.logger.info(f"[STATS] Stored final stats in result for run {run_id}: {result.fpf_stats}")
-            except Exception as e:
-                self.logger.error(f"[STATS] Failed to serialize stats for run {run_id}: {e}", exc_info=True)
-                result.fpf_stats = None
-            
-            # Emit run completion timeline event
-            await self._emit_timeline_event(
-                run_id=run_id,
-                phase="completion",
-                event_type="complete",
-                description="Run completed successfully",
-                timestamp=result.completed_at,
-                duration_seconds=result.duration_seconds,
-                success=True,
-            )
-            
-            self.logger.info(
-                f"Run {run_id}: Completed | "
-                f"docs={len(result.generated_docs)} "
-                f"winner={result.winner_doc_id} "
-                f"cost=${result.total_cost_usd:.4f}"
-            )
+            # All runs use the per-source-document pipeline architecture.
+            # Single-document runs are just a special case with one pipeline.
+            # The legacy path (_execute_single_doc_legacy) is preserved but
+            # no longer used - can be removed after testing confirms stability.
+            await self._execute_multi_doc(run_id, config, result, started_at)
             
         except Exception as e:
             tb = traceback.format_exc()
             self.logger.error(f"Run {run_id} failed: {e}\n{tb}")
             result.status = RunPhase.FAILED
-            # Store both message and full traceback for diagnostics
             result.errors.append(str(e))
             result.errors.append(tb)
             result.completed_at = datetime.utcnow()
@@ -745,9 +696,7 @@ class RunExecutor:
             # Include FPF stats even on failure
             try:
                 result.fpf_stats = self._fpf_stats.to_dict()
-                self.logger.info(f"[STATS] Stored stats from failed run {run_id}: {result.fpf_stats}")
-            except Exception as stats_err:
-                self.logger.error(f"[STATS] Failed to serialize stats for failed run {run_id}: {stats_err}", exc_info=True)
+            except Exception:
                 result.fpf_stats = None
             
             # Emit run failure timeline event
@@ -762,6 +711,301 @@ class RunExecutor:
             )
         
         return result
+    
+    async def _execute_multi_doc(
+        self,
+        run_id: str,
+        config: RunConfig,
+        result: RunResult,
+        started_at: datetime,
+    ) -> None:
+        """
+        Execute run with per-source-document pipelines.
+        
+        Each source document runs through its own isolated pipeline.
+        Pipelines run concurrently with shared API semaphore.
+        """
+        from .source_doc_pipeline import SourceDocPipeline
+        
+        self.logger.info(f"Run {run_id}: Starting multi-doc execution with {len(config.document_ids)} documents")
+        
+        # Create shared semaphores
+        # API semaphore limits concurrent API calls across all pipelines
+        api_semaphore = asyncio.Semaphore(config.generation_concurrency)
+        # Pipeline semaphore limits how many pipelines are active simultaneously
+        pipeline_semaphore = asyncio.Semaphore(config.max_concurrent_pipelines)
+        
+        # Create a pipeline for each source document
+        pipelines = []
+        for doc_id in config.document_ids:
+            # Get human-readable name from document_names or fall back to doc_id
+            doc_name = config.document_names.get(doc_id, doc_id)
+            
+            pipeline = SourceDocPipeline(
+                source_doc_id=doc_id,
+                source_doc_name=doc_name,
+                content=config.document_contents[doc_id],
+                config=config,
+                run_id=run_id,
+                shared_semaphore=api_semaphore,
+                stats_tracker=self._fpf_stats,
+                fpf_adapter=self._fpf_adapter,
+                gptr_adapter=self._gptr_adapter,
+                dr_adapter=self._dr_adapter,
+                logger=self.logger,
+                ws_manager=self._run_ws_manager,
+                run_store=getattr(self, '_run_store', None),
+                on_timeline_event=self._on_pipeline_timeline_event,
+            )
+            pipelines.append(pipeline)
+        
+        async def run_pipeline_with_limit(pipeline: SourceDocPipeline):
+            """Run a single pipeline with concurrency limiting."""
+            async with pipeline_semaphore:
+                if self._cancelled:
+                    pipeline.cancel()
+                return await pipeline.run()
+        
+        # Run all pipelines concurrently
+        pipeline_results = await asyncio.gather(
+            *[run_pipeline_with_limit(p) for p in pipelines],
+            return_exceptions=True,
+        )
+        
+        # Collect results from all pipelines
+        all_completed = True
+        any_success = False
+        
+        for doc_id, pipe_result in zip(config.document_ids, pipeline_results):
+            if isinstance(pipe_result, Exception):
+                # Pipeline threw an exception
+                self.logger.error(f"Run {run_id}: Pipeline for {doc_id} failed with exception: {pipe_result}")
+                doc_name = config.document_names.get(doc_id, doc_id)
+                result.source_doc_results[doc_id] = SourceDocResult(
+                    source_doc_id=doc_id,
+                    source_doc_name=doc_name,
+                    status=RunPhase.FAILED,
+                    errors=[str(pipe_result)],
+                )
+                all_completed = False
+            else:
+                # Store pipeline result
+                result.source_doc_results[doc_id] = pipe_result
+                
+                # Track success/failure
+                if pipe_result.status == RunPhase.COMPLETED:
+                    any_success = True
+                elif pipe_result.status != RunPhase.CANCELLED:
+                    all_completed = False
+                
+                # Aggregate costs
+                result.total_cost_usd += pipe_result.cost_usd
+                
+                # Aggregate generated docs into legacy flat list for backward compat
+                result.generated_docs.extend(pipe_result.generated_docs)
+        
+        # Determine overall run status
+        if self._cancelled:
+            result.status = RunPhase.CANCELLED
+        elif all_completed and any_success:
+            result.status = RunPhase.COMPLETED
+        elif any_success:
+            result.status = RunPhase.COMPLETED_WITH_ERRORS
+        else:
+            result.status = RunPhase.FAILED
+        
+        # Finalize result
+        result.completed_at = datetime.utcnow()
+        result.duration_seconds = (result.completed_at - started_at).total_seconds()
+        
+        # Include FPF stats
+        try:
+            result.fpf_stats = self._fpf_stats.to_dict()
+        except Exception:
+            result.fpf_stats = None
+        
+        # Emit run completion timeline event
+        await self._emit_timeline_event(
+            run_id=run_id,
+            phase="completion",
+            event_type="complete",
+            description=f"Run completed: {len([r for r in result.source_doc_results.values() if r.status == RunPhase.COMPLETED])}/{len(config.document_ids)} documents succeeded",
+            timestamp=result.completed_at,
+            duration_seconds=result.duration_seconds,
+            success=result.status in (RunPhase.COMPLETED, RunPhase.COMPLETED_WITH_ERRORS),
+        )
+        
+        self.logger.info(
+            f"Run {run_id}: Multi-doc execution completed | "
+            f"status={result.status.value} "
+            f"docs={len(result.generated_docs)} "
+            f"cost=${result.total_cost_usd:.4f}"
+        )
+    
+    async def _on_pipeline_timeline_event(self, run_id: str, event: dict) -> None:
+        """Handle timeline events from SourceDocPipeline instances."""
+        # Persist per-source-doc timeline events for per-doc Timeline tabs.
+        # This is incremental, so runs in-progress still show entries.
+        try:
+            source_doc_id = event.get("source_doc_id")
+            if source_doc_id:
+                from ..infra.db.session import async_session_factory
+                from ..infra.db.repositories import RunRepository
+
+                async with async_session_factory() as session:
+                    run_repo = RunRepository(session)
+                    await run_repo.append_source_doc_timeline_event(run_id, source_doc_id, event)
+        except Exception as e:
+            self.logger.warning(f"Failed to append source-doc timeline event for run {run_id}: {e}")
+
+        await self._emit_timeline_event(
+            run_id=run_id,
+            phase=event.get("phase", ""),
+            event_type=event.get("event_type", ""),
+            description=event.get("description", ""),
+            model=event.get("model"),
+            timestamp=datetime.fromisoformat(event["timestamp"]) if event.get("timestamp") else None,
+            completed_at=datetime.fromisoformat(event["completed_at"]) if event.get("completed_at") else None,
+            duration_seconds=event.get("duration_seconds"),
+            success=event.get("success", True),
+            details={
+                **(event.get("details") or {}),
+                "source_doc_id": event.get("source_doc_id"),
+                "source_doc_name": event.get("source_doc_name"),
+            },
+        )
+    
+    async def _execute_single_doc_legacy(
+        self,
+        run_id: str,
+        config: RunConfig,
+        result: RunResult,
+        started_at: datetime,
+    ) -> None:
+        """
+        Legacy execution path for single-document runs.
+        
+        Preserves backward compatibility with existing code paths.
+        """
+        # Phase 1: Generation + Streaming Single Eval
+        self.logger.info(f"Run {run_id}: Starting generation phase")
+        await self._run_generation_with_eval(run_id, config, result)
+        
+        if self._cancelled:
+            result.status = RunPhase.CANCELLED
+            # Ensure stats are included even if cancelled
+            try:
+                result.fpf_stats = self._fpf_stats.to_dict()
+            except Exception:
+                pass
+            return
+        
+        # Phase 2: Pairwise Evaluation (batch, after all single evals)
+        if config.enable_pairwise and len(result.generated_docs) >= 2:
+            self.logger.info(f"Run {run_id}: Starting pairwise phase")
+            result.status = RunPhase.PAIRWISE_EVAL
+            if getattr(self, '_run_store', None):
+                try:
+                    self._run_store.update(run_id, current_phase=result.status.value)
+                    if getattr(self, '_run_ws_manager', None):
+                        try:
+                            await self._run_ws_manager.broadcast(run_id, {"event": "phase", "phase": result.status.value, "run": self._run_store.get(run_id)})
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+            await self._run_pairwise(config, result)
+        
+        if self._cancelled:
+            result.status = RunPhase.CANCELLED
+            # Ensure stats are included even if cancelled
+            try:
+                result.fpf_stats = self._fpf_stats.to_dict()
+            except Exception:
+                pass
+            return
+        
+        # If pairwise was disabled but we have single eval results, determine winner from scores
+        if not result.winner_doc_id and result.single_eval_results and config.enable_combine:
+            # Find doc with highest average score from single eval
+            doc_scores = {}
+            for doc_id, summary in result.single_eval_results.items():
+                if hasattr(summary, 'avg_score') and summary.avg_score is not None:
+                    doc_scores[doc_id] = summary.avg_score
+            
+            if doc_scores:
+                result.winner_doc_id = max(doc_scores, key=doc_scores.get)
+                self.logger.info(f"Run {run_id}: Winner determined from single eval scores: {result.winner_doc_id} (score: {doc_scores[result.winner_doc_id]:.2f})")
+                if getattr(self, '_run_store', None):
+                    try:
+                        self._run_store.update(run_id, winner_doc_id=result.winner_doc_id)
+                    except Exception:
+                        pass
+        
+        # Phase 3: Combine (optional)
+        self.logger.info(f"Run {run_id}: Combine check - enable_combine={config.enable_combine}, winner_doc_id={result.winner_doc_id}")
+        if config.enable_combine and result.winner_doc_id:
+            self.logger.info(f"Run {run_id}: Starting combine phase")
+            result.status = RunPhase.COMBINING
+            if getattr(self, '_run_store', None):
+                try:
+                    self._run_store.update(run_id, current_phase=result.status.value)
+                    if getattr(self, '_run_ws_manager', None):
+                        try:
+                            await self._run_ws_manager.broadcast(run_id, {"event": "phase", "phase": result.status.value, "run": self._run_store.get(run_id)})
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+            await self._run_combine(config, result)
+        
+        # Phase 4: Post-Combine Eval (optional)
+        self.logger.debug(f"Post-combine eval check: enable_combine={config.enable_combine}, combined_docs={len(result.combined_docs)}, enable_pairwise={config.enable_pairwise}")
+        if config.enable_combine and result.combined_docs and config.enable_pairwise:
+            self.logger.info(f"Run {run_id}: Starting post-combine eval phase")
+            result.status = RunPhase.POST_COMBINE_EVAL
+            if getattr(self, '_run_store', None):
+                try:
+                    self._run_store.update(run_id, current_phase=result.status.value)
+                    if getattr(self, '_run_ws_manager', None):
+                        try:
+                            await self._run_ws_manager.broadcast(run_id, {"event": "phase", "phase": result.status.value, "run": self._run_store.get(run_id)})
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+            await self._run_post_combine_eval(config, result)
+
+        # Done
+        result.status = RunPhase.COMPLETED
+        result.completed_at = datetime.utcnow()
+        result.duration_seconds = (result.completed_at - started_at).total_seconds()
+        
+        # Include FPF stats in result
+        try:
+            result.fpf_stats = self._fpf_stats.to_dict()
+            self.logger.info(f"[STATS] Stored final stats in result for run {run_id}: {result.fpf_stats}")
+        except Exception as e:
+            self.logger.error(f"[STATS] Failed to serialize stats for run {run_id}: {e}", exc_info=True)
+            result.fpf_stats = None
+        
+        # Emit run completion timeline event
+        await self._emit_timeline_event(
+            run_id=run_id,
+            phase="completion",
+            event_type="complete",
+            description="Run completed successfully",
+            timestamp=result.completed_at,
+            duration_seconds=result.duration_seconds,
+            success=True,
+        )
+        
+        self.logger.info(
+            f"Run {run_id}: Completed | "
+            f"docs={len(result.generated_docs)} "
+            f"winner={result.winner_doc_id} "
+            f"cost=${result.total_cost_usd:.4f}"
+        )
     
     async def _run_generation_with_eval(
         self,
@@ -1141,6 +1385,7 @@ class RunExecutor:
             if not gen_config.extra:
                 gen_config.extra = {}
             gen_config.extra["task_id"] = task_id
+            gen_config.extra["run_id"] = run_id  # For FPF cost logging
             gen_config.extra["max_completion_tokens"] = max_tokens
             gen_config.extra["temperature"] = temperature
             if timeout:

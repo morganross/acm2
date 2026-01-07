@@ -129,6 +129,16 @@ class FpfAdapter(BaseAdapter):
 
             # Prepare environment - inherit current env to pass API keys
             env = os.environ.copy()
+            
+            # Set FPF log environment variables so FPF writes structured JSON logs
+            run_id = extra.get("run_id")
+            if run_id:
+                env["FPF_RUN_GROUP_ID"] = run_id
+                # Point FPF logs to ACM2's logs directory  
+                logs_dir = Path("logs") / run_id
+                logs_dir.mkdir(parents=True, exist_ok=True)
+                env["FPF_LOG_DIR"] = str(logs_dir.resolve())
+            
             fpf_cwd = self._get_fpf_directory()
             actual_timeout = timeout_val if timeout_val else 1200  # 20 min default
             
@@ -167,6 +177,21 @@ class FpfAdapter(BaseAdapter):
 
             completed_at = datetime.utcnow()
             duration = completed_at - started_at
+            
+            # Try to extract cost and token info from FPF's JSON log
+            input_tokens = 0
+            output_tokens = 0
+            total_tokens = 0
+            cost_usd = 0.0
+            
+            if run_id:
+                cost_info = self._parse_fpf_cost_log(run_id)
+                if cost_info:
+                    input_tokens = cost_info.get("input_tokens", 0)
+                    output_tokens = cost_info.get("output_tokens", 0)
+                    total_tokens = cost_info.get("total_tokens", 0)
+                    cost_usd = cost_info.get("cost_usd", 0.0)
+                    logger.info(f"FPF cost for {task_id}: ${cost_usd:.6f} ({total_tokens} tokens)")
 
             return GenerationResult(
                 generator=GeneratorType.FPF,
@@ -178,10 +203,10 @@ class FpfAdapter(BaseAdapter):
                 started_at=started_at,
                 completed_at=completed_at,
                 duration_seconds=duration.total_seconds(),
-                input_tokens=0,
-                output_tokens=0,
-                total_tokens=0,
-                cost_usd=0.0,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=total_tokens,
+                cost_usd=cost_usd,
                 sources=[],
                 metadata={},
                 status=TaskStatus.COMPLETED,
@@ -357,6 +382,54 @@ class FpfAdapter(BaseAdapter):
             cmd.extend(["--fpf-retry-delay", str(extra["fpf_retry_delay"])])
 
         return cmd
+
+    def _parse_fpf_cost_log(self, run_id: str) -> dict | None:
+        """Parse FPF's JSON log file to extract cost and token usage.
+        
+        FPF writes logs to logs/{run_group_id}/YYYYMMDDTHHMMSS-{run_id}.json
+        with fields: total_cost_usd, usage.prompt_tokens, usage.completion_tokens
+        """
+        import json
+        import glob
+        
+        try:
+            logs_dir = Path("logs") / run_id
+            if not logs_dir.exists():
+                logger.debug(f"FPF logs dir not found: {logs_dir}")
+                return None
+            
+            # Find the most recent JSON log file
+            log_files = list(logs_dir.glob("*.json"))
+            if not log_files:
+                logger.debug(f"No JSON logs found in {logs_dir}")
+                return None
+            
+            # Sort by modification time, get newest
+            log_files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+            newest_log = log_files[0]
+            
+            logger.debug(f"Parsing FPF cost log: {newest_log}")
+            
+            with open(newest_log, "r", encoding="utf-8") as f:
+                log_data = json.load(f)
+            
+            # Extract cost and token info
+            cost_usd = log_data.get("total_cost_usd", 0.0)
+            usage = log_data.get("usage", {})
+            input_tokens = usage.get("prompt_tokens", 0)
+            output_tokens = usage.get("completion_tokens", 0)
+            total_tokens = input_tokens + output_tokens
+            
+            return {
+                "cost_usd": cost_usd,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": total_tokens,
+            }
+            
+        except Exception as e:
+            logger.warning(f"Failed to parse FPF cost log for run {run_id}: {e}")
+            return None
 
     def _get_fpf_directory(self) -> str:
         """Get the FilePromptForge directory path."""

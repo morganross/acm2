@@ -8,7 +8,7 @@ import { useModelCatalog } from '../../stores/modelCatalog'
 
 export function FpfParamsPanel() {
   const config = useConfigStore()
-  const { fpfModels, fpfFreeModels, models, isLoading, fetchModels } = useModelCatalog()
+  const { fpfModels, fpfFreeModels, models, isLoading, fetchModels, formatPricing } = useModelCatalog()
   const [freeModelsExpanded, setFreeModelsExpanded] = useState(false)
 
   // Fetch models on mount if empty
@@ -57,7 +57,7 @@ export function FpfParamsPanel() {
               <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin' : ''}`} />
             </button>
           </h4>
-          <div className="grid grid-cols-2 gap-2" data-section="fpf-models">
+          <div className="grid grid-cols-1 gap-1" data-section="fpf-models">
             {fpfModels.map((model) => (
               <Checkbox
                 key={model}
@@ -69,6 +69,7 @@ export function FpfParamsPanel() {
                   config.updateFpf({ selectedModels })
                 }}
                 label={model}
+                priceSuffix={formatPricing(model)}
                 dataTestId={`fpf-model-${model}`}
               />
             ))}
@@ -100,7 +101,7 @@ export function FpfParamsPanel() {
                 <p className="text-xs text-gray-400 mb-3">
                   $0/M tokens - Community-provided free endpoints with rate limits
                 </p>
-                <div className="grid grid-cols-2 gap-2" data-section="fpf-free-models">
+                <div className="grid grid-cols-1 gap-1" data-section="fpf-free-models">
                   {fpfFreeModels.map((model) => (
                     <Checkbox
                       key={model}
@@ -112,6 +113,7 @@ export function FpfParamsPanel() {
                         config.updateFpf({ selectedModels })
                       }}
                       label={model.replace('openrouter:', '').replace(':free', ' 🆓')}
+                      priceSuffix="FREE"
                       dataTestId={`fpf-model-${model}`}
                     />
                   ))}

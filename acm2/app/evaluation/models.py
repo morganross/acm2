@@ -48,6 +48,9 @@ class CriterionScore:
     reason: str
     
     def __post_init__(self):
+        # Convert 0 (N/A) to 1 - some LLMs return 0 for "not applicable" criteria
+        if self.score == 0:
+            self.score = 1
         if not 1 <= self.score <= 5:
             raise ValueError(f"Score must be 1-5, got {self.score}")
 

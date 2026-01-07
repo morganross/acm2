@@ -2,16 +2,14 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { 
   Play, Square, AlertCircle, Activity, Clock,
-  FileText, Users, ChevronDown, Calendar, Target, Timer,
+  FileText, Users, ChevronDown, Timer,
   XCircle, CheckCircle, Loader2, RefreshCw
 } from 'lucide-react';
 import LogViewer from '../components/execution/LogViewer';
 import type { Run } from '../api';
 import { runsApi } from '../api';
 import { formatTime, computeEndTime } from './execute/utils';
-import EvaluationTab from './execute/EvaluationTab';
-import PairwiseTab from './execute/PairwiseTab';
-import TimelineTab from './execute/TimelineTab';
+import SourceDocSection from './execute/SourceDocSection';
 import useRunSocket from '../hooks/useRunSocket';
 import { getConcurrencySettings } from './Settings';
 
@@ -39,24 +37,71 @@ export default function Execute() {
   const [isRunning, setIsRunning] = useState(false);
   const [isReevaluating, setIsReevaluating] = useState(false);
   const [runningRunsCount, setRunningRunsCount] = useState<number | null>(null);
-  const [activeTab, setActiveTab] = useState<'evaluation' | 'pairwise' | 'timeline'>('evaluation');
   const [error, setError] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  // Helper to check if a value is "empty" (null, undefined, empty object, or empty array)
+  const isEmpty = (val: unknown): boolean => {
+    if (val === null || val === undefined) return true;
+    if (Array.isArray(val)) return val.length === 0;
+    if (typeof val === 'object') return Object.keys(val as object).length === 0;
+    return false;
+  };
+
+  // Merge run updates while preserving non-empty data
+  // If the new value is empty but the old value had data, keep the old data
+  const mergeRun = (prev: Run | null, updated: Run): Run => {
+    const merged: any = { ...(prev || {}), ...updated };
+    
+    // Fields that should be preserved if the update is empty but prev had data
+    const preserveFields = [
+      'fpf_stats',
+      'pre_combine_evals_detailed',
+      'post_combine_evals_detailed',
+      'criteria_list',
+      'evaluator_list',
+      'timeline_events',
+      'generation_events',
+      'generated_docs',
+      'pre_combine_evals',
+      'post_combine_evals',
+      'pairwise_results',
+      'tasks',
+      'source_doc_results',
+    ];
+
+    for (const field of preserveFields) {
+      const prevVal = (prev as any)?.[field];
+      const newVal = (updated as any)?.[field];
+      // If new value is empty but prev had data, keep prev
+      if (isEmpty(newVal) && !isEmpty(prevVal)) {
+        merged[field] = prevVal;
+      }
+    }
+
+    return merged;
+  };
+
   const handleRunUpdate = useCallback((updatedRun: Run) => {
     if (!updatedRun?.id) return;
-    setCurrentRun(prev => {
-      const merged: any = { ...(prev || {}), ...updatedRun };
-      if (!updatedRun.fpf_stats && prev?.fpf_stats) {
-        merged.fpf_stats = prev.fpf_stats;
-      }
-      return merged;
-    });
+    
+    // If run just completed, re-fetch from API to get full data (WebSocket may have incomplete data)
+    if (updatedRun.status === 'completed' || updatedRun.status === 'failed' || updatedRun.status === 'cancelled') {
+      setIsRunning(false);
+      runsApi.get(updatedRun.id).then(fullRun => {
+        setCurrentRun(prev => mergeRun(prev, fullRun));
+      }).catch(err => {
+        console.error('Failed to re-fetch run on completion:', err);
+        // Fall back to WebSocket data
+        setCurrentRun(prev => mergeRun(prev, updatedRun));
+      });
+      return;
+    }
+    
+    setCurrentRun(prev => mergeRun(prev, updatedRun));
     // Update running state based on status
     if (updatedRun.status === 'running' || updatedRun.status === 'pending') {
       setIsRunning(true);
-    } else if (updatedRun.status === 'completed' || updatedRun.status === 'failed' || updatedRun.status === 'cancelled') {
-      setIsRunning(false);
     }
   }, []);
 
@@ -103,13 +148,7 @@ export default function Execute() {
     if (runId) {
       runsApi.get(runId)
         .then(async run => {
-          setCurrentRun(prev => {
-            const merged: any = { ...(prev || {}), ...run };
-            if (!run.fpf_stats && prev?.fpf_stats) {
-              merged.fpf_stats = prev.fpf_stats;
-            }
-            return merged;
-          });
+          setCurrentRun(prev => mergeRun(prev, run));
           setIsRunning(run.status === 'running' || run.status === 'pending');
           
           // Also fetch preset data if run has preset_id
@@ -248,6 +287,18 @@ export default function Execute() {
       
       if (!startResponse.ok) {
         throw new Error('Failed to start run');
+      }
+      
+      // Re-fetch the run to get source_doc_results that was initialized during start
+      // This ensures collapsible sections appear immediately
+      const updatedRunResponse = await fetch(`/api/v1/runs/${runId}`);
+      if (updatedRunResponse.ok) {
+        const updatedRunData = await updatedRunResponse.json();
+        setCurrentRun(prev => ({
+          ...(prev || {}),
+          ...updatedRunData,
+        }));
+        console.log('[Execute] Re-fetched run after start, source_doc_results:', updatedRunData.source_doc_results);
       }
       
       // WebSocket handles all real-time updates - no polling needed
@@ -675,45 +726,7 @@ export default function Execute() {
           )}
         </div>      </div>
 
-      {/* Tabs */}
-      <div style={{ 
-        display: 'flex', 
-        gap: '4px', 
-        marginBottom: '24px',
-        backgroundColor: '#1f2937',
-        padding: '4px',
-        borderRadius: '8px',
-        width: 'fit-content'
-      }}>
-        {[
-          { id: 'evaluation' as const, label: 'Single Evaluation', icon: Target },
-          { id: 'pairwise' as const, label: 'Pairwise Comparison', icon: Users },
-          { id: 'timeline' as const, label: 'Timeline & Details', icon: Calendar }
-        ].map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '10px 16px',
-              backgroundColor: activeTab === tab.id ? '#374151' : 'transparent',
-              border: 'none',
-              borderRadius: '6px',
-              color: activeTab === tab.id ? 'white' : '#9ca3af',
-              cursor: 'pointer',
-              fontSize: '14px',
-              fontWeight: activeTab === tab.id ? 500 : 400
-            }}
-          >
-            <tab.icon size={16} />
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Tab Content */}
+      {/* Results Content - Per-Source-Document Sections with Internal Tabs */}
       <div style={{
         backgroundColor: '#1f2937',
         borderRadius: '12px',
@@ -721,19 +734,103 @@ export default function Execute() {
         border: '1px solid #374151',
         minHeight: '400px'
       }}>
-        {activeTab === 'evaluation' && (
-          <EvaluationTab 
-            currentRun={currentRun}
-            execStatus={{ id: 0, status: currentRun?.status || 'pending' }}
-          />
-        )}
-
-        {activeTab === 'pairwise' && (
-          <PairwiseTab currentRun={currentRun} />
-        )}
-
-        {activeTab === 'timeline' && (
-          <TimelineTab currentRun={currentRun} />
+        {/* Multi-doc view: Show per-source-document sections */}
+        {currentRun?.source_doc_results && Object.keys(currentRun.source_doc_results).length > 0 ? (
+          <div>
+            {/* Only show multi-doc info banner when there are 2+ documents */}
+            {Object.keys(currentRun.source_doc_results).length > 1 && (
+              <div style={{ 
+                marginBottom: '16px', 
+                padding: '12px 16px', 
+                backgroundColor: '#111827', 
+                borderRadius: '8px',
+                borderLeft: '3px solid #3b82f6',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px'
+              }}>
+                <FileText size={18} style={{ color: '#60a5fa' }} />
+                <span style={{ color: '#d1d5db', fontSize: '14px' }}>
+                  <strong>Multi-Document Run:</strong> Each input document runs its own independent pipeline with separate evaluations.
+                </span>
+                <span style={{ 
+                  marginLeft: 'auto', 
+                  color: '#9ca3af', 
+                  fontSize: '13px' 
+                }}>
+                  {Object.keys(currentRun.source_doc_results).length} source documents
+                </span>
+              </div>
+            )}
+            {Object.entries(currentRun.source_doc_results).map(([sourceDocId, sourceDocResult]) => (
+              <SourceDocSection
+                key={sourceDocId}
+                sourceDocId={sourceDocId}
+                sourceDocResult={sourceDocResult}
+                currentRun={currentRun}
+                defaultExpanded={Object.keys(currentRun.source_doc_results!).length <= 3}
+                hideHeader={Object.keys(currentRun.source_doc_results!).length === 1}
+              />
+            ))}
+          </div>
+        ) : currentRun ? (
+          /* ERROR: source_doc_results is missing - this should never happen */
+          (() => {
+            // Log error to console
+            console.error('[FATAL] source_doc_results is missing or empty!', {
+              runId: currentRun.id,
+              status: currentRun.status,
+              hasSourceDocResults: !!currentRun.source_doc_results,
+              sourceDocResultsKeys: currentRun.source_doc_results ? Object.keys(currentRun.source_doc_results) : [],
+              fullRun: currentRun
+            });
+            return (
+              <div style={{
+                padding: '40px',
+                textAlign: 'center',
+                backgroundColor: '#7f1d1d',
+                borderRadius: '8px',
+                border: '2px solid #dc2626'
+              }}>
+                <div style={{ color: '#fca5a5', fontSize: '24px', fontWeight: 'bold', marginBottom: '16px' }}>
+                  ⚠️ FATAL ERROR: source_doc_results is missing
+                </div>
+                <div style={{ color: '#fecaca', fontSize: '14px', marginBottom: '12px' }}>
+                  The API response does not contain source_doc_results. This is a backend bug.
+                </div>
+                <div style={{ 
+                  backgroundColor: '#450a0a', 
+                  padding: '16px', 
+                  borderRadius: '4px', 
+                  textAlign: 'left',
+                  fontFamily: 'monospace',
+                  fontSize: '12px',
+                  color: '#fca5a5',
+                  overflow: 'auto',
+                  maxHeight: '300px'
+                }}>
+                  <div><strong>Run ID:</strong> {currentRun.id}</div>
+                  <div><strong>Status:</strong> {currentRun.status}</div>
+                  <div><strong>source_doc_results exists:</strong> {String(!!currentRun.source_doc_results)}</div>
+                  <div><strong>source_doc_results keys:</strong> {currentRun.source_doc_results ? Object.keys(currentRun.source_doc_results).join(', ') || '(empty object)' : '(null/undefined)'}</div>
+                  <div style={{ marginTop: '12px' }}><strong>Full currentRun object:</strong></div>
+                  <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                    {JSON.stringify(currentRun, null, 2)}
+                  </pre>
+                </div>
+              </div>
+            );
+          })()
+        ) : (
+          /* No run started yet - show placeholder */
+          <div style={{ 
+            padding: '40px', 
+            textAlign: 'center', 
+            color: '#9ca3af' 
+          }}>
+            <div style={{ fontSize: '18px', marginBottom: '8px' }}>No run in progress</div>
+            <div style={{ fontSize: '14px' }}>Select a preset and click "Start Execution" to begin</div>
+          </div>
         )}
       </div>
 

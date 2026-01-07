@@ -216,6 +216,7 @@ class CombineConfigComplete(BaseModel):
     enabled: bool = False
     selected_models: list[str] = Field(default_factory=list, description="REQUIRED from preset if enabled")
     strategy: str = Field("", description="REQUIRED from preset if enabled")
+    max_tokens: Optional[int] = Field(None, description="Max output tokens for combine phase (REQUIRED if enabled)")
 
 
 class GeneralConfigComplete(BaseModel):
@@ -492,6 +493,73 @@ class GenerationEvent(BaseModel):
     cost_usd: Optional[float] = None
 
 
+# ============================================================================
+# Per-Source-Document Result Models (Multi-Doc Pipeline)
+# ============================================================================
+
+class SourceDocStatus(str, Enum):
+    """Status of a source document's pipeline execution."""
+    PENDING = "pending"
+    GENERATING = "generating"
+    SINGLE_EVAL = "single_eval"
+    PAIRWISE_EVAL = "pairwise_eval"
+    COMBINING = "combining"
+    POST_COMBINE_EVAL = "post_combine_eval"
+    COMPLETED = "completed"
+    COMPLETED_WITH_ERRORS = "completed_with_errors"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class SourceDocResultResponse(BaseModel):
+    """Results for a single source document's pipeline.
+    
+    Each input document runs through its own isolated pipeline:
+    Generation → Single Eval → Pairwise → Combine → Post-Combine Eval
+    
+    Documents never compete across source doc boundaries.
+    """
+    source_doc_id: str
+    source_doc_name: str
+    status: SourceDocStatus
+    
+    # Generated documents for this source
+    generated_docs: list[GeneratedDocInfo] = Field(default_factory=list)
+    
+    # Evaluation results
+    single_eval_scores: dict[str, float] = Field(
+        default_factory=dict,
+        description="Average score per generated doc: { gen_doc_id: avg_score }"
+    )
+    single_eval_detailed: dict[str, DocumentEvalDetail] = Field(
+        default_factory=dict,
+        description="Detailed eval breakdown per generated doc"
+    )
+    pairwise_results: Optional[PairwiseResults] = None
+    
+    # Winner and combined output
+    winner_doc_id: Optional[str] = None
+    combined_doc: Optional[GeneratedDocInfo] = None  # Legacy: first combined doc
+    combined_docs: list[GeneratedDocInfo] = Field(default_factory=list)  # All combined docs
+    
+    # Post-combine evaluation
+    post_combine_eval_scores: dict[str, float] = Field(
+        default_factory=dict,
+        description="Scores for post-combine comparison"
+    )
+    post_combine_pairwise: Optional[PairwiseResults] = None
+    
+    # Timeline events for this source doc
+    timeline_events: list[TimelineEvent] = Field(default_factory=list)
+    
+    # Per-document stats
+    errors: list[str] = Field(default_factory=list)
+    cost_usd: float = 0.0
+    duration_seconds: float = 0.0
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+
 class RunDetail(BaseModel):
     """Detailed view of a run (single run endpoint)."""
     id: str
@@ -525,7 +593,8 @@ class RunDetail(BaseModel):
     post_combine_evals: dict[str, dict[str, float]] = Field(default_factory=dict)  # { combined_doc_id: { judge_model: score } }
     pairwise_results: Optional[PairwiseResults] = None  # Pairwise comparison results (pre-combine)
     post_combine_pairwise: Optional[PairwiseResults] = None  # Pairwise comparison: combined doc vs winner
-    combined_doc_id: Optional[str] = None  # ID of the combined document if any
+    combined_doc_id: Optional[str] = None  # ID of the combined document if any (legacy, first one)
+    combined_doc_ids: list[str] = Field(default_factory=list)  # All combined document IDs
     
     # ACM1-style detailed evaluation data with criteria breakdown
     pre_combine_evals_detailed: dict[str, DocumentEvalDetail] = Field(default_factory=dict)  # { gen_doc_id: DocumentEvalDetail }
@@ -536,6 +605,13 @@ class RunDetail(BaseModel):
     # ACM1-style timeline and generation events
     timeline_events: list[TimelineEvent] = Field(default_factory=list)  # All timeline events
     generation_events: list[GenerationEvent] = Field(default_factory=list)  # Generation event records
+    
+    # === NEW: Per-source-document results (multi-doc pipeline) ===
+    # Each source document has its own isolated pipeline results
+    source_doc_results: dict[str, SourceDocResultResponse] = Field(
+        default_factory=dict,
+        description="Results organized by source document ID. Each source doc has its own winner/combined output."
+    )
     
     # Costs
     total_cost_usd: float = 0.0

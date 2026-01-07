@@ -58,6 +58,7 @@ async def execute_run_background(run_id: str, config: RunConfig):
         db_lock = asyncio.Lock()
         pre_combine_evals_detailed_incremental = {}
         generated_docs_incremental = []  # Track generated docs for incremental save
+        gen_doc_to_source_doc: dict[str, str] = {}
         # Track evaluator and criterion sets so the UI can render per-judge, per-criterion badges while the run is live
         all_evaluators_incremental: set[str] = set()
         all_criteria_incremental: set[str] = set()
@@ -72,6 +73,8 @@ async def execute_run_background(run_id: str, config: RunConfig):
             
             async with db_lock:
                 gen_count += 1
+
+                gen_doc_to_source_doc[doc_id] = source_doc_id
                 
                 # Build the doc info
                 doc_info = {
@@ -92,6 +95,11 @@ async def execute_run_background(run_id: str, config: RunConfig):
                         logger.info(f"[on_gen_complete] Appended to DB: generated_docs count now {len(result.results_summary.get('generated_docs', []))}")
                     else:
                         logger.warning(f"[on_gen_complete] Run {run_id} not found in DB!")
+
+                # Also write per-source-doc generated_docs so per-doc tabs populate
+                async with async_session_factory() as session:
+                    repo = RunRepository(session)
+                    await repo.append_source_doc_generated_doc(run_id, source_doc_id, doc_info)
                 
                 logger.info(f"[DB] Saved gen #{gen_count}: {doc_id} | {model}")
         
@@ -101,6 +109,8 @@ async def execute_run_background(run_id: str, config: RunConfig):
             
             async with db_lock:
                 eval_count += 1
+
+                source_doc_id = gen_doc_to_source_doc.get(doc_id)
                 
                 # Initialize doc entry if needed
                 if doc_id not in pre_combine_evals_detailed_incremental:
@@ -150,6 +160,18 @@ async def execute_run_background(run_id: str, config: RunConfig):
                         results_summary_updated["evaluator_list"] = sorted(list(all_evaluators_incremental))
                         results_summary_updated["criteria_list"] = sorted(list(all_criteria_incremental))
                         await repo.update(run_id, results_summary=results_summary_updated)
+
+                # Also write per-source-doc single_eval_results so per-doc evaluation tab fills
+                if source_doc_id:
+                    overall_avg = float(pre_combine_evals_detailed_incremental[doc_id]["overall_average"])
+                    async with async_session_factory() as session:
+                        repo = RunRepository(session)
+                        await repo.upsert_source_doc_single_eval_result(
+                            run_id,
+                            source_doc_id,
+                            doc_id,
+                            {"avg_score": overall_avg},
+                        )
                 
                 logger.info(f"[DB] Saved eval #{eval_count}: {doc_id} | {judge_model} trial={trial} avg={result.average_score:.2f}")
         
@@ -201,12 +223,26 @@ async def execute_run_background(run_id: str, config: RunConfig):
                     })
                 
                 # Build pre-combine evaluation scores
+                # First, check if we have incrementally-saved data that we should preserve
+                # The incremental callbacks (on_eval_complete) save data to DB during execution,
+                # but result.single_eval_results may be empty for multi-doc pipelines.
+                # If so, we should use the incrementally-saved data instead of overwriting with empty.
                 pre_combine_evals = {}
                 pre_combine_evals_detailed = {}
                 all_criteria = set()
                 all_evaluators = set()
                 
-                if result.single_eval_results:
+                # Check if incremental data was saved during execution
+                use_incremental_data = False
+                if pre_combine_evals_detailed_incremental and not result.single_eval_results:
+                    # We have incremental data but no result.single_eval_results - use incremental
+                    pre_combine_evals_detailed = dict(pre_combine_evals_detailed_incremental)
+                    all_criteria = set(all_criteria_incremental)
+                    all_evaluators = set(all_evaluators_incremental)
+                    use_incremental_data = True
+                    logger.info(f"[COMPLETION] Using incrementally-saved eval data: {len(pre_combine_evals_detailed)} docs, {len(all_criteria)} criteria, {len(all_evaluators)} evaluators")
+                
+                if result.single_eval_results and not use_incremental_data:
                     for gen_doc_id, summary in result.single_eval_results.items():
                         combined_doc_ids = [d.doc_id for d in (result.combined_docs or [])]
                         if gen_doc_id in combined_doc_ids:
@@ -427,6 +463,32 @@ async def execute_run_background(run_id: str, config: RunConfig):
                 
                 logger.info(f"[STATS] Persisting stats to database for run {run_id}: {result.fpf_stats}")
                 
+                # Serialize source_doc_results for multi-doc runs
+                # Also distribute run-level timeline events to each source doc based on source_doc_id
+                source_doc_results_serialized = {}
+                if result.source_doc_results:
+                    for sdr_id, sdr in result.source_doc_results.items():
+                        # Filter timeline events that belong to this source doc
+                        sdr_timeline_events = []
+                        for te in timeline_events:
+                            details = te.get("details") or {}
+                            te_source_doc_id = details.get("source_doc_id")
+                            te_doc_id = details.get("doc_id", "")
+                            # Match by explicit source_doc_id or by doc_id prefix
+                            if te_source_doc_id == sdr_id or (te_doc_id and te_doc_id.startswith(sdr_id[:8])):
+                                sdr_timeline_events.append(te)
+                        
+                        # Add timeline events to the source doc result before serializing
+                        if hasattr(sdr, 'timeline_events'):
+                            sdr.timeline_events = sdr_timeline_events
+                        
+                        serialized = serialize_dataclass(sdr)
+                        # Ensure timeline_events is in the serialized data
+                        if 'timeline_events' not in serialized or not serialized['timeline_events']:
+                            serialized['timeline_events'] = sdr_timeline_events
+                        
+                        source_doc_results_serialized[sdr_id] = serialized
+                
                 await run_repo.complete(
                     run_id, 
                     results_summary={
@@ -448,6 +510,7 @@ async def execute_run_background(run_id: str, config: RunConfig):
                         "evaluator_list": sorted(list(all_evaluators)),
                         "generation_events": generation_events,
                         "timeline_events": timeline_events,
+                        "source_doc_results": source_doc_results_serialized,  # NEW: Per-source-document results
                     },
                     total_cost_usd=result.total_cost_usd
                 )
@@ -787,9 +850,33 @@ async def start_run(
     # Set status to RUNNING only after all validation succeeds
     await repo.start(run_id)
     
+    # Initialize source_doc_results for immediate frontend display
+    # This MUST happen before background task so frontend sees collapsible sections immediately
+    source_doc_results_init = {}
+    for doc_id in document_contents.keys():
+        source_doc_results_init[doc_id] = {
+            "source_doc_id": doc_id,
+            "source_doc_name": doc_id,
+            "status": "pending",
+            "generated_docs": [],
+            "single_eval_results": {},
+            "pairwise_results": None,
+            "winner_doc_id": None,
+            "combined_doc": None,
+            "timeline_events": [],
+            "cost_usd": 0.0,
+            "errors": [],
+            "duration_seconds": 0.0,
+        }
+    
+    # Save to DB before returning so frontend can fetch it
+    await repo.update(run_id, results_summary={"source_doc_results": source_doc_results_init})
+    logger.info(f"[INIT] Pre-initialized source_doc_results with {len(document_contents)} input documents")
+    
     background_tasks.add_task(execute_run_background, run_id, executor_config)
     
     return {"status": "started", "run_id": run_id}
+
 
 
 @router.post("/runs/{run_id}/pause")

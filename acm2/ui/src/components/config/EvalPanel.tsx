@@ -9,7 +9,7 @@ import { contentsApi, type ContentSummary } from '../../api/contents'
 
 export function EvalPanel() {
   const config = useConfigStore()
-  const { evalModels, evalFreeModels, models, fetchModels } = useModelCatalog()
+  const { evalModels, evalFreeModels, models, fetchModels, formatPricing } = useModelCatalog()
   const [freeModelsExpanded, setFreeModelsExpanded] = useState(false)
   
   // Compute max output tokens based on selected judge models (use minimum across all selected)
@@ -163,7 +163,7 @@ export function EvalPanel() {
           <h4 className="text-sm font-semibold text-gray-300 mb-2 flex items-center gap-2">
             <Gavel className="w-4 h-4" /> Judge Models
           </h4>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 gap-1">
             {evalModels.map((model) => (
               <Checkbox
                 key={model}
@@ -175,6 +175,7 @@ export function EvalPanel() {
                   config.updateEval({ judgeModels: models })
                 }}
                 label={model}
+                priceSuffix={formatPricing(model)}
                 dataTestId={`judge-model-${model}`}
               />
             ))}
@@ -204,7 +205,7 @@ export function EvalPanel() {
               </button>
               {freeModelsExpanded && (
                 <div className="p-3 bg-gray-800/50">
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 gap-1">
                     {evalFreeModels.map((model) => (
                       <Checkbox
                         key={model}
@@ -216,6 +217,7 @@ export function EvalPanel() {
                           config.updateEval({ judgeModels: models })
                         }}
                         label={`🆓 ${model}`}
+                        priceSuffix="FREE"
                         dataTestId={`judge-model-${model}`}
                       />
                     ))}

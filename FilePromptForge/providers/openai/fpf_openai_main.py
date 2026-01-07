@@ -65,7 +65,7 @@ def _attach_reasoning_for_model(payload: Dict[str, Any], cfg: Dict, model: str) 
 
     # Default reasoning level selection (can be tuned via cfg.web_search or other fields)
     # Prefer effort when supported.
-    effort_level = (cfg.get("reasoning") or {}).get("effort") or "high"
+    effort_level = (cfg.get("reasoning") or {}).get("effort") or "medium"
 
     # Heuristic mapping:
     # - gpt-5* and o1/o3/o4 series generally support `effort`

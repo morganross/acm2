@@ -1,6 +1,6 @@
 // API module exports
 export { apiClient, ApiError } from './client'
-export { runsApi, type Run, type RunConfig, type CreateRunRequest } from './runs'
+export { runsApi, type Run, type RunConfig, type CreateRunRequest, type SourceDocResult, type SourceDocStatus, type GeneratedDocInfo, type DocumentEvalDetail, type PairwiseRanking } from './runs'
 export { documentsApi, type Document, type AddDocumentRequest } from './documents'
 export { 
   executionApi, 

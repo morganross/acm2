@@ -33,6 +33,8 @@ from ...schemas.runs import (
     PairwiseComparison,
     TimelineEvent,
     GenerationEvent,
+    SourceDocResultResponse,
+    SourceDocStatus,
 )
 
 logger = logging.getLogger(__name__)
@@ -280,6 +282,205 @@ def to_detail(run) -> RunDetail:
         logger.warning(f"Failed to parse post_combine_evals_detailed for run {run.id}: {e}")
         post_combine_evals_detailed = {}
     
+    # Parse per-source-document results (multi-doc pipeline)
+    source_doc_results = {}
+    try:
+        post_combine_evals = results_summary.get("post_combine_evals") or {}
+
+        def _parse_pairwise_results_maybe_legacy(pw: dict) -> Optional[PairwiseResults]:
+            """Parse either GUI-format pairwise results or legacy PairwiseSummary dict.
+
+            Multi-doc pipelines persist PairwiseSummary via dataclass serialization, which
+            yields keys like `elo_ratings` and `results`. The GUI expects `rankings` and
+            `comparisons`. This function normalizes both.
+            """
+            if not isinstance(pw, dict):
+                return None
+
+            try:
+                # Legacy format: { total_comparisons, winner_doc_id, results: [...], elo_ratings: [...] }
+                if pw.get("elo_ratings") is not None or pw.get("results") is not None:
+                    rankings: list[PairwiseRanking] = []
+                    for er in (pw.get("elo_ratings") or []):
+                        if isinstance(er, dict):
+                            rankings.append(
+                                PairwiseRanking(
+                                    doc_id=er.get("doc_id", ""),
+                                    wins=int(er.get("wins", 0) or 0),
+                                    losses=int(er.get("losses", 0) or 0),
+                                    elo=float(er.get("rating", 0.0) or 0.0),
+                                )
+                            )
+
+                    comparisons: list[PairwiseComparison] = []
+                    for r in (pw.get("results") or []):
+                        if isinstance(r, dict):
+                            comparisons.append(
+                                PairwiseComparison(
+                                    doc_id_a=r.get("doc_id_1", ""),
+                                    doc_id_b=r.get("doc_id_2", ""),
+                                    winner=r.get("winner_doc_id", "") or "tie",
+                                    judge_model=r.get("model", ""),
+                                    reason=r.get("reason", ""),
+                                    score_a=None,
+                                    score_b=None,
+                                )
+                            )
+
+                    return PairwiseResults(
+                        total_comparisons=int(pw.get("total_comparisons", 0) or 0),
+                        winner_doc_id=pw.get("winner_doc_id"),
+                        rankings=rankings,
+                        comparisons=comparisons,
+                    )
+
+                # GUI format: { total_comparisons, winner_doc_id, rankings: [...], comparisons: [...] }
+                rankings = [PairwiseRanking(**r) for r in (pw.get("rankings") or [])]
+                comparisons = [PairwiseComparison(**c) for c in (pw.get("comparisons") or [])]
+                return PairwiseResults(
+                    total_comparisons=pw.get("total_comparisons", 0),
+                    winner_doc_id=pw.get("winner_doc_id"),
+                    rankings=rankings,
+                    comparisons=comparisons,
+                )
+            except Exception:
+                return None
+
+        for source_doc_id, sdr in (results_summary.get("source_doc_results") or {}).items():
+            # Parse generated docs for this source
+            sdr_generated_docs = []
+            for doc_info in (sdr.get("generated_docs") or []):
+                if isinstance(doc_info, dict):
+                    parsed_id = doc_info.get("id") or doc_info.get("doc_id") or ""
+                    sdr_generated_docs.append(GeneratedDocInfo(
+                        id=parsed_id,
+                        model=doc_info.get("model", ""),
+                        source_doc_id=doc_info.get("source_doc_id", source_doc_id),
+                        generator=doc_info.get("generator", ""),
+                        iteration=doc_info.get("iteration", 1),
+                    ))
+            
+            # Parse pairwise results for this source doc
+            sdr_pairwise = None
+            if sdr.get("pairwise_results"):
+                sdr_pairwise = _parse_pairwise_results_maybe_legacy(sdr["pairwise_results"])
+            
+            # Parse post-combine pairwise for this source doc
+            sdr_post_combine_pairwise = None
+            if sdr.get("post_combine_eval_results"):
+                sdr_post_combine_pairwise = _parse_pairwise_results_maybe_legacy(sdr["post_combine_eval_results"])
+            
+            # Parse combined docs - support both singular and plural formats
+            sdr_combined_docs: list[GeneratedDocInfo] = []
+            sdr_combined_doc = None
+            
+            # First try combined_docs (array)
+            for cd in (sdr.get("combined_docs") or []):
+                if isinstance(cd, dict):
+                    combined_id = cd.get("id") or cd.get("doc_id") or ""
+                    doc_info = GeneratedDocInfo(
+                        id=combined_id,
+                        model=cd.get("model", ""),
+                        source_doc_id=cd.get("source_doc_id", source_doc_id),
+                        generator=cd.get("generator", ""),
+                        iteration=cd.get("iteration", 1),
+                    )
+                    sdr_combined_docs.append(doc_info)
+            
+            # Fallback to singular combined_doc for backward compatibility
+            if not sdr_combined_docs and sdr.get("combined_doc"):
+                cd = sdr["combined_doc"]
+                combined_id = cd.get("id") or cd.get("doc_id") or ""
+                sdr_combined_doc = GeneratedDocInfo(
+                    id=combined_id,
+                    model=cd.get("model", ""),
+                    source_doc_id=cd.get("source_doc_id", source_doc_id),
+                    generator=cd.get("generator", ""),
+                    iteration=cd.get("iteration", 1),
+                )
+                sdr_combined_docs.append(sdr_combined_doc)
+            
+            # Set legacy combined_doc to first item for backward compat
+            if sdr_combined_docs:
+                sdr_combined_doc = sdr_combined_docs[0]
+            
+            # Parse timeline events for this source doc
+            sdr_timeline = []
+            for te in (sdr.get("timeline_events") or []):
+                try:
+                    sdr_timeline.append(TimelineEvent(**te))
+                except Exception:
+                    pass
+            
+            # Parse single eval scores - check both possible key names for compatibility
+            # execution.py uses dataclass field name "single_eval_results"
+            # presets.py was saving as "single_eval_scores"
+            sdr_single_eval_scores = {}
+            single_eval_data = sdr.get("single_eval_results") or sdr.get("single_eval_scores") or {}
+            for doc_id, summary in single_eval_data.items():
+                if isinstance(summary, dict):
+                    sdr_single_eval_scores[doc_id] = summary.get("avg_score", 0.0)
+                elif isinstance(summary, (int, float)):
+                    sdr_single_eval_scores[doc_id] = float(summary)
+                else:
+                    sdr_single_eval_scores[doc_id] = getattr(summary, "avg_score", 0.0)
+
+            # Derive per-source-doc detailed evals from the run-level ACM1 detailed structure.
+            # This keeps multi-doc buckets compatible with the heatmap UI without requiring
+            # separate persistence for every nested field.
+            sdr_single_eval_detailed = {}
+            try:
+                for gen_doc in sdr_generated_docs:
+                    if gen_doc.id in pre_combine_evals_detailed:
+                        sdr_single_eval_detailed[gen_doc.id] = pre_combine_evals_detailed[gen_doc.id]
+            except Exception:
+                sdr_single_eval_detailed = {}
+
+            # Derive per-source-doc post-combine eval scores (multi-judge) from run-level mapping
+            sdr_post_combine_eval_scores: dict[str, float] = {}
+            try:
+                if sdr_combined_doc and sdr_combined_doc.id:
+                    raw_scores = post_combine_evals.get(sdr_combined_doc.id) or {}
+                    if isinstance(raw_scores, dict):
+                        for judge_model, score in raw_scores.items():
+                            try:
+                                sdr_post_combine_eval_scores[str(judge_model)] = float(score)
+                            except Exception:
+                                continue
+            except Exception:
+                sdr_post_combine_eval_scores = {}
+            
+            # Map status string to enum
+            status_str = sdr.get("status", "pending")
+            try:
+                status = SourceDocStatus(status_str)
+            except ValueError:
+                status = SourceDocStatus.PENDING
+            
+            source_doc_results[source_doc_id] = SourceDocResultResponse(
+                source_doc_id=source_doc_id,
+                source_doc_name=sdr.get("source_doc_name", source_doc_id),
+                status=status,
+                generated_docs=sdr_generated_docs,
+                single_eval_scores=sdr_single_eval_scores,
+                single_eval_detailed=sdr_single_eval_detailed,
+                pairwise_results=sdr_pairwise,
+                winner_doc_id=sdr.get("winner_doc_id"),
+                combined_doc=sdr_combined_doc,
+                combined_docs=sdr_combined_docs,
+                post_combine_eval_scores=sdr_post_combine_eval_scores,
+                post_combine_pairwise=sdr_post_combine_pairwise,
+                timeline_events=sdr_timeline,
+                errors=sdr.get("errors") or [],
+                cost_usd=sdr.get("cost_usd", 0.0),
+                duration_seconds=sdr.get("duration_seconds", 0.0),
+                started_at=sdr.get("started_at"),
+                completed_at=sdr.get("completed_at"),
+            )
+    except Exception as e:
+        logger.warning(f"Failed to parse source_doc_results for run {run.id}: {e}", exc_info=True)
+        source_doc_results = {}
+    
     # Parse models safely
     models = []
     try:
@@ -320,12 +521,14 @@ def to_detail(run) -> RunDetail:
         pairwise_results=pairwise_results,
         post_combine_pairwise=post_combine_pairwise,
         combined_doc_id=results_summary.get("combined_doc_id"),
+        combined_doc_ids=results_summary.get("combined_doc_ids") or [],
         pre_combine_evals_detailed=pre_combine_evals_detailed,
         post_combine_evals_detailed=post_combine_evals_detailed,
         criteria_list=results_summary.get("criteria_list") or [],
         evaluator_list=results_summary.get("evaluator_list") or [],
         timeline_events=timeline_events,
         generation_events=generation_events,
+        source_doc_results=source_doc_results,  # NEW: Per-source-document results
         total_cost_usd=run.total_cost_usd or 0.0,
         cost_by_model={},
         cost_by_document={},

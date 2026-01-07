@@ -123,36 +123,13 @@ anthropic:claude-3-5-haiku-20241022:
 # Model format: openrouter:provider/model
 # =============================================================================
 
-# OpenAI models via OpenRouter
+# OpenAI models via OpenRouter (unique models only - direct OpenAI access for o3, o4-mini, gpt-4.1)
 openrouter:openai/gpt-4o:
   sections: [fpf, gpt-r, dr]
   max_output_tokens: 16384
 openrouter:openai/gpt-4o-mini:
   sections: [fpf, gpt-r, dr]
   max_output_tokens: 16384
-openrouter:openai/gpt-4.1:
-  sections: [fpf, gpt-r, dr]
-  max_output_tokens: 32768
-openrouter:openai/o3:
-  sections: [fpf, gpt-r, dr]
-  max_output_tokens: 100000
-openrouter:openai/o4-mini:
-  sections: [fpf, gpt-r, dr]
-  max_output_tokens: 100000
-
-# Anthropic models via OpenRouter
-openrouter:anthropic/claude-sonnet-4:
-  sections: [fpf, gpt-r, dr]
-  max_output_tokens: 64000
-openrouter:anthropic/claude-opus-4:
-  sections: [fpf, gpt-r, dr]
-  max_output_tokens: 64000
-openrouter:anthropic/claude-3.7-sonnet:
-  sections: [fpf, gpt-r, dr]
-  max_output_tokens: 64000
-openrouter:anthropic/claude-3.5-haiku:
-  sections: [fpf, gpt-r, dr]
-  max_output_tokens: 32768
 
 # DeepSeek (reasoning models)
 openrouter:deepseek/deepseek-r1:
@@ -177,14 +154,6 @@ openrouter:meta-llama/llama-3.1-405b-instruct:
 openrouter:meta-llama/llama-3.1-70b-instruct:
   sections: [fpf, gpt-r, dr]
   max_output_tokens: 32768
-
-# Google models via OpenRouter
-openrouter:google/gemini-2.5-pro:
-  sections: [fpf, gpt-r, dr]
-  max_output_tokens: 65536
-openrouter:google/gemini-2.5-flash:
-  sections: [fpf, gpt-r, dr]
-  max_output_tokens: 65536
 
 # Mistral (corrected model IDs for OpenRouter)
 openrouter:mistralai/mistral-large-2411:

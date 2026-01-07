@@ -117,6 +117,55 @@ export interface FpfStats {
   last_error?: string
 }
 
+// ============================================================================
+// Per-Source-Document Results (Multi-Doc Pipeline)
+// ============================================================================
+
+export type SourceDocStatus =
+  | 'pending'
+  | 'generating'
+  | 'single_eval'
+  | 'pairwise_eval'
+  | 'combining'
+  | 'post_combine_eval'
+  | 'completed'
+  | 'completed_with_errors'
+  | 'failed'
+  | 'cancelled'
+
+export interface SourceDocResult {
+  source_doc_id: string
+  source_doc_name: string
+  status: SourceDocStatus
+  
+  // Generated documents for this source
+  generated_docs: GeneratedDocInfo[]
+  
+  // Evaluation results
+  single_eval_scores: Record<string, number>  // { gen_doc_id: avg_score }
+  single_eval_detailed?: Record<string, DocumentEvalDetail>
+  pairwise_results?: PairwiseResults
+  
+  // Winner and combined output
+  winner_doc_id?: string
+  combined_doc?: GeneratedDocInfo  // Legacy: first combined doc
+  combined_docs?: GeneratedDocInfo[]  // All combined docs
+  
+  // Post-combine evaluation
+  post_combine_eval_scores?: Record<string, number>
+  post_combine_pairwise?: PairwiseResults
+  
+  // Timeline events for this source doc
+  timeline_events?: TimelineEvent[]
+  
+  // Per-document stats
+  errors: string[]
+  cost_usd: number
+  duration_seconds: number
+  started_at?: string
+  completed_at?: string
+}
+
 export interface Run {
   id: string
   title: string
@@ -154,7 +203,8 @@ export interface Run {
   post_combine_evals?: Record<string, Record<string, number>>  // { combined_doc_id: { judge_model: score } }
   pairwise_results?: PairwiseResults
   post_combine_pairwise?: PairwiseResults  // Pairwise comparison: combined doc vs winner
-  combined_doc_id?: string
+  combined_doc_id?: string  // Legacy: first combined doc ID
+  combined_doc_ids?: string[]  // All combined document IDs
   // ACM1-style detailed evaluation data with criteria breakdown
   pre_combine_evals_detailed?: Record<string, DocumentEvalDetail>  // { gen_doc_id: DocumentEvalDetail }
   post_combine_evals_detailed?: Record<string, DocumentEvalDetail>  // { combined_doc_id: DocumentEvalDetail }
@@ -163,6 +213,8 @@ export interface Run {
   // ACM1-style timeline and generation events
   timeline_events?: TimelineEvent[]  // All timeline events
   generation_events?: GenerationEvent[]  // Generation event records
+  // === NEW: Per-source-document results (multi-doc pipeline) ===
+  source_doc_results?: Record<string, SourceDocResult>  // { source_doc_id: SourceDocResult }
   // UI-specific fields
   duration_seconds?: number // For running time display
 }
@@ -274,6 +326,8 @@ export const runsApi = {
       // ACM1-style timeline and generation events
       timeline_events: r.timeline_events || [],
       generation_events: r.generation_events || [],
+      // Per-source-document results (multi-doc pipeline)
+      source_doc_results: r.source_doc_results || {},
     }
   },
 

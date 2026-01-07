@@ -391,8 +391,6 @@ export default function EvaluationTab({ currentRun, execStatus }: EvaluationTabP
       }
     }
     
-    const maxPossible = criteriaList.length * evaluatorList.length * 5
-    
     return (
       <div>
         <h4 className="text-lg font-semibold mb-3 flex items-center gap-2" style={{ color: sectionColor }}>
@@ -447,7 +445,9 @@ export default function EvaluationTab({ currentRun, execStatus }: EvaluationTabP
                     }
                   }
                 }
-                const percentage = maxPossible > 0 ? (totalScore / maxPossible * 100).toFixed(1) : '0.0'
+                // Use actual scores received, not theoretical max - failed evals shouldn't hurt the grade
+                const docMaxPossible = scoreCount * 5
+                const percentage = docMaxPossible > 0 ? (totalScore / docMaxPossible * 100).toFixed(1) : '0.0'
                 
                 return (
                   <tr key={doc.id} className="hover:bg-gray-50">
@@ -524,7 +524,7 @@ export default function EvaluationTab({ currentRun, execStatus }: EvaluationTabP
                     <td className="p-3 text-center" style={{ fontWeight: 'bold', fontSize: '1.1em', borderBottom: '1px solid #ddd', color: '#374151' }}>
                       {percentage}% 
                       <span style={{ fontSize: '0.7em', color: '#777', marginLeft: '4px' }}>
-                        ({totalScore}/{maxPossible})
+                        ({totalScore}/{docMaxPossible})
                       </span>
                     </td>
                   </tr>

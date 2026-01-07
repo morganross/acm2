@@ -3,6 +3,7 @@ Presets API Routes.
 
 Endpoints for managing saved preset configurations.
 """
+import asyncio
 import json
 import logging
 from datetime import datetime
@@ -45,6 +46,7 @@ async def execute_run_background(run_id: str, config: RunConfig):
     Background task to execute a run and update DB.
     """
     from pathlib import Path
+    from app.evaluation.models import SingleEvalResult
     
     # Set up file logging for this run
     log_dir = Path("logs") / run_id
@@ -63,6 +65,181 @@ async def execute_run_background(run_id: str, config: RunConfig):
     root_logger.addHandler(file_handler)
     
     logger.info(f"Starting background execution for run {run_id}")
+    
+    # Set up incremental DB save callbacks (copied from execution.py)
+    db_lock = asyncio.Lock()
+    pre_combine_evals_detailed_incremental = {}
+    generated_docs_incremental = []
+    
+    # Pre-initialize source_doc_results with entries for each input document
+    # so that collapsible sections appear immediately when generation STARTS
+    source_doc_results_incremental = {}
+    for doc_id in config.document_ids:
+        source_doc_results_incremental[doc_id] = {
+            "source_doc_id": doc_id,
+            "source_doc_name": doc_id,
+            "status": "pending",
+            "generated_docs": [],
+            "single_eval_results": {},
+            "pairwise_results": None,
+            "winner_doc_id": None,
+            "combined_doc": None,
+            "cost_usd": 0.0,
+            "errors": [],
+        }
+    
+    # Save initial source_doc_results to DB immediately so UI shows collapsible sections
+    async with async_session_factory() as session:
+        repo = RunRepository(session)
+        run_fresh = await repo.get_by_id(run_id)
+        if run_fresh:
+            results_summary_updated = dict(run_fresh.results_summary or {})
+            results_summary_updated["source_doc_results"] = source_doc_results_incremental
+            await repo.update(run_id, results_summary=results_summary_updated)
+            logger.info(f"[INIT] Pre-initialized source_doc_results with {len(config.document_ids)} input documents")
+    
+    all_evaluators_incremental: set[str] = set()
+    all_criteria_incremental: set[str] = set()
+    eval_count = 0
+    gen_count = 0
+    
+    async def on_gen_complete(doc_id: str, model: str, generator: str, source_doc_id: str, iteration: int):
+        """Callback fired after each document generation - writes generated_docs to DB immediately."""
+        nonlocal gen_count
+        
+        logger.info(f"[on_gen_complete] CALLED: doc_id={doc_id}, model={model}, generator={generator}, source_doc_id={source_doc_id}")
+        
+        async with db_lock:
+            gen_count += 1
+            
+            doc_info = {
+                "id": doc_id,
+                "model": model,
+                "source_doc_id": source_doc_id,
+                "generator": generator,
+                "iteration": iteration,
+            }
+            generated_docs_incremental.append(doc_info)
+            
+            # Update source_doc_results - entry should already exist from pre-initialization
+            # If not (edge case), create it
+            if source_doc_id not in source_doc_results_incremental:
+                source_doc_results_incremental[source_doc_id] = {
+                    "source_doc_id": source_doc_id,
+                    "source_doc_name": source_doc_id,
+                    "status": "running",
+                    "generated_docs": [],
+                    "single_eval_results": {},
+                    "pairwise_results": None,
+                    "winner_doc_id": None,
+                    "combined_doc": None,
+                    "cost_usd": 0.0,
+                    "errors": [],
+                }
+            else:
+                # Update status from "pending" to "running" on first generation
+                source_doc_results_incremental[source_doc_id]["status"] = "running"
+            
+            # Add to generated_docs for this source doc
+            source_doc_results_incremental[source_doc_id]["generated_docs"].append({
+                "doc_id": doc_id,
+                "model": model,
+                "generator": generator,
+                "source_doc_id": source_doc_id,
+                "iteration": iteration,
+            })
+            
+            async with async_session_factory() as session:
+                repo = RunRepository(session)
+                run_fresh = await repo.get_by_id(run_id)
+                if run_fresh:
+                    results_summary_updated = dict(run_fresh.results_summary or {})
+                    results_summary_updated["generated_docs"] = generated_docs_incremental
+                    results_summary_updated["source_doc_results"] = source_doc_results_incremental
+                    await repo.update(run_id, results_summary=results_summary_updated)
+                    logger.info(f"[on_gen_complete] Saved to DB: generated_docs={len(generated_docs_incremental)}, source_doc_results={list(source_doc_results_incremental.keys())}")
+                else:
+                    logger.warning(f"[on_gen_complete] Run {run_id} not found in DB!")
+            
+            logger.info(f"[DB] Saved gen #{gen_count}: {doc_id} | {model}")
+    
+    async def on_eval_complete(doc_id: str, judge_model: str, trial: int, result: SingleEvalResult):
+        """Callback fired after each individual judge evaluation - writes to DB immediately."""
+        nonlocal eval_count
+        
+        async with db_lock:
+            eval_count += 1
+            
+            if doc_id not in pre_combine_evals_detailed_incremental:
+                pre_combine_evals_detailed_incremental[doc_id] = {
+                    "evaluations": [],
+                    "overall_average": 0.0,
+                }
+            
+            eval_entry = {
+                "judge_model": result.model,
+                "trial": trial,
+                "scores": [{"criterion": s.criterion, "score": s.score, "reason": s.reason} for s in result.scores],
+                "average_score": result.average_score,
+            }
+            pre_combine_evals_detailed_incremental[doc_id]["evaluations"].append(eval_entry)
+            all_evaluators_incremental.add(result.model)
+            for s in result.scores:
+                all_criteria_incremental.add(s.criterion)
+            
+            all_avgs = [e["average_score"] for e in pre_combine_evals_detailed_incremental[doc_id]["evaluations"]]
+            pre_combine_evals_detailed_incremental[doc_id]["overall_average"] = sum(all_avgs) / len(all_avgs) if all_avgs else 0.0
+            
+            pre_combine_evals = {}
+            for d_id, details in pre_combine_evals_detailed_incremental.items():
+                criterion_scores = {}
+                for ev in details["evaluations"]:
+                    for sc in ev["scores"]:
+                        crit = sc["criterion"]
+                        if crit not in criterion_scores:
+                            criterion_scores[crit] = []
+                        criterion_scores[crit].append(sc["score"])
+                pre_combine_evals[d_id] = {c: sum(s)/len(s) for c, s in criterion_scores.items()}
+            
+            # Find which source_doc this generated doc belongs to and update its single_eval_results
+            source_doc_id = None
+            for src_id, sdr in source_doc_results_incremental.items():
+                for gen_doc in sdr.get("generated_docs", []):
+                    if gen_doc.get("doc_id") == doc_id:
+                        source_doc_id = src_id
+                        break
+                if source_doc_id:
+                    break
+            
+            if source_doc_id and source_doc_id in source_doc_results_incremental:
+                # Add/update eval result for this doc in source_doc_results
+                if doc_id not in source_doc_results_incremental[source_doc_id]["single_eval_results"]:
+                    source_doc_results_incremental[source_doc_id]["single_eval_results"][doc_id] = {
+                        "avg_score": 0.0,
+                        "scores_by_criterion": {},
+                        "scores_by_model": {},
+                    }
+                # Update the average score
+                source_doc_results_incremental[source_doc_id]["single_eval_results"][doc_id]["avg_score"] = \
+                    pre_combine_evals_detailed_incremental[doc_id]["overall_average"]
+            
+            async with async_session_factory() as session:
+                repo = RunRepository(session)
+                run_fresh = await repo.get_by_id(run_id)
+                if run_fresh:
+                    results_summary_updated = dict(run_fresh.results_summary or {})
+                    results_summary_updated["pre_combine_evals"] = pre_combine_evals
+                    results_summary_updated["pre_combine_evals_detailed"] = pre_combine_evals_detailed_incremental
+                    results_summary_updated["evaluator_list"] = sorted(list(all_evaluators_incremental))
+                    results_summary_updated["criteria_list"] = sorted(list(all_criteria_incremental))
+                    results_summary_updated["source_doc_results"] = source_doc_results_incremental
+                    await repo.update(run_id, results_summary=results_summary_updated)
+            
+            logger.info(f"[DB] Saved eval #{eval_count}: {doc_id} | {judge_model} trial={trial} avg={result.average_score:.2f}")
+    
+    # Attach callbacks to config
+    config.on_gen_complete = on_gen_complete
+    config.on_eval_complete = on_eval_complete
     
     executor = get_executor()
     result = await executor.execute(run_id, config)
@@ -149,6 +326,77 @@ async def execute_run_background(run_id: str, config: RunConfig):
                         "is_combined": True,
                     })
                 
+                # Serialize source_doc_results for multi-doc pipeline
+                source_doc_results_data = {}
+                for src_doc_id, sdr in (result.source_doc_results or {}).items():
+                    # Serialize generated docs for this source
+                    sdr_gen_docs = []
+                    for doc in (sdr.generated_docs or []):
+                        sdr_gen_docs.append({
+                            "doc_id": doc.doc_id,
+                            "model": doc.model,
+                            "generator": doc.generator.value if hasattr(doc.generator, 'value') else str(doc.generator),
+                            "source_doc_id": doc.source_doc_id,
+                            "iteration": doc.iteration,
+                        })
+                    
+                    # Serialize single eval scores for this source
+                    sdr_single_eval_scores = {}
+                    for doc_id, summary in (sdr.single_eval_results or {}).items():
+                        scores_by_model = {}
+                        if hasattr(summary, 'results') and summary.results:
+                            model_scores: dict[str, list[float]] = {}
+                            for eval_result in summary.results:
+                                model = eval_result.model
+                                if model not in model_scores:
+                                    model_scores[model] = []
+                                for score_item in eval_result.scores:
+                                    model_scores[model].append(score_item.score)
+                            for model, scores in model_scores.items():
+                                scores_by_model[model] = sum(scores) / len(scores) if scores else 0.0
+                        sdr_single_eval_scores[doc_id] = {
+                            "avg_score": summary.avg_score,
+                            "scores_by_criterion": summary.scores_by_criterion,
+                            "scores_by_model": scores_by_model,
+                        }
+                    
+                    # Serialize pairwise results for this source
+                    sdr_pairwise = None
+                    if sdr.pairwise_results:
+                        pw = sdr.pairwise_results
+                        sdr_pairwise = {
+                            "total_comparisons": pw.total_comparisons,
+                            "total_pairs": pw.total_pairs,
+                            "winner_doc_id": pw.winner_doc_id,
+                            "rankings": [
+                                {"doc_id": r.doc_id, "elo": r.rating, "wins": r.wins, "losses": r.losses}
+                                for r in (pw.elo_ratings or [])
+                            ],
+                        }
+                    
+                    # Serialize combined doc for this source
+                    sdr_combined = None
+                    if sdr.combined_doc:
+                        sdr_combined = {
+                            "doc_id": sdr.combined_doc.doc_id,
+                            "model": sdr.combined_doc.model,
+                            "generator": sdr.combined_doc.generator.value if hasattr(sdr.combined_doc.generator, 'value') else str(sdr.combined_doc.generator),
+                        }
+                    
+                    source_doc_results_data[src_doc_id] = {
+                        "source_doc_id": sdr.source_doc_id,
+                        "source_doc_name": sdr.source_doc_name,
+                        "status": sdr.status.value if hasattr(sdr.status, 'value') else str(sdr.status),
+                        "generated_docs": sdr_gen_docs,
+                        "single_eval_results": sdr_single_eval_scores,  # Match dataclass field name
+                        "pairwise_results": sdr_pairwise,
+                        "winner_doc_id": sdr.winner_doc_id,
+                        "combined_doc": sdr_combined,
+                        "cost_usd": sdr.cost_usd,
+                        "duration_seconds": sdr.duration_seconds,
+                        "errors": sdr.errors,
+                    }
+                
                 results_summary = {
                     "winner": result.winner_doc_id,
                     "generated_count": len(result.generated_docs),
@@ -159,6 +407,7 @@ async def execute_run_background(run_id: str, config: RunConfig):
                     "pre_combine_evals_detailed": pre_combine_evals_detailed,
                     "pairwise_results": pairwise_data,
                     "generated_docs": generated_docs_data,
+                    "source_doc_results": source_doc_results_data,  # NEW: Per-source-document results
                 }
 
                 # Convert datetime objects to ISO strings for JSON serialization
@@ -859,6 +1108,12 @@ async def execute_preset(
         combine_models_list = [combine_config.get("model")]
     if combine_enabled and not combine_models_list:
         raise ValueError(f"Preset {preset.name} has combine enabled but no models - set this in the GUI")
+    combine_max_tokens = combine_config.get("max_tokens")
+    if combine_enabled and combine_max_tokens is None:
+        # Default for backwards compatibility with old presets
+        combine_max_tokens = 64000
+        logger.warning(f"Preset {preset.name} has no combine_max_tokens, using default of 64000")
+    logger.info(f"DEBUG: combine_enabled={combine_enabled}, combine_max_tokens={combine_max_tokens}")
     
     # Get log_level - REQUIRED
     if not preset.log_level:
@@ -979,6 +1234,7 @@ async def execute_preset(
         enable_combine=combine_enabled,
         combine_strategy=combine_strategy or "",
         combine_models=combine_models_list if combine_enabled else [],
+        combine_max_tokens=combine_max_tokens,
         log_level=preset.log_level,
         request_timeout=request_timeout_val,
         eval_timeout=eval_timeout_val,

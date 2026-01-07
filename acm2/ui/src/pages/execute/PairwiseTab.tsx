@@ -1,13 +1,103 @@
-import { FileText, GitMerge, Trophy } from 'lucide-react'
+import { FileText, GitMerge, Trophy, Loader2, X, ExternalLink } from 'lucide-react'
+import { useState } from 'react'
 import type { Run } from '../../api'
 
 interface PairwiseTabProps {
   currentRun: Run | null
 }
 
+interface DocViewerState {
+  isOpen: boolean
+  docId: string
+  model: string
+  content: string | null
+  loading: boolean
+  error: string | null
+}
+
 export default function PairwiseTab({ currentRun }: PairwiseTabProps) {
   const pairwiseResults = currentRun?.pairwise_results
   const postCombinePairwise = currentRun?.post_combine_pairwise
+  
+  // Document viewer modal state
+  const [docViewer, setDocViewer] = useState<DocViewerState>({
+    isOpen: false,
+    docId: '',
+    model: '',
+    content: null,
+    loading: false,
+    error: null,
+  })
+
+  const openDocViewer = async (docId: string, model: string) => {
+    if (!currentRun?.id) return
+    
+    setDocViewer({
+      isOpen: true,
+      docId,
+      model,
+      content: null,
+      loading: true,
+      error: null,
+    })
+    
+    try {
+      const response = await fetch(`/api/v1/runs/${currentRun.id}/generated/${encodeURIComponent(docId)}`)
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.detail || 'Failed to load document')
+      }
+      const data = await response.json()
+      setDocViewer(prev => ({
+        ...prev,
+        content: data.content,
+        loading: false,
+      }))
+    } catch (err) {
+      setDocViewer(prev => ({
+        ...prev,
+        loading: false,
+        error: err instanceof Error ? err.message : 'Failed to load document',
+      }))
+    }
+  }
+
+  const closeDocViewer = () => {
+    setDocViewer({
+      isOpen: false,
+      docId: '',
+      model: '',
+      content: null,
+      loading: false,
+      error: null,
+    })
+  }
+  
+  // Helper to get a short display name from a doc ID
+  // Doc ID format: "abcd1234.5678abcd.gptr.1.openai_gpt-4o" or "combined.abcd1234.5678abcd.openai_gpt-4o"
+  const getDocDisplayName = (docId: string): string => {
+    if (docId.startsWith('combined.')) {
+      // Extract model from combined doc: "combined.shortid.uuid.provider_model"
+      const parts = docId.split('.')
+      if (parts.length >= 4) {
+        const modelPart = parts.slice(3).join('.')
+        const formatted = modelPart.replace('_', ':')
+        return `📦 ${formatted}`
+      }
+      return '📦 Combined'
+    }
+    // Format: "shortid.uuid.generator.iteration.provider_model"
+    const parts = docId.split('.')
+    if (parts.length >= 5) {
+      const fileUuid = parts[1].slice(0, 8)  // Per-file uuid (8 chars)
+      const modelPart = parts.slice(4).join('.')
+      // Format: provider_model -> provider:model
+      const formatted = modelPart.replace('_', ':')
+      return `${formatted} [${fileUuid}]`
+    }
+    // Fallback: return full docId (no truncation)
+    return docId
+  }
   const rankings = pairwiseResults?.rankings || []
   
   if (rankings.length === 0 && !postCombinePairwise) {
@@ -31,7 +121,7 @@ export default function PairwiseTab({ currentRun }: PairwiseTabProps) {
         <strong>Pairwise Comparison Rankings:</strong> Documents ranked by ELO score from head-to-head comparisons.
         {pairwiseResults?.winner_doc_id && (
           <span className="ml-4 px-3 py-1 rounded" style={{ backgroundColor: '#28a745', color: 'white' }}>
-            Winner: {pairwiseResults.winner_doc_id.length > 30 ? pairwiseResults.winner_doc_id.substring(0, 30) + '...' : pairwiseResults.winner_doc_id}
+            Winner: {getDocDisplayName(pairwiseResults.winner_doc_id)}
           </span>
         )}
       </div>
@@ -89,9 +179,15 @@ export default function PairwiseTab({ currentRun }: PairwiseTabProps) {
                     <td className="p-3" style={{ color: '#0f172a' }}>
                       <div className="flex items-center gap-2">
                         <FileText className="w-4 h-4 text-gray-400" />
-                        <span className="font-mono text-sm truncate max-w-[300px]" title={ranking.doc_id}>
-                          {ranking.doc_id.length > 40 ? ranking.doc_id.substring(0, 40) + '...' : ranking.doc_id}
-                        </span>
+                        <button 
+                          onClick={() => openDocViewer(ranking.doc_id, getDocDisplayName(ranking.doc_id))}
+                          className="font-mono text-sm hover:underline cursor-pointer flex items-center gap-1"
+                          style={{ color: '#2563eb', background: 'none', border: 'none', padding: 0, font: 'inherit' }}
+                          title={`View ${ranking.doc_id}`}
+                        >
+                          {getDocDisplayName(ranking.doc_id)}
+                          <ExternalLink className="w-3 h-3" />
+                        </button>
                         {isWinner && (
                           <span className="ml-2 px-2 py-0.5 text-xs rounded" style={{ backgroundColor: '#28a745', color: 'white' }}>
                             WINNER
@@ -178,7 +274,22 @@ export default function PairwiseTab({ currentRun }: PairwiseTabProps) {
             }
 
             const getShortDocId = (docId: string) => {
-              if (docId.length > 20) return docId.substring(0, 17) + '...'
+              // Extract model name from end of doc ID for clearer display
+              // Format: "shortid.uuid.generator.iteration.provider_model"
+              if (docId.startsWith('combined.')) {
+                const parts = docId.split('.')
+                if (parts.length >= 4) {
+                  return parts.slice(3).join('.').replace('_', ':')
+                }
+                return 'Combined'
+              }
+              const parts = docId.split('.')
+              if (parts.length >= 5) {
+                const modelPart = parts.slice(4).join('.').replace('_', ':')
+                const fileUuid = parts[1].slice(0, 8)
+                return `${modelPart}[${fileUuid}]`
+              }
+              // Fallback: return full docId (no truncation)
               return docId
             }
 
@@ -365,9 +476,15 @@ export default function PairwiseTab({ currentRun }: PairwiseTabProps) {
                         <td className="p-3" style={{ color: '#0f172a' }}>
                           <div className="flex items-center gap-2">
                             {isCombined ? <GitMerge className="w-4 h-4 text-emerald-600" /> : <FileText className="w-4 h-4 text-gray-400" />}
-                            <span className="font-mono text-sm truncate max-w-[300px]" title={ranking.doc_id}>
-                              {isCombined ? 'Combined Document' : (ranking.doc_id.length > 40 ? ranking.doc_id.substring(0, 40) + '...' : ranking.doc_id)}
-                            </span>
+                            <button 
+                              onClick={() => openDocViewer(ranking.doc_id, isCombined ? '📦 Combined' : getDocDisplayName(ranking.doc_id))}
+                              className="font-mono text-sm hover:underline cursor-pointer flex items-center gap-1"
+                              style={{ color: '#2563eb', background: 'none', border: 'none', padding: 0, font: 'inherit' }}
+                              title={`View ${ranking.doc_id}`}
+                            >
+                              {isCombined ? '📦 Combined' : getDocDisplayName(ranking.doc_id)}
+                              <ExternalLink className="w-3 h-3" />
+                            </button>
                             {isWinner && (
                               <span className="ml-2 px-2 py-0.5 text-xs rounded" style={{ backgroundColor: '#059669', color: 'white' }}>
                                 WINNER
@@ -462,7 +579,7 @@ export default function PairwiseTab({ currentRun }: PairwiseTabProps) {
                   if (modelName) {
                     return modelName
                   }
-                  if (docId.length > 20) return docId.substring(0, 17) + '...'
+                  // Fallback: return full docId (no truncation)
                   return docId
                 }
 
@@ -629,6 +746,65 @@ export default function PairwiseTab({ currentRun }: PairwiseTabProps) {
                   ? '✓ Combined document is the final winner!' 
                   : 'Original winner document remains the best'}
               </span>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Document Viewer Modal */}
+      {docViewer.isOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div 
+            className="bg-white rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[90vh] flex flex-col"
+            style={{ minHeight: '400px' }}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-4 border-b">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-800">Generated Document</h3>
+                <p className="text-sm text-gray-500 font-mono">{docViewer.model}</p>
+              </div>
+              <button
+                onClick={closeDocViewer}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+            
+            {/* Modal Body */}
+            <div className="flex-1 overflow-auto p-4">
+              {docViewer.loading ? (
+                <div className="flex items-center justify-center h-full">
+                  <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+                  <span className="ml-2 text-gray-500">Loading document...</span>
+                </div>
+              ) : docViewer.error ? (
+                <div className="text-center text-red-500 p-8">
+                  <p className="font-semibold">Failed to load document</p>
+                  <p className="text-sm mt-2">{docViewer.error}</p>
+                </div>
+              ) : (
+                <pre 
+                  className="whitespace-pre-wrap font-mono text-sm text-gray-700 leading-relaxed"
+                  style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' }}
+                >
+                  {docViewer.content || '(Empty document)'}
+                </pre>
+              )}
+            </div>
+            
+            {/* Modal Footer */}
+            <div className="flex items-center justify-end gap-3 p-4 border-t bg-gray-50">
+              <span className="text-sm text-gray-500 mr-auto">
+                {docViewer.content ? `${docViewer.content.length.toLocaleString()} characters` : ''}
+              </span>
+              <button
+                onClick={closeDocViewer}
+                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg transition-colors"
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>
