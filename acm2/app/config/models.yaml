@@ -8,10 +8,10 @@
 # OpenAI - GPT-4 Family
 # =============================================================================
 openai:gpt-4.1:
-  sections: [fpf, gpt-r]
+  sections: [fpf, gpt-r, dr]
   max_output_tokens: 32768  # OpenAI docs: 32,768 output limit
 openai:gpt-4.1-mini:
-  sections: [fpf, gpt-r]
+  sections: [fpf, gpt-r, dr]
   max_output_tokens: 32768
 openai:gpt-4.1-nano:
   sections: [fpf]
@@ -21,19 +21,19 @@ openai:gpt-4.1-nano:
 # OpenAI - GPT-5 Family
 # =============================================================================
 openai:gpt-5:
-  sections: [fpf, gpt-r]
+  sections: [fpf, gpt-r, dr]
   max_output_tokens: 128000  # OpenAI docs: 128,000 output limit
 openai:gpt-5-mini:
-  sections: [fpf, gpt-r]
+  sections: [fpf, gpt-r, dr]
   max_output_tokens: 128000
 openai:gpt-5-nano:
   sections: [fpf]
   max_output_tokens: 64000
 openai:gpt-5.1:
-  sections: [fpf, gpt-r]
+  sections: [fpf, gpt-r, dr]
   max_output_tokens: 128000
 openai:gpt-5.2:
-  sections: [fpf, gpt-r]
+  sections: [fpf, gpt-r, dr]
   max_output_tokens: 128000
 
 # =============================================================================
@@ -41,37 +41,39 @@ openai:gpt-5.2:
 # Note: max_output_tokens includes BOTH visible output AND hidden reasoning tokens
 # =============================================================================
 openai:o4-mini:
-  sections: [fpf, gpt-r]
+  sections: [fpf, gpt-r, dr]
   max_output_tokens: 100000  # OpenAI docs: 100,000 output limit (includes reasoning)
 openai:o3:
-  sections: [fpf, gpt-r]
+  sections: [fpf, gpt-r, dr]
   max_output_tokens: 100000  # OpenAI docs: 100,000 output limit (includes reasoning)
 
 # =============================================================================
-# OpenAI Deep Research
+# OpenAI Deep Research (DR Native - autonomous research, no token pricing)
 # =============================================================================
 openaidp:o3-deep-research:
   sections: [fpf]
   max_output_tokens: 100000
+  dr_native: true
 openaidp:o4-mini-deep-research:
   sections: [fpf]
   max_output_tokens: 100000
+  dr_native: true
 
 # =============================================================================
 # Google - Gemini 3 Family
 # =============================================================================
 google:gemini-3-pro-preview:
-  sections: [fpf, gpt-r]
+  sections: [fpf, gpt-r, dr]
   max_output_tokens: 64000  # Google docs: 64k output, 1M context
 google:gemini-3-flash-preview:
-  sections: [fpf, gpt-r]
+  sections: [fpf, gpt-r, dr]
   max_output_tokens: 64000
 
 # =============================================================================
 # Google - Gemini 2.5 Family
 # =============================================================================
 google:gemini-2.5-pro:
-  sections: [fpf, gpt-r]
+  sections: [fpf, gpt-r, dr]
   max_output_tokens: 65536  # Google docs: 65,536 output, 1M context
 google:gemini-2.5-flash:
   sections: [fpf]
@@ -81,40 +83,37 @@ google:gemini-2.5-flash-lite:
   max_output_tokens: 32768
 
 # =============================================================================
-# Tavily (Research API) - Token limits not applicable
+# Tavily (Research API) - DR Native, credit-based pricing not per-token
 # =============================================================================
 tavily:tvly-mini:
   sections: [fpf]
   max_output_tokens: 16384
+  dr_native: true
 tavily:tvly-pro:
   sections: [fpf]
   max_output_tokens: 32768
+  dr_native: true
 
 # =============================================================================
 # Anthropic (Claude) - All current models support 64k output, 200k context
+# Using aliases (without dates) to always use latest snapshots
 # =============================================================================
-anthropic:claude-opus-4-5-20251101:
+anthropic:claude-opus-4-5:
   sections: [fpf]
   max_output_tokens: 64000  # Anthropic docs: 64k output, 200k context
-anthropic:claude-haiku-4-5-20251001:
+anthropic:claude-haiku-4-5:
   sections: [fpf]
   max_output_tokens: 64000
-anthropic:claude-sonnet-4-5-20250929:
+anthropic:claude-sonnet-4-5:
   sections: [fpf]
   max_output_tokens: 64000
-anthropic:claude-opus-4-1-20250805:
+anthropic:claude-sonnet-4:
   sections: [fpf]
   max_output_tokens: 64000
-anthropic:claude-opus-4-20250514:
+anthropic:claude-3-7-sonnet:
   sections: [fpf]
   max_output_tokens: 64000
-anthropic:claude-sonnet-4-20250514:
-  sections: [fpf]
-  max_output_tokens: 64000
-anthropic:claude-3-7-sonnet-20250219:
-  sections: [fpf]
-  max_output_tokens: 64000
-anthropic:claude-3-5-haiku-20241022:
+anthropic:claude-3-5-haiku:
   sections: [fpf]
   max_output_tokens: 32768
 
@@ -135,9 +134,6 @@ openrouter:openai/gpt-4o-mini:
 openrouter:deepseek/deepseek-r1:
   sections: [fpf, gpt-r, dr]
   max_output_tokens: 64000
-openrouter:deepseek/deepseek-chat:
-  sections: [fpf, gpt-r, dr]
-  max_output_tokens: 64000
 
 # Perplexity (built-in web search)
 openrouter:perplexity/sonar-pro:
@@ -146,6 +142,13 @@ openrouter:perplexity/sonar-pro:
 openrouter:perplexity/sonar:
   sections: [fpf, gpt-r, dr]
   max_output_tokens: 16384
+openrouter:perplexity/sonar-deep-research:
+  sections: [fpf]
+  max_output_tokens: 32768
+  dr_native: true
+openrouter:perplexity/sonar-reasoning-pro:
+  sections: [fpf, gpt-r, dr]
+  max_output_tokens: 32768
 
 # Meta Llama
 openrouter:meta-llama/llama-3.1-405b-instruct:

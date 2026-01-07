@@ -1117,49 +1117,42 @@
   {
     "provider": "openai",
     "model": "openai/o3-deep-research",
-    "input_price_per_million_usd": 10.0,
-    "output_price_per_million_usd": 40.0,
-    "unit": "per_million_tokens",
-    "last_updated": "2025-09-27",
+    "input_price_per_million_usd": null,
+    "output_price_per_million_usd": null,
+    "unit": "per_research_task",
+    "last_updated": "2026-01-06",
     "source": "openai",
     "source_url": "https://platform.openai.com/docs/models/o3-deep-research",
     "metadata": {
+      "dr_native": true,
       "context_length": 200000,
-      "raw_pricing": {
-        "prompt": "0.00001",
-        "completion": "0.00004",
-        "request": "0",
-        "image": "0",
-        "web_search": "0.01",
-        "internal_reasoning": "0"
-      }
+      "actual_input_per_million": 10.0,
+      "actual_output_per_million": 40.0,
+      "web_search_per_thousand": 10.0,
+      "note": "DR Native - autonomous research model, pricing varies by task complexity"
     }
   },
   {
     "provider": "openai",
     "model": "openai/o4-mini-deep-research",
-    "input_price_per_million_usd": 1.1,
-    "output_price_per_million_usd": 4.4,
-    "unit": "per_million_tokens",
-    "last_updated": "2025-09-27",
+    "input_price_per_million_usd": null,
+    "output_price_per_million_usd": null,
+    "unit": "per_research_task",
+    "last_updated": "2026-01-06",
     "source": "openai",
     "source_url": "https://platform.openai.com/docs/models/o4-mini-deep-research",
     "metadata": {
+      "dr_native": true,
       "context_length": 200000,
-      "raw_pricing": {
-        "prompt": "0.0000011",
-        "completion": "0.0000044",
-        "request": "0",
-        "image": "0.0008415",
-        "web_search": "0.01",
-        "internal_reasoning": "0",
-        "input_cache_read": "0.000000275"
-      }
+      "actual_input_per_million": 2.0,
+      "actual_output_per_million": 8.0,
+      "web_search_per_thousand": 10.0,
+      "note": "DR Native - autonomous research model, pricing varies by task complexity"
     }
   },
   {
     "provider": "anthropic",
-    "model": "anthropic/claude-opus-4-5-20251101",
+    "model": "anthropic/claude-opus-4-5",
     "input_price_per_million_usd": 5.0,
     "output_price_per_million_usd": 25.0,
     "unit": "per_million_tokens",
@@ -1176,7 +1169,7 @@
   },
   {
     "provider": "anthropic",
-    "model": "anthropic/claude-sonnet-4-5-20250929",
+    "model": "anthropic/claude-sonnet-4-5",
     "input_price_per_million_usd": 3.0,
     "output_price_per_million_usd": 15.0,
     "unit": "per_million_tokens",
@@ -1193,7 +1186,7 @@
   },
   {
     "provider": "anthropic",
-    "model": "anthropic/claude-haiku-4-5-20251001",
+    "model": "anthropic/claude-haiku-4-5",
     "input_price_per_million_usd": 1.0,
     "output_price_per_million_usd": 5.0,
     "unit": "per_million_tokens",
@@ -1210,7 +1203,7 @@
   },
   {
     "provider": "anthropic",
-    "model": "anthropic/claude-3-opus-20240229",
+    "model": "anthropic/claude-3-opus",
     "input_price_per_million_usd": 15.0,
     "output_price_per_million_usd": 75.0,
     "unit": "per_million_tokens",
@@ -1227,7 +1220,7 @@
   },
   {
     "provider": "anthropic",
-    "model": "anthropic/claude-3-sonnet-20240229",
+    "model": "anthropic/claude-3-sonnet",
     "input_price_per_million_usd": 3.0,
     "output_price_per_million_usd": 15.0,
     "unit": "per_million_tokens",
@@ -1244,7 +1237,7 @@
   },
   {
     "provider": "anthropic",
-    "model": "anthropic/claude-3-haiku-20240307",
+    "model": "anthropic/claude-3-haiku",
     "input_price_per_million_usd": 0.25,
     "output_price_per_million_usd": 1.25,
     "unit": "per_million_tokens",
@@ -1323,7 +1316,55 @@
     "last_updated": "2026-01-06",
     "source": "openrouter",
     "source_url": "https://openrouter.ai/perplexity/sonar",
-    "metadata": {}
+    "metadata": {
+      "request_cost_per_thousand": 5.0,
+      "note": "Additional $5/1K requests for web search"
+    }
+  },
+  {
+    "provider": "perplexity",
+    "model": "perplexity/sonar-deep-research",
+    "input_price_per_million_usd": null,
+    "output_price_per_million_usd": null,
+    "unit": "per_research_task",
+    "last_updated": "2026-01-06",
+    "source": "openrouter",
+    "source_url": "https://openrouter.ai/perplexity/sonar-deep-research",
+    "metadata": {
+      "dr_native": true,
+      "actual_input_per_million": 2.0,
+      "actual_output_per_million": 8.0,
+      "search_cost_per_thousand": 5.0,
+      "reasoning_cost_per_million": 3.0,
+      "note": "DR Native - multi-step research model, pricing varies by task complexity"
+    }
+  },
+  {
+    "provider": "perplexity",
+    "model": "perplexity/sonar-pro-search",
+    "input_price_per_million_usd": 3.0,
+    "output_price_per_million_usd": 15.0,
+    "unit": "per_million_tokens",
+    "last_updated": "2026-01-06",
+    "source": "openrouter",
+    "source_url": "https://openrouter.ai/perplexity/sonar-pro-search",
+    "metadata": {
+      "request_cost_per_thousand": 18.0,
+      "note": "Agentic search with multi-step reasoning. Additional $18/1K requests"
+    }
+  },
+  {
+    "provider": "perplexity",
+    "model": "perplexity/sonar-reasoning-pro",
+    "input_price_per_million_usd": 2.0,
+    "output_price_per_million_usd": 8.0,
+    "unit": "per_million_tokens",
+    "last_updated": "2026-01-06",
+    "source": "openrouter",
+    "source_url": "https://openrouter.ai/perplexity/sonar-reasoning-pro",
+    "metadata": {
+      "note": "Reasoning model powered by DeepSeek R1 with Chain of Thought"
+    }
   },
   {
     "provider": "meta-llama",
@@ -1415,17 +1456,6 @@
   },
   {
     "provider": "anthropic",
-    "model": "anthropic/claude-opus-4",
-    "input_price_per_million_usd": 15.0,
-    "output_price_per_million_usd": 75.0,
-    "unit": "per_million_tokens",
-    "last_updated": "2026-01-06",
-    "source": "openrouter",
-    "source_url": "https://openrouter.ai/anthropic/claude-opus-4",
-    "metadata": {}
-  },
-  {
-    "provider": "anthropic",
     "model": "anthropic/claude-3.7-sonnet",
     "input_price_per_million_usd": 3.0,
     "output_price_per_million_usd": 15.0,
@@ -1445,5 +1475,322 @@
     "source": "openrouter",
     "source_url": "https://openrouter.ai/anthropic/claude-3.5-haiku",
     "metadata": {}
+  },
+  {
+    "provider": "anthropic",
+    "model": "anthropic/claude-3-5-haiku",
+    "input_price_per_million_usd": 0.8,
+    "output_price_per_million_usd": 4.0,
+    "unit": "per_million_tokens",
+    "last_updated": "2026-01-06",
+    "source": "anthropic",
+    "source_url": "https://www.anthropic.com/pricing",
+    "metadata": {
+      "note": "Alias for claude-3.5-haiku (dash vs dot naming)"
+    }
+  },
+  {
+    "provider": "anthropic",
+    "model": "anthropic/claude-3-7-sonnet",
+    "input_price_per_million_usd": 3.0,
+    "output_price_per_million_usd": 15.0,
+    "unit": "per_million_tokens",
+    "last_updated": "2026-01-06",
+    "source": "anthropic",
+    "source_url": "https://www.anthropic.com/pricing",
+    "metadata": {
+      "note": "Alias for claude-3.7-sonnet (dash vs dot naming)"
+    }
+  },
+  {
+    "provider": "tavily",
+    "model": "tavily/tvly-mini",
+    "input_price_per_million_usd": null,
+    "output_price_per_million_usd": null,
+    "unit": "per_research_task",
+    "last_updated": "2026-01-06",
+    "source": "tavily",
+    "source_url": "https://docs.tavily.com/documentation/api-credits",
+    "metadata": {
+      "dr_native": true,
+      "pricing_model": "credit_based",
+      "min_credits_per_request": 4,
+      "max_credits_per_request": 110,
+      "credit_cost_usd": 0.008,
+      "estimated_cost_per_request_usd": 0.46,
+      "note": "DR Native - Tavily Research mini, credit-based pricing"
+    }
+  },
+  {
+    "provider": "tavily",
+    "model": "tavily/tvly-pro",
+    "input_price_per_million_usd": null,
+    "output_price_per_million_usd": null,
+    "unit": "per_research_task",
+    "last_updated": "2026-01-06",
+    "source": "tavily",
+    "source_url": "https://docs.tavily.com/documentation/api-credits",
+    "metadata": {
+      "dr_native": true,
+      "pricing_model": "credit_based",
+      "min_credits_per_request": 15,
+      "max_credits_per_request": 250,
+      "credit_cost_usd": 0.008,
+      "estimated_cost_per_request_usd": 1.06,
+      "note": "DR Native - Tavily Research pro, credit-based pricing"
+    }
+  },
+  {
+    "provider": "openrouter",
+    "model": "meta-llama/llama-3.1-405b-instruct:free",
+    "input_price_per_million_usd": 0.0,
+    "output_price_per_million_usd": 0.0,
+    "unit": "per_million_tokens",
+    "last_updated": "2026-01-06",
+    "source": "openrouter",
+    "source_url": "https://openrouter.ai/meta-llama/llama-3.1-405b-instruct:free",
+    "metadata": {"note": "Free tier model"}
+  },
+  {
+    "provider": "openrouter",
+    "model": "nousresearch/hermes-3-llama-3.1-405b:free",
+    "input_price_per_million_usd": 0.0,
+    "output_price_per_million_usd": 0.0,
+    "unit": "per_million_tokens",
+    "last_updated": "2026-01-06",
+    "source": "openrouter",
+    "source_url": "https://openrouter.ai/nousresearch/hermes-3-llama-3.1-405b:free",
+    "metadata": {"note": "Free tier model"}
+  },
+  {
+    "provider": "openrouter",
+    "model": "deepseek/deepseek-r1-0528:free",
+    "input_price_per_million_usd": 0.0,
+    "output_price_per_million_usd": 0.0,
+    "unit": "per_million_tokens",
+    "last_updated": "2026-01-06",
+    "source": "openrouter",
+    "source_url": "https://openrouter.ai/deepseek/deepseek-r1-0528:free",
+    "metadata": {"note": "Free tier model"}
+  },
+  {
+    "provider": "openrouter",
+    "model": "qwen/qwen3-coder:free",
+    "input_price_per_million_usd": 0.0,
+    "output_price_per_million_usd": 0.0,
+    "unit": "per_million_tokens",
+    "last_updated": "2026-01-06",
+    "source": "openrouter",
+    "source_url": "https://openrouter.ai/qwen/qwen3-coder:free",
+    "metadata": {"note": "Free tier model"}
+  },
+  {
+    "provider": "openrouter",
+    "model": "xiaomi/mimo-v2-flash:free",
+    "input_price_per_million_usd": 0.0,
+    "output_price_per_million_usd": 0.0,
+    "unit": "per_million_tokens",
+    "last_updated": "2026-01-06",
+    "source": "openrouter",
+    "source_url": "https://openrouter.ai/xiaomi/mimo-v2-flash:free",
+    "metadata": {"note": "Free tier model"}
+  },
+  {
+    "provider": "openrouter",
+    "model": "mistralai/devstral-2512:free",
+    "input_price_per_million_usd": 0.0,
+    "output_price_per_million_usd": 0.0,
+    "unit": "per_million_tokens",
+    "last_updated": "2026-01-06",
+    "source": "openrouter",
+    "source_url": "https://openrouter.ai/mistralai/devstral-2512:free",
+    "metadata": {"note": "Free tier model"}
+  },
+  {
+    "provider": "openrouter",
+    "model": "mistralai/mistral-small-3.1-24b-instruct:free",
+    "input_price_per_million_usd": 0.0,
+    "output_price_per_million_usd": 0.0,
+    "unit": "per_million_tokens",
+    "last_updated": "2026-01-06",
+    "source": "openrouter",
+    "source_url": "https://openrouter.ai/mistralai/mistral-small-3.1-24b-instruct:free",
+    "metadata": {"note": "Free tier model"}
+  },
+  {
+    "provider": "openrouter",
+    "model": "google/gemini-2.0-flash-exp:free",
+    "input_price_per_million_usd": 0.0,
+    "output_price_per_million_usd": 0.0,
+    "unit": "per_million_tokens",
+    "last_updated": "2026-01-06",
+    "source": "openrouter",
+    "source_url": "https://openrouter.ai/google/gemini-2.0-flash-exp:free",
+    "metadata": {"note": "Free tier model"}
+  },
+  {
+    "provider": "openrouter",
+    "model": "google/gemma-3-27b-it:free",
+    "input_price_per_million_usd": 0.0,
+    "output_price_per_million_usd": 0.0,
+    "unit": "per_million_tokens",
+    "last_updated": "2026-01-06",
+    "source": "openrouter",
+    "source_url": "https://openrouter.ai/google/gemma-3-27b-it:free",
+    "metadata": {"note": "Free tier model"}
+  },
+  {
+    "provider": "openrouter",
+    "model": "google/gemma-3n-e2b-it:free",
+    "input_price_per_million_usd": 0.0,
+    "output_price_per_million_usd": 0.0,
+    "unit": "per_million_tokens",
+    "last_updated": "2026-01-06",
+    "source": "openrouter",
+    "source_url": "https://openrouter.ai/google/gemma-3n-e2b-it:free",
+    "metadata": {"note": "Free tier model"}
+  },
+  {
+    "provider": "openrouter",
+    "model": "google/gemma-3n-e4b-it:free",
+    "input_price_per_million_usd": 0.0,
+    "output_price_per_million_usd": 0.0,
+    "unit": "per_million_tokens",
+    "last_updated": "2026-01-06",
+    "source": "openrouter",
+    "source_url": "https://openrouter.ai/google/gemma-3n-e4b-it:free",
+    "metadata": {"note": "Free tier model"}
+  },
+  {
+    "provider": "openrouter",
+    "model": "nvidia/nemotron-nano-12b-v2-vl:free",
+    "input_price_per_million_usd": 0.0,
+    "output_price_per_million_usd": 0.0,
+    "unit": "per_million_tokens",
+    "last_updated": "2026-01-06",
+    "source": "openrouter",
+    "source_url": "https://openrouter.ai/nvidia/nemotron-nano-12b-v2-vl:free",
+    "metadata": {"note": "Free tier model"}
+  },
+  {
+    "provider": "openrouter",
+    "model": "nvidia/nemotron-nano-9b-v2:free",
+    "input_price_per_million_usd": 0.0,
+    "output_price_per_million_usd": 0.0,
+    "unit": "per_million_tokens",
+    "last_updated": "2026-01-06",
+    "source": "openrouter",
+    "source_url": "https://openrouter.ai/nvidia/nemotron-nano-9b-v2:free",
+    "metadata": {"note": "Free tier model"}
+  },
+  {
+    "provider": "openrouter",
+    "model": "meta-llama/llama-3.2-3b-instruct:free",
+    "input_price_per_million_usd": 0.0,
+    "output_price_per_million_usd": 0.0,
+    "unit": "per_million_tokens",
+    "last_updated": "2026-01-06",
+    "source": "openrouter",
+    "source_url": "https://openrouter.ai/meta-llama/llama-3.2-3b-instruct:free",
+    "metadata": {"note": "Free tier model"}
+  },
+  {
+    "provider": "openrouter",
+    "model": "meta-llama/llama-3.3-70b-instruct:free",
+    "input_price_per_million_usd": 0.0,
+    "output_price_per_million_usd": 0.0,
+    "unit": "per_million_tokens",
+    "last_updated": "2026-01-06",
+    "source": "openrouter",
+    "source_url": "https://openrouter.ai/meta-llama/llama-3.3-70b-instruct:free",
+    "metadata": {"note": "Free tier model"}
+  },
+  {
+    "provider": "openrouter",
+    "model": "allenai/olmo-3-32b-think:free",
+    "input_price_per_million_usd": 0.0,
+    "output_price_per_million_usd": 0.0,
+    "unit": "per_million_tokens",
+    "last_updated": "2026-01-06",
+    "source": "openrouter",
+    "source_url": "https://openrouter.ai/allenai/olmo-3-32b-think:free",
+    "metadata": {"note": "Free tier model"}
+  },
+  {
+    "provider": "openrouter",
+    "model": "allenai/olmo-3.1-32b-think:free",
+    "input_price_per_million_usd": 0.0,
+    "output_price_per_million_usd": 0.0,
+    "unit": "per_million_tokens",
+    "last_updated": "2026-01-06",
+    "source": "openrouter",
+    "source_url": "https://openrouter.ai/allenai/olmo-3.1-32b-think:free",
+    "metadata": {"note": "Free tier model"}
+  },
+  {
+    "provider": "openrouter",
+    "model": "tngtech/deepseek-r1t-chimera:free",
+    "input_price_per_million_usd": 0.0,
+    "output_price_per_million_usd": 0.0,
+    "unit": "per_million_tokens",
+    "last_updated": "2026-01-06",
+    "source": "openrouter",
+    "source_url": "https://openrouter.ai/tngtech/deepseek-r1t-chimera:free",
+    "metadata": {"note": "Free tier model"}
+  },
+  {
+    "provider": "openrouter",
+    "model": "tngtech/deepseek-r1t2-chimera:free",
+    "input_price_per_million_usd": 0.0,
+    "output_price_per_million_usd": 0.0,
+    "unit": "per_million_tokens",
+    "last_updated": "2026-01-06",
+    "source": "openrouter",
+    "source_url": "https://openrouter.ai/tngtech/deepseek-r1t2-chimera:free",
+    "metadata": {"note": "Free tier model"}
+  },
+  {
+    "provider": "openrouter",
+    "model": "tngtech/tng-r1t-chimera:free",
+    "input_price_per_million_usd": 0.0,
+    "output_price_per_million_usd": 0.0,
+    "unit": "per_million_tokens",
+    "last_updated": "2026-01-06",
+    "source": "openrouter",
+    "source_url": "https://openrouter.ai/tngtech/tng-r1t-chimera:free",
+    "metadata": {"note": "Free tier model"}
+  },
+  {
+    "provider": "openrouter",
+    "model": "arcee-ai/trinity-mini:free",
+    "input_price_per_million_usd": 0.0,
+    "output_price_per_million_usd": 0.0,
+    "unit": "per_million_tokens",
+    "last_updated": "2026-01-06",
+    "source": "openrouter",
+    "source_url": "https://openrouter.ai/arcee-ai/trinity-mini:free",
+    "metadata": {"note": "Free tier model"}
+  },
+  {
+    "provider": "openrouter",
+    "model": "kwaipilot/kat-coder-pro:free",
+    "input_price_per_million_usd": 0.0,
+    "output_price_per_million_usd": 0.0,
+    "unit": "per_million_tokens",
+    "last_updated": "2026-01-06",
+    "source": "openrouter",
+    "source_url": "https://openrouter.ai/kwaipilot/kat-coder-pro:free",
+    "metadata": {"note": "Free tier model"}
+  },
+  {
+    "provider": "openrouter",
+    "model": "nex-agi/deepseek-v3.1-nex-n1:free",
+    "input_price_per_million_usd": 0.0,
+    "output_price_per_million_usd": 0.0,
+    "unit": "per_million_tokens",
+    "last_updated": "2026-01-06",
+    "source": "openrouter",
+    "source_url": "https://openrouter.ai/nex-agi/deepseek-v3.1-nex-n1:free",
+    "metadata": {"note": "Free tier model"}
   }
 ]

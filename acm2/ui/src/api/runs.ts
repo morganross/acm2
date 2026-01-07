@@ -20,6 +20,7 @@ export interface GeneratedDocInfo {
   source_doc_id: string
   generator: string
   iteration: number
+  cost_usd?: number
 }
 
 export interface PairwiseRanking {

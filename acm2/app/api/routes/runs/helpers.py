@@ -358,6 +358,7 @@ def to_detail(run) -> RunDetail:
                         source_doc_id=doc_info.get("source_doc_id", source_doc_id),
                         generator=doc_info.get("generator", ""),
                         iteration=doc_info.get("iteration", 1),
+                        cost_usd=doc_info.get("cost_usd"),
                     ))
             
             # Parse pairwise results for this source doc
@@ -384,6 +385,7 @@ def to_detail(run) -> RunDetail:
                         source_doc_id=cd.get("source_doc_id", source_doc_id),
                         generator=cd.get("generator", ""),
                         iteration=cd.get("iteration", 1),
+                        cost_usd=cd.get("cost_usd"),
                     )
                     sdr_combined_docs.append(doc_info)
             
@@ -397,6 +399,7 @@ def to_detail(run) -> RunDetail:
                     source_doc_id=cd.get("source_doc_id", source_doc_id),
                     generator=cd.get("generator", ""),
                     iteration=cd.get("iteration", 1),
+                    cost_usd=cd.get("cost_usd"),
                 )
                 sdr_combined_docs.append(sdr_combined_doc)
             
@@ -405,12 +408,35 @@ def to_detail(run) -> RunDetail:
                 sdr_combined_doc = sdr_combined_docs[0]
             
             # Parse timeline events for this source doc
+            # First try from source_doc_result, then filter from run-level timeline_events
             sdr_timeline = []
-            for te in (sdr.get("timeline_events") or []):
-                try:
-                    sdr_timeline.append(TimelineEvent(**te))
-                except Exception:
-                    pass
+            sdr_timeline_raw = sdr.get("timeline_events") or []
+            
+            # Only use source-doc timeline if it has events, otherwise filter from run-level
+            if sdr_timeline_raw and len(sdr_timeline_raw) > 0:
+                for te in sdr_timeline_raw:
+                    try:
+                        sdr_timeline.append(TimelineEvent(**te))
+                    except Exception:
+                        pass
+            else:
+                # Filter from run-level timeline events using the same logic as execution.py
+                sdr_suffix = source_doc_id.split('-')[-1] if '-' in source_doc_id else source_doc_id
+                logger.info(f"[TIMELINE] Filtering for source_doc {source_doc_id[:8]}..., suffix={sdr_suffix}, run-level events={len(timeline_events)}")
+                matched_count = 0
+                for te in timeline_events:
+                    try:
+                        # timeline_events are already TimelineEvent objects, not dicts
+                        te_source_doc_id = te.details.get("source_doc_id") if te.details else None
+                        te_doc_id = te.details.get("doc_id", "") if te.details else ""
+                        doc_id_prefix = te_doc_id.split(".")[0] if te_doc_id else None
+                        # Match by explicit source_doc_id or if the suffix ends with the prefix
+                        if te_source_doc_id == source_doc_id or (doc_id_prefix and sdr_suffix.endswith(doc_id_prefix)):
+                            sdr_timeline.append(te)
+                            matched_count += 1
+                    except Exception as e:
+                        logger.warning(f"[TIMELINE] Failed to parse timeline event: {e}")
+                logger.info(f"[TIMELINE] Matched {matched_count} events for source_doc {source_doc_id[:8]}...")
             
             # Parse single eval scores - check both possible key names for compatibility
             # execution.py uses dataclass field name "single_eval_results"

@@ -11,6 +11,7 @@ interface ModelCatalogState {
   pricing: Record<string, ModelPricing>; // provider/model or provider:model -> {input, output}
   isLoading: boolean;
   error: string | null;
+  sortBy: 'name' | 'price';  // Global sort preference
   
   // Computed lists for convenience
   fpfModels: string[];
@@ -28,6 +29,9 @@ interface ModelCatalogState {
   getMaxOutputTokens: (modelKey: string) => number | null;
   getPricing: (modelKey: string) => ModelPricing | null;
   formatPricing: (modelKey: string) => string;
+  isDrNative: (modelKey: string) => boolean;  // Check if model is DR native (bold purple, no eval/combine)
+  setSortBy: (method: 'name' | 'price') => void;
+  getSortedModels: (models: string[]) => string[];
 }
 
 // Convert ACM2 model format to pricing index format
@@ -54,6 +58,7 @@ export const useModelCatalog = create<ModelCatalogState>((set, get) => ({
   pricing: {},
   isLoading: false,
   error: null,
+  sortBy: 'name',  // Default to alphabetical sort
   fpfModels: [],
   fpfFreeModels: [],
   gptrModels: [],
@@ -92,11 +97,11 @@ export const useModelCatalog = create<ModelCatalogState>((set, get) => ({
       const gptrFreeModels = Object.keys(models).filter(m => models[m].sections.includes('gpt-r-free'));
       const drModels = Object.keys(models).filter(m => models[m].sections.includes('dr'));
       const drFreeModels = Object.keys(models).filter(m => models[m].sections.includes('dr-free'));
-      // eval and combine use fpf list (and fpf-free for free models)
-      const evalModels = Object.keys(models).filter(m => models[m].sections.includes('fpf'));
-      const evalFreeModels = Object.keys(models).filter(m => models[m].sections.includes('fpf-free'));
-      const combineModels = Object.keys(models).filter(m => models[m].sections.includes('fpf'));
-      const combineFreeModels = Object.keys(models).filter(m => models[m].sections.includes('fpf-free'));
+      // eval and combine use fpf list (and fpf-free for free models), but EXCLUDE dr_native models
+      const evalModels = Object.keys(models).filter(m => models[m].sections.includes('fpf') && !models[m].dr_native);
+      const evalFreeModels = Object.keys(models).filter(m => models[m].sections.includes('fpf-free') && !models[m].dr_native);
+      const combineModels = Object.keys(models).filter(m => models[m].sections.includes('fpf') && !models[m].dr_native);
+      const combineFreeModels = Object.keys(models).filter(m => models[m].sections.includes('fpf-free') && !models[m].dr_native);
 
       set({ 
         models,
@@ -135,11 +140,59 @@ export const useModelCatalog = create<ModelCatalogState>((set, get) => ({
     if (modelKey.endsWith(':free')) {
       return 'FREE';
     }
+    // DR native models show "DR Native" instead of token pricing
+    const model = get().models[modelKey];
+    if (model?.dr_native) {
+      return 'DR Native';
+    }
     const p = get().getPricing(modelKey);
     if (!p) return '';  // No price found, don't display anything
     // Format as "$0.30/$2.50" (input/output per 1M)
     const fmtIn = p.input < 0.01 ? p.input.toFixed(3) : p.input.toFixed(2);
     const fmtOut = p.output < 0.01 ? p.output.toFixed(3) : p.output.toFixed(2);
     return `$${fmtIn}/$${fmtOut}`;
+  },
+  
+  isDrNative: (modelKey: string): boolean => {
+    const model = get().models[modelKey];
+    return model?.dr_native === true;
+  },
+  
+  setSortBy: (method: 'name' | 'price') => {
+    set({ sortBy: method });
+  },
+  
+  getSortedModels: (models: string[]): string[] => {
+    const { sortBy, getPricing } = get();
+    const sorted = [...models];
+    
+    if (sortBy === 'name') {
+      // Alphabetical sort by model key
+      sorted.sort((a, b) => a.localeCompare(b));
+    } else if (sortBy === 'price') {
+      // Sort by total price (input + output) ascending, models without pricing go to end
+      sorted.sort((a, b) => {
+        const priceA = getPricing(a);
+        const priceB = getPricing(b);
+        
+        // Handle :free models (treat as $0)
+        const isAFree = a.endsWith(':free');
+        const isBFree = b.endsWith(':free');
+        
+        // Calculate total price (input + output)
+        const totalA = isAFree ? 0 : 
+          (priceA?.input != null && priceA?.output != null) 
+            ? priceA.input + priceA.output 
+            : Infinity;
+        const totalB = isBFree ? 0 : 
+          (priceB?.input != null && priceB?.output != null) 
+            ? priceB.input + priceB.output 
+            : Infinity;
+        
+        return totalA - totalB;
+      });
+    }
+    
+    return sorted;
   },
 }));

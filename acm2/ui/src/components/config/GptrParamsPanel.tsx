@@ -34,7 +34,7 @@ export function GptrParamsPanel() {
           <h4 className="text-sm font-semibold text-gray-300 mb-2 flex items-center gap-2">
             <Cpu className="w-4 h-4" /> Model Selection
           </h4>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 gap-1">
             {gptrModels.map((model) => (
               <Checkbox
                 key={model}
@@ -76,7 +76,7 @@ export function GptrParamsPanel() {
                 <p className="text-xs text-gray-400 mb-3">
                   $0/M tokens - Community-provided free endpoints with rate limits
                 </p>
-                <div className="grid grid-cols-2 gap-2" data-section="gptr-free-models">
+                <div className="grid grid-cols-1 gap-1" data-section="gptr-free-models">
                   {gptrFreeModels.map((model) => (
                     <Checkbox
                       key={model}

@@ -8,8 +8,12 @@ import { contentsApi, type ContentSummary } from '../../api/contents'
 
 export function CombinePanel() {
   const config = useConfigStore()
-  const { combineModels, combineFreeModels, models, fetchModels, formatPricing } = useModelCatalog()
+  const { combineModels, combineFreeModels, models, fetchModels, formatPricing, getSortedModels } = useModelCatalog()
   const [freeModelsExpanded, setFreeModelsExpanded] = useState(false)
+  
+  // Apply global sort to models
+  const sortedCombineModels = getSortedModels(combineModels)
+  const sortedCombineFreeModels = getSortedModels(combineFreeModels)
   
   // Content Library items for combine instructions
   const [combineInstructionContents, setCombineInstructionContents] = useState<ContentSummary[]>([])
@@ -67,7 +71,7 @@ export function CombinePanel() {
             <Cpu className="w-4 h-4" /> Combine Model
           </h4>
           <div className="grid grid-cols-1 gap-1">
-            {combineModels.map((model) => (
+            {sortedCombineModels.map((model) => (
               <Checkbox
                 key={model}
                 checked={config.combine.selectedModels.includes(model)}
@@ -109,7 +113,7 @@ export function CombinePanel() {
               {freeModelsExpanded && (
                 <div className="p-3 bg-gray-800/50">
                   <div className="grid grid-cols-1 gap-1">
-                    {combineFreeModels.map((model) => (
+                    {sortedCombineFreeModels.map((model) => (
                       <Checkbox
                         key={model}
                         checked={config.combine.selectedModels.includes(model)}

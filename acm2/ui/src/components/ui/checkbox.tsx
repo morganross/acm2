@@ -18,6 +18,8 @@ interface CheckboxProps {
   dataTestId?: string
   /** Section context for grouping */
   section?: string
+  /** DR Native model - styled bold purple */
+  drNative?: boolean
 }
 
 export function Checkbox({
@@ -29,6 +31,7 @@ export function Checkbox({
   className,
   dataTestId,
   section,
+  drNative = false,
 }: CheckboxProps) {
   const id = React.useId()
   // Generate auto testId from section and label if not provided
@@ -69,10 +72,16 @@ export function Checkbox({
         {checked && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
       </div>
       {label && (
-        <span className="text-sm text-gray-300 flex items-center gap-2 flex-wrap" data-testid={autoTestId ? `${autoTestId}-label` : undefined}>
+        <span className={cn(
+          "text-sm flex items-center gap-2 flex-wrap",
+          drNative ? "text-purple-400 font-bold" : "text-gray-300"
+        )} data-testid={autoTestId ? `${autoTestId}-label` : undefined}>
           <span className="truncate">{label}</span>
           {priceSuffix && (
-            <span className="text-xs text-gray-400 font-mono whitespace-nowrap bg-gray-800 px-1.5 py-0.5 rounded" title="Input/Output price per 1M tokens">
+            <span className={cn(
+              "text-xs font-mono whitespace-nowrap px-1.5 py-0.5 rounded",
+              drNative ? "text-purple-300 bg-purple-900/50" : "text-gray-400 bg-gray-800"
+            )} title={drNative ? "Deep Research Native - autonomous research model" : "Input/Output price per 1M tokens"}>
               {priceSuffix}
             </span>
           )}

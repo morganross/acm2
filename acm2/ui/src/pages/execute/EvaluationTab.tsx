@@ -98,14 +98,23 @@ export default function EvaluationTab({ currentRun, execStatus }: EvaluationTabP
   // ============= NEW FORMAT HEATMAP TABLE =============
   const renderNewFormatHeatmapTable = (
     title: string,
-    docs: Array<{ id: string; model: string; generator: string; source_doc_id?: string }>,
+    docs: Array<{ id: string; model: string; generator: string; source_doc_id?: string; cost_usd?: number }>,
     evalData: Record<string, Record<string, number>>,
     sectionColor: string
-  ) => (
+  ) => {
+    // Calculate total cost for this section
+    const totalCost = docs.reduce((sum, doc) => sum + (doc.cost_usd || 0), 0)
+    
+    return (
     <div>
       <h4 className="text-lg font-semibold mb-3 flex items-center gap-2" style={{ color: sectionColor }}>
         <FileText className="w-5 h-5" />
         {title}
+        {totalCost > 0 && (
+          <span className="text-sm text-gray-600 font-normal ml-2">
+            (Total: ${totalCost.toFixed(totalCost < 0.01 ? 4 : 2)})
+          </span>
+        )}
       </h4>
       <div className="overflow-x-auto">
         <table className="w-full border-collapse">
@@ -161,9 +170,14 @@ export default function EvaluationTab({ currentRun, execStatus }: EvaluationTabP
                         onClick={() => openDocViewer(genDoc.id, genDoc.model)}
                         className="font-medium truncate max-w-[200px] hover:underline cursor-pointer flex items-center gap-1"
                         style={{ color: '#2563eb', background: 'none', border: 'none', padding: 0, font: 'inherit' }}
-                        title={`View ${genDoc.model}`}
+                        title={`View ${genDoc.model}${genDoc.cost_usd ? ` ($${genDoc.cost_usd.toFixed(4)})` : ''}`}
                       >
                         {genDoc.model.length > 25 ? genDoc.model.substring(0, 25) + '...' : genDoc.model}
+                        {genDoc.cost_usd && genDoc.cost_usd > 0 && (
+                          <span className="text-xs text-gray-500 ml-1">
+                            (${genDoc.cost_usd.toFixed(genDoc.cost_usd < 0.01 ? 4 : 2)})
+                          </span>
+                        )}
                         <ExternalLink className="w-3 h-3" />
                       </button>
                     </div>
@@ -255,7 +269,8 @@ export default function EvaluationTab({ currentRun, execStatus }: EvaluationTabP
         </table>
       </div>
     </div>
-  )
+    )
+  }
   
   // ============= LEGACY FORMAT HEATMAP TABLE =============
   const renderLegacyHeatmapTable = () => {

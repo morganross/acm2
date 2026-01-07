@@ -9,8 +9,12 @@ import { contentsApi, type ContentSummary } from '../../api/contents'
 
 export function EvalPanel() {
   const config = useConfigStore()
-  const { evalModels, evalFreeModels, models, fetchModels, formatPricing } = useModelCatalog()
+  const { evalModels, evalFreeModels, models, fetchModels, formatPricing, getSortedModels } = useModelCatalog()
   const [freeModelsExpanded, setFreeModelsExpanded] = useState(false)
+  
+  // Apply global sort to models
+  const sortedEvalModels = getSortedModels(evalModels)
+  const sortedEvalFreeModels = getSortedModels(evalFreeModels)
   
   // Compute max output tokens based on selected judge models (use minimum across all selected)
   const maxOutputTokensLimit = useMemo(() => {
@@ -164,7 +168,7 @@ export function EvalPanel() {
             <Gavel className="w-4 h-4" /> Judge Models
           </h4>
           <div className="grid grid-cols-1 gap-1">
-            {evalModels.map((model) => (
+            {sortedEvalModels.map((model) => (
               <Checkbox
                 key={model}
                 checked={config.eval.judgeModels.includes(model)}
@@ -206,7 +210,7 @@ export function EvalPanel() {
               {freeModelsExpanded && (
                 <div className="p-3 bg-gray-800/50">
                   <div className="grid grid-cols-1 gap-1">
-                    {evalFreeModels.map((model) => (
+                    {sortedEvalFreeModels.map((model) => (
                       <Checkbox
                         key={model}
                         checked={config.eval.judgeModels.includes(model)}

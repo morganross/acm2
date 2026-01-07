@@ -8,8 +8,12 @@ import { useModelCatalog } from '../../stores/modelCatalog'
 
 export function FpfParamsPanel() {
   const config = useConfigStore()
-  const { fpfModels, fpfFreeModels, models, isLoading, fetchModels, formatPricing } = useModelCatalog()
+  const { fpfModels, fpfFreeModels, models, isLoading, fetchModels, formatPricing, getSortedModels, isDrNative } = useModelCatalog()
   const [freeModelsExpanded, setFreeModelsExpanded] = useState(false)
+  
+  // Apply global sort to models
+  const sortedFpfModels = getSortedModels(fpfModels)
+  const sortedFpfFreeModels = getSortedModels(fpfFreeModels)
 
   // Fetch models on mount if empty
   useEffect(() => {
@@ -58,7 +62,7 @@ export function FpfParamsPanel() {
             </button>
           </h4>
           <div className="grid grid-cols-1 gap-1" data-section="fpf-models">
-            {fpfModels.map((model) => (
+            {sortedFpfModels.map((model) => (
               <Checkbox
                 key={model}
                 checked={config.fpf.selectedModels.includes(model)}
@@ -71,6 +75,7 @@ export function FpfParamsPanel() {
                 label={model}
                 priceSuffix={formatPricing(model)}
                 dataTestId={`fpf-model-${model}`}
+                drNative={isDrNative(model)}
               />
             ))}
           </div>
@@ -102,7 +107,7 @@ export function FpfParamsPanel() {
                   $0/M tokens - Community-provided free endpoints with rate limits
                 </p>
                 <div className="grid grid-cols-1 gap-1" data-section="fpf-free-models">
-                  {fpfFreeModels.map((model) => (
+                  {sortedFpfFreeModels.map((model) => (
                     <Checkbox
                       key={model}
                       checked={config.fpf.selectedModels.includes(model)}

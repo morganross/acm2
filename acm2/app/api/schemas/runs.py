@@ -394,6 +394,7 @@ class GeneratedDocInfo(BaseModel):
     source_doc_id: str
     generator: str
     iteration: int
+    cost_usd: Optional[float] = None
 
 
 class PairwiseRanking(BaseModel):

@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Save, RotateCcw, Sliders, Play, FileText, Library, ExternalLink, Github, Folder, ChevronRight, RefreshCw, X } from 'lucide-react'
+import { Save, RotateCcw, Sliders, Play, FileText, Library, ExternalLink, Github, Folder, ChevronRight, RefreshCw, X, ArrowDownAZ, DollarSign } from 'lucide-react'
 import { Button } from '../components/ui/button'
 import { useConfigStore } from '../stores/config'
+import { useModelCatalog } from '../stores/modelCatalog'
 import { notify } from '@/stores/notifications'
 import { runsApi } from '@/api/runs'
 import { contentsApi, type ContentSummary } from '@/api/contents'
@@ -502,6 +503,43 @@ function deserializePresetToConfig(
   };
 }
 
+// Model Sort Toggle Component
+function ModelSortToggle() {
+  const { sortBy, setSortBy } = useModelCatalog();
+  
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-sm text-gray-400">Sort:</span>
+      <div className="flex rounded overflow-hidden border border-gray-600">
+        <button
+          onClick={() => setSortBy('name')}
+          className={`px-2 py-1 text-xs flex items-center gap-1 transition-colors ${
+            sortBy === 'name' 
+              ? 'bg-blue-600 text-white' 
+              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+          }`}
+          title="Sort by name (A-Z)"
+        >
+          <ArrowDownAZ className="w-3 h-3" />
+          A-Z
+        </button>
+        <button
+          onClick={() => setSortBy('price')}
+          className={`px-2 py-1 text-xs flex items-center gap-1 transition-colors ${
+            sortBy === 'price' 
+              ? 'bg-blue-600 text-white' 
+              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+          }`}
+          title="Sort by price (cheapest first)"
+        >
+          <DollarSign className="w-3 h-3" />
+          Price
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function Configure() {
   const navigate = useNavigate()
   const config = useConfigStore()
@@ -893,6 +931,9 @@ export default function Configure() {
                 Reset
               </Button>
             </div>
+            
+            {/* Sort Toggle */}
+            <ModelSortToggle />
           </div>
         </div>
       </div>

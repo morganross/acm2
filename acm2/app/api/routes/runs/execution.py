@@ -197,6 +197,7 @@ async def execute_run_background(run_id: str, config: RunConfig):
                         "source_doc_id": gen_doc.source_doc_id,
                         "generator": gen_doc.generator.value if hasattr(gen_doc.generator, 'value') else str(gen_doc.generator),
                         "iteration": gen_doc.iteration,
+                        "cost_usd": gen_doc.cost_usd or 0.0,
                     })
                     
                     generation_events.append({
@@ -220,7 +221,20 @@ async def execute_run_background(run_id: str, config: RunConfig):
                         "source_doc_id": combined_doc.source_doc_id,
                         "generator": "combine",
                         "iteration": 1,
+                        "cost_usd": combined_doc.cost_usd or 0.0,
                     })
+                
+                # Build per-document cost tracking
+                doc_generation_costs = {}
+                doc_eval_costs = {}
+                
+                # Track generation costs per document
+                for gen_doc in result.generated_docs:
+                    doc_generation_costs[gen_doc.doc_id] = gen_doc.cost_usd or 0.0
+                
+                # Track combined document generation costs
+                for combined_doc in (result.combined_docs or []):
+                    doc_generation_costs[combined_doc.doc_id] = combined_doc.cost_usd or 0.0
                 
                 # Build pre-combine evaluation scores
                 # First, check if we have incrementally-saved data that we should preserve
@@ -394,7 +408,11 @@ async def execute_run_background(run_id: str, config: RunConfig):
                         "completed_at": gen_event.get("completed_at"),
                         "duration_seconds": gen_event.get("duration_seconds"),
                         "success": gen_event.get("status") == "completed",
-                        "details": {"doc_id": gen_event.get("doc_id")},
+                        "details": {
+                            "doc_id": gen_event.get("doc_id"),
+                            "source_doc_id": gen_event.get("source_doc_id"),
+                            "cost_usd": gen_event.get("cost_usd", 0.0),
+                        },
                     })
                 
                 if result.single_eval_results:
@@ -470,12 +488,17 @@ async def execute_run_background(run_id: str, config: RunConfig):
                     for sdr_id, sdr in result.source_doc_results.items():
                         # Filter timeline events that belong to this source doc
                         sdr_timeline_events = []
+                        # Extract the last segment of source_doc_id (e.g., "2fed7a903b33" from UUID)
+                        sdr_suffix = sdr_id.split('-')[-1] if '-' in sdr_id else sdr_id
                         for te in timeline_events:
                             details = te.get("details") or {}
                             te_source_doc_id = details.get("source_doc_id")
                             te_doc_id = details.get("doc_id", "")
-                            # Match by explicit source_doc_id or by doc_id prefix
-                            if te_source_doc_id == sdr_id or (te_doc_id and te_doc_id.startswith(sdr_id[:8])):
+                            # Extract prefix from doc_id (format: prefix.hash.generator.iteration.model)
+                            # The prefix is the last 8 chars of the source doc UUID (e.g., "7a903b33")
+                            doc_id_prefix = te_doc_id.split(".")[0] if te_doc_id else None
+                            # Match by explicit source_doc_id or if the suffix ends with the prefix
+                            if te_source_doc_id == sdr_id or (doc_id_prefix and sdr_suffix.endswith(doc_id_prefix)):
                                 sdr_timeline_events.append(te)
                         
                         # Add timeline events to the source doc result before serializing
@@ -511,6 +534,8 @@ async def execute_run_background(run_id: str, config: RunConfig):
                         "generation_events": generation_events,
                         "timeline_events": timeline_events,
                         "source_doc_results": source_doc_results_serialized,  # NEW: Per-source-document results
+                        "doc_generation_costs": doc_generation_costs,  # NEW: Per-document generation costs
+                        "doc_eval_costs": doc_eval_costs,  # NEW: Per-document per-judge evaluation costs
                     },
                     total_cost_usd=result.total_cost_usd
                 )

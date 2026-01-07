@@ -112,6 +112,36 @@ def build_payload(prompt: str, cfg: Dict) -> Tuple[Dict, Optional[Dict]]:
         if effort:
             payload["reasoning_effort"] = effort
 
+    # Perplexity-specific parameters for Sonar models
+    if "perplexity/" in model_to_use:
+        # search_mode: 'web' (default), 'academic', or 'sec'
+        payload["search_mode"] = cfg.get("search_mode", "web")
+        
+        # web_search_options for search context size
+        web_search_opts = cfg.get("web_search_options") or {}
+        if web_search_opts:
+            payload["web_search_options"] = web_search_opts
+        elif "sonar-deep-research" in model_to_use:
+            # Default to high search context for deep research
+            payload["web_search_options"] = {"search_context_size": "high"}
+        
+        # reasoning_effort specifically for sonar-deep-research
+        if "sonar-deep-research" in model_to_use and not payload.get("reasoning_effort"):
+            # Default to medium if not specified
+            payload["reasoning_effort"] = cfg.get("reasoning_effort", "medium")
+        
+        # Search domain filtering
+        if cfg.get("search_domain_filter"):
+            payload["search_domain_filter"] = cfg["search_domain_filter"]
+        
+        # Search recency filtering (e.g., 'day', 'week', 'month')
+        if cfg.get("search_recency_filter"):
+            payload["search_recency_filter"] = cfg["search_recency_filter"]
+        
+        # Optional: return related questions
+        if cfg.get("return_related_questions"):
+            payload["return_related_questions"] = True
+
     # Optional: response_format for JSON mode
     if request_json:
         payload["response_format"] = {"type": "json_object"}

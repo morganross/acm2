@@ -36,10 +36,11 @@ def get_model_config() -> Dict[str, Dict[str, Any]]:
                     "max_output_tokens": None,
                 }
             elif isinstance(model_data, dict):
-                # New format: model: {sections: [...], max_output_tokens: int}
+                # New format: model: {sections: [...], max_output_tokens: int, dr_native: bool}
                 result[model_key] = {
                     "sections": model_data.get("sections", []),
                     "max_output_tokens": model_data.get("max_output_tokens"),
+                    "dr_native": model_data.get("dr_native", False),
                 }
             else:
                 print(f"Warning: Unknown format for model {model_key}: {type(model_data)}")
