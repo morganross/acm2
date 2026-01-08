@@ -67,7 +67,7 @@ export default function TimelineTab({ currentRun }: TimelineTabProps) {
                   <div className="flex-shrink-0 text-right text-xs text-gray-500">
                     {event.model && <div className="font-mono">{event.model}</div>}
                     {event.duration_seconds != null && <div>{event.duration_seconds.toFixed(2)}s</div>}
-                    {event.details?.cost_usd != null && event.details.cost_usd > 0 && (
+                    {event.details?.cost_usd != null && typeof event.details.cost_usd === 'number' && event.details.cost_usd > 0 && (
                       <div className="font-mono text-green-700">${event.details.cost_usd.toFixed(4)}</div>
                     )}
                     {event.timestamp && <div>{new Date(event.timestamp).toLocaleTimeString()}</div>}

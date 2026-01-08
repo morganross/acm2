@@ -9,6 +9,7 @@ import {
   Sliders,
   Scale,
   Library,
+  DollarSign,
 } from 'lucide-react'
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
@@ -20,6 +21,7 @@ const navigation = [
   { name: 'Content Library', href: '/content', icon: Library },
   { name: 'Evaluation', href: '/evaluation', icon: Scale },
   { name: 'History', href: '/history', icon: FileText },
+  { name: 'Ratings', href: '/ratings', icon: DollarSign },
   { name: 'Settings', href: '/settings', icon: Settings },
 ]
 
