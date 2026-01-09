@@ -72,6 +72,7 @@ class SingleEvalSummary:
     scores_by_criterion: Dict[str, float]
     num_evaluations: int
     results: List[SingleEvalResult]
+    deviations_by_judge_criterion: Optional[Dict[str, Dict[str, float]]] = None  # { judge_model: { criterion: deviation } }
     
     @classmethod
     def from_results(
@@ -123,6 +124,82 @@ class SingleEvalSummary:
             num_evaluations=len(results),
             results=results,
         )
+    
+    @staticmethod
+    def calculate_deviations(
+        summaries: Dict[str, "SingleEvalSummary"],
+    ) -> Dict[str, Dict[str, float]]:
+        """
+        Calculate judge deviations from document averages across all documents.
+        
+        For each judge and criterion, calculates:
+        - Per-document deviation: judge_score - document_mean_score
+        - Returns: average of these deviations across all documents (as float)
+        
+        Args:
+            summaries: Dict mapping doc_id to SingleEvalSummary
+            
+        Returns:
+            Dict[judge_model, Dict[criterion, avg_deviation_as_float]]
+        """
+        if not summaries:
+            return {}
+        
+        # Collect deviations: { judge_model: { criterion: [deviations] } }
+        judge_criterion_deviations: Dict[str, Dict[str, List[float]]] = {}
+        
+        for doc_id, summary in summaries.items():
+            # Calculate mean score per criterion for this document
+            criterion_means: Dict[str, float] = {}
+            criterion_counts: Dict[str, int] = {}
+            
+            for result in summary.results:
+                for score in result.scores:
+                    if score.criterion not in criterion_means:
+                        criterion_means[score.criterion] = 0.0
+                        criterion_counts[score.criterion] = 0
+                    criterion_means[score.criterion] += score.score
+                    criterion_counts[score.criterion] += 1
+            
+            # Calculate means
+            for criterion in criterion_means:
+                if criterion_counts[criterion] > 0:
+                    criterion_means[criterion] /= criterion_counts[criterion]
+            
+            # Calculate deviations for each judge × criterion
+            for result in summary.results:
+                judge_model = result.model
+                if judge_model not in judge_criterion_deviations:
+                    judge_criterion_deviations[judge_model] = {}
+                
+                for score in result.scores:
+                    criterion = score.criterion
+                    if criterion in criterion_means:
+                        deviation = score.score - criterion_means[criterion]
+                        
+                        if criterion not in judge_criterion_deviations[judge_model]:
+                            judge_criterion_deviations[judge_model][criterion] = []
+                        judge_criterion_deviations[judge_model][criterion].append(deviation)
+        
+        # Calculate average deviations as floats
+        result: Dict[str, Dict[str, float]] = {}
+        for judge_model, criterion_devs in judge_criterion_deviations.items():
+            result[judge_model] = {}
+            all_criterion_deviations = []
+            
+            for criterion, deviations in criterion_devs.items():
+                if deviations:
+                    avg_deviation = sum(deviations) / len(deviations)
+                    # Keep decimal precision
+                    result[judge_model][criterion] = avg_deviation
+                    all_criterion_deviations.append(avg_deviation)
+            
+            # Calculate total deviation across all criteria for this judge
+            if all_criterion_deviations:
+                total_deviation = sum(all_criterion_deviations) / len(all_criterion_deviations)
+                result[judge_model]["__TOTAL__"] = total_deviation
+        
+        return result
 
 
 ProgressCallback = Callable[[str, int, int], None]  # (doc_id, completed, total)

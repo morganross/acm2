@@ -393,7 +393,9 @@ class FpfAdapter(BaseAdapter):
         import glob
         
         try:
+            # Use absolute path - same as when writing logs
             logs_dir = Path("logs") / run_id
+            logs_dir = logs_dir.resolve()
             if not logs_dir.exists():
                 logger.debug(f"FPF logs dir not found: {logs_dir}")
                 return None
@@ -408,7 +410,7 @@ class FpfAdapter(BaseAdapter):
             log_files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
             newest_log = log_files[0]
             
-            logger.debug(f"Parsing FPF cost log: {newest_log}")
+            logger.info(f"Parsing FPF cost log: {newest_log}")
             
             with open(newest_log, "r", encoding="utf-8") as f:
                 log_data = json.load(f)
@@ -420,6 +422,8 @@ class FpfAdapter(BaseAdapter):
             output_tokens = usage.get("completion_tokens", 0)
             total_tokens = input_tokens + output_tokens
             
+            logger.info(f"FPF cost for run {run_id}: ${cost_usd:.6f} ({total_tokens} tokens)")
+            
             return {
                 "cost_usd": cost_usd,
                 "input_tokens": input_tokens,
@@ -428,7 +432,7 @@ class FpfAdapter(BaseAdapter):
             }
             
         except Exception as e:
-            logger.warning(f"Failed to parse FPF cost log for run {run_id}: {e}")
+            logger.error(f"Failed to parse FPF cost log for run {run_id}: {e}", exc_info=True)
             return None
 
     def _get_fpf_directory(self) -> str:

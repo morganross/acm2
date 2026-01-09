@@ -900,6 +900,15 @@ class RunExecutor:
                 pass
             return
         
+        # Calculate deviations after all single evals complete
+        if result.single_eval_results and len(result.single_eval_results) > 0:
+            from ..evaluation.single_doc import SingleEvalSummary
+            deviations = SingleEvalSummary.calculate_deviations(result.single_eval_results)
+            # Attach deviations to each summary
+            for doc_id, summary in result.single_eval_results.items():
+                summary.deviations_by_judge_criterion = deviations
+            self.logger.info(f"Run {run_id}: Calculated deviations for {len(deviations)} judges")
+        
         # Phase 2: Pairwise Evaluation (batch, after all single evals)
         if config.enable_pairwise and len(result.generated_docs) >= 2:
             self.logger.info(f"Run {run_id}: Starting pairwise phase")
@@ -1596,6 +1605,15 @@ Optimize your output to score highly on each criterion:
         pairwise_started_at = datetime.utcnow()
         summary = await evaluator.evaluate_all_pairs(doc_ids, contents)
         pairwise_completed_at = datetime.utcnow()
+        
+        # Calculate pairwise deviations
+        if summary.results:
+            from app.evaluation.pairwise import PairwiseSummary
+            summary.deviations_by_judge = PairwiseSummary.calculate_deviations(summary.results)
+            self.logger.info(
+                f"Calculated pairwise deviations for {len(summary.deviations_by_judge)} judges"
+            )
+        
         result.pairwise_results = summary
         result.winner_doc_id = summary.winner_doc_id
         
@@ -1877,6 +1895,15 @@ Optimize your output to score highly on each criterion:
             summary = await evaluator.evaluate_all_pairs(all_doc_ids, all_contents)
             post_combine_end = datetime.utcnow()
             post_combine_duration = (post_combine_end - post_combine_start).total_seconds()
+            
+            # Calculate pairwise deviations
+            if summary.results:
+                from app.evaluation.pairwise import PairwiseSummary
+                summary.deviations_by_judge = PairwiseSummary.calculate_deviations(summary.results)
+                self.logger.info(
+                    f"Post-combine: Calculated pairwise deviations for {len(summary.deviations_by_judge)} judges"
+                )
+            
             result.post_combine_eval_results = summary
             
             self.logger.info(

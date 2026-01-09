@@ -19,6 +19,7 @@ interface DocViewerState {
 export default function SourceDocPairwiseContent({ sourceDocResult, runId }: SourceDocPairwiseContentProps) {
   const { pairwise_results, post_combine_pairwise, winner_doc_id } = sourceDocResult
   const rankings = pairwise_results?.rankings || []
+  const pairwiseDeviations = pairwise_results?.pairwise_deviations || {}
 
   const comparisons = pairwise_results?.comparisons || []
   
@@ -148,6 +149,20 @@ export default function SourceDocPairwiseContent({ sourceDocResult, runId }: Sou
         <span>
           <strong>Pairwise Rankings:</strong> Documents ranked by ELO score from head-to-head comparisons.
         </span>
+        {pairwise_results?.total_cost !== undefined && pairwise_results.total_cost > 0 && (
+          <span
+            style={{
+              padding: '4px 12px',
+              borderRadius: '16px',
+              backgroundColor: '#064e3b',
+              color: '#10b981',
+              fontSize: '12px',
+              fontWeight: 700,
+            }}
+          >
+            Cost: ${pairwise_results.total_cost.toFixed(4)}
+          </span>
+        )}
         {winner_doc_id && (
           <span
             style={{
@@ -291,6 +306,106 @@ export default function SourceDocPairwiseContent({ sourceDocResult, runId }: Sou
                 })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Judge Deviations: Consensus Agreement */}
+      {Object.keys(pairwiseDeviations).length > 0 && (
+        <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: '1px solid #374151' }}>
+          <h4
+            style={{
+              fontSize: '14px',
+              fontWeight: 600,
+              marginBottom: '12px',
+              color: '#f3f4f6',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+            }}
+          >
+            <Users size={16} style={{ color: '#60a5fa' }} />
+            Judge Consensus Agreement Deviation
+          </h4>
+          <div
+            style={{
+              fontSize: '12px',
+              color: '#9ca3af',
+              marginBottom: '12px',
+              padding: '8px 12px',
+              backgroundColor: '#111827',
+              borderRadius: '6px',
+              border: '1px solid #374151',
+            }}
+          >
+            Shows how much each judge's agreement with consensus winners deviates from the average agreement rate.
+            Positive values indicate higher agreement (conformist), negative values indicate lower agreement (contrarian).
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
+            {Object.entries(pairwiseDeviations)
+              .sort(([, a], [, b]) => (b as number) - (a as number))
+              .map(([judge, deviation]) => {
+                const devNum = deviation as number
+                let bgColor = '#374151'
+                let textColor = '#9ca3af'
+                
+                if (devNum > 1) {
+                  bgColor = '#16a34a'
+                  textColor = 'white'
+                } else if (devNum > 0) {
+                  bgColor = 'rgba(134, 239, 172, 0.25)'
+                  textColor = '#86efac'
+                } else if (devNum < -1) {
+                  bgColor = '#dc2626'
+                  textColor = 'white'
+                } else if (devNum < 0) {
+                  bgColor = 'rgba(252, 165, 165, 0.20)'
+                  textColor = '#fca5a5'
+                }
+                
+                const displayValue = devNum > 0 ? `+${devNum}%` : `${devNum}%`
+                
+                return (
+                  <div
+                    key={judge}
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      padding: '12px 16px',
+                      backgroundColor: '#1f2937',
+                      borderRadius: '8px',
+                      border: '1px solid #374151',
+                      minWidth: '140px',
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: '11px',
+                        color: '#9ca3af',
+                        marginBottom: '4px',
+                        fontWeight: 500,
+                      }}
+                    >
+                      {judge}
+                    </div>
+                    <div
+                      style={{
+                        display: 'inline-block',
+                        padding: '6px 12px',
+                        borderRadius: '6px',
+                        backgroundColor: bgColor,
+                        color: textColor,
+                        fontSize: '14px',
+                        fontWeight: 600,
+                        textAlign: 'center',
+                      }}
+                      title={`Deviation: ${displayValue}`}
+                    >
+                      {displayValue}
+                    </div>
+                  </div>
+                )
+              })}
+          </div>
         </div>
       )}
 

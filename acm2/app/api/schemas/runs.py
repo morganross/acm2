@@ -423,6 +423,10 @@ class PairwiseResults(BaseModel):
     rankings: list[PairwiseRanking] = Field(default_factory=list)
     # ACM1-style: list of all head-to-head comparisons
     comparisons: list[PairwiseComparison] = Field(default_factory=list)
+    # Pairwise deviations: { judge_model: deviation_int } - percentage deviation from mean agreement rate
+    pairwise_deviations: dict[str, int] = Field(default_factory=dict)
+    # Total cost of all pairwise evaluations
+    total_cost: float = 0.0
 
 
 # ============================================================================
@@ -559,6 +563,18 @@ class SourceDocResultResponse(BaseModel):
     duration_seconds: float = 0.0
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    
+    # Deviation data for judges
+    eval_deviations: Optional[dict[str, dict[str, float]]] = Field(
+        default=None,
+        description="Judge deviations from document averages: { judge_model: { criterion: deviation, __TOTAL__: total_deviation } }"
+    )
+    
+    # Per-document cost breakdown
+    generated_doc_costs: dict[str, float] = Field(
+        default_factory=dict,
+        description="Cost breakdown per generated document: { gen_doc_id: cost_usd }"
+    )
 
 
 class RunDetail(BaseModel):
@@ -600,6 +616,7 @@ class RunDetail(BaseModel):
     # ACM1-style detailed evaluation data with criteria breakdown
     pre_combine_evals_detailed: dict[str, DocumentEvalDetail] = Field(default_factory=dict)  # { gen_doc_id: DocumentEvalDetail }
     post_combine_evals_detailed: dict[str, DocumentEvalDetail] = Field(default_factory=dict)  # { combined_doc_id: DocumentEvalDetail }
+    eval_deviations: dict[str, dict[str, float]] = Field(default_factory=dict)  # { judge_model: { criterion: deviation } } - average deviation from document means
     criteria_list: list[str] = Field(default_factory=list)  # All criteria used
     evaluator_list: list[str] = Field(default_factory=list)  # All evaluator model names
     

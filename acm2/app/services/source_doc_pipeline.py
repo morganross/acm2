@@ -178,6 +178,15 @@ class SourceDocPipeline:
                 result.duration_seconds = (result.completed_at - started_at).total_seconds()
                 return result
             
+            # Calculate deviations after all single evals complete
+            if result.single_eval_results and len(result.single_eval_results) > 0:
+                from ..evaluation.single_doc import SingleEvalSummary
+                deviations = SingleEvalSummary.calculate_deviations(result.single_eval_results)
+                # Attach deviations to each summary
+                for doc_id, summary in result.single_eval_results.items():
+                    summary.deviations_by_judge_criterion = deviations
+                self.logger.info(f"Pipeline [{self.source_doc_name}]: Calculated deviations for {len(deviations)} judges")
+            
             # Phase 2: Pairwise evaluation
             if self.config.enable_pairwise and len(result.generated_docs) >= 2:
                 result.status = RunPhase.PAIRWISE_EVAL
@@ -796,6 +805,15 @@ Optimize your response to score highly on each criterion:
         pairwise_started_at = datetime.utcnow()
         summary = await evaluator.evaluate_all_pairs(doc_ids, contents)
         pairwise_completed_at = datetime.utcnow()
+        
+        # Calculate pairwise deviations
+        if summary.results:
+            from app.evaluation.pairwise import PairwiseSummary
+            summary.deviations_by_judge = PairwiseSummary.calculate_deviations(summary.results)
+            self.logger.info(
+                f"Pipeline [{self.source_doc_name}]: Calculated pairwise deviations for "
+                f"{len(summary.deviations_by_judge)} judges"
+            )
         
         result.pairwise_results = summary
         result.winner_doc_id = summary.winner_doc_id

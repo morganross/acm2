@@ -8,6 +8,7 @@ interface SourceDocEvaluationContentProps {
   runId: string
   criteriaList: string[]
   evaluatorList: string[]
+  evalDeviations?: Record<string, Record<string, number>>  // { judge_model: { criterion: deviation } }
 }
 
 interface DocViewerState {
@@ -24,6 +25,7 @@ export default function SourceDocEvaluationContent({
   runId,
   criteriaList,
   evaluatorList,
+  evalDeviations,
 }: SourceDocEvaluationContentProps) {
   const [docViewer, setDocViewer] = useState<DocViewerState>({
     isOpen: false,
@@ -214,6 +216,22 @@ export default function SourceDocEvaluationContent({
                           {doc.model.length > 20 ? doc.model.substring(0, 20) + '...' : doc.model}
                           <ExternalLink size={12} />
                         </button>
+                        {/* Show cost if available */}
+                        {sourceDocResult.generated_doc_costs?.[doc.id] !== undefined && (
+                          <span
+                            style={{
+                              fontSize: '10px',
+                              padding: '2px 6px',
+                              borderRadius: '4px',
+                              backgroundColor: '#064e3b',
+                              color: '#10b981',
+                              fontWeight: 700,
+                            }}
+                            title={`Generation cost: $${sourceDocResult.generated_doc_costs[doc.id].toFixed(4)}`}
+                          >
+                            ${sourceDocResult.generated_doc_costs[doc.id].toFixed(4)}
+                          </span>
+                        )}
                       </div>
                     </td>
 
@@ -290,6 +308,135 @@ export default function SourceDocEvaluationContent({
                   </tr>
                 )
               })}
+              
+              {/* Deviation Row */}
+              {evalDeviations && Object.keys(evalDeviations).length > 0 && (
+                <tr style={{ borderTop: '3px solid #4b5563', backgroundColor: '#1f2937' }}>
+                  <td style={{ padding: '12px', fontWeight: 700, color: '#60a5fa', fontSize: '13px' }}>
+                    DEVIATION
+                  </td>
+                  
+                  {criteria.map((criterion) => (
+                    <td key={criterion} style={{ padding: '10px', textAlign: 'center' }}>
+                      <div style={{ display: 'flex', justifyContent: 'center', gap: '4px', flexWrap: 'wrap' }}>
+                        {evaluators.map((judgeModel) => {
+                          const deviation = evalDeviations[judgeModel]?.[criterion]
+                          
+                          if (deviation === undefined) {
+                            return (
+                              <span
+                                key={judgeModel}
+                                style={{
+                                  display: 'inline-block',
+                                  padding: '2px 6px',
+                                  borderRadius: '4px',
+                                  fontSize: '11px',
+                                  fontWeight: 700,
+                                  backgroundColor: '#374151',
+                                  color: '#9ca3af',
+                                }}
+                                title={`${judgeModel}: No deviation data`}
+                              >
+                                —
+                              </span>
+                            )
+                          }
+
+                          // Color coding: positive = green, negative = red, near-zero = gray
+                          let bgColor = '#6b7280'  // gray for near-zero
+                          let textColor = 'white'
+                          if (deviation > 1) { bgColor = '#22c55e'; textColor = 'white' }  // green
+                          else if (deviation > 0) { bgColor = '#86efac'; textColor = '#166534' }  // light green
+                          else if (deviation < -1) { bgColor = '#ef4444'; textColor = 'white' }  // red
+                          else if (deviation < 0) { bgColor = '#fca5a5'; textColor = '#991b1b' }  // light red
+
+                          // Format with explicit sign
+                          const deviationStr = deviation > 0 ? `+${deviation}` : `${deviation}`
+
+                          return (
+                            <span
+                              key={judgeModel}
+                              style={{
+                                display: 'inline-block',
+                                padding: '2px 6px',
+                                borderRadius: '4px',
+                                fontSize: '11px',
+                                fontWeight: 800,
+                                backgroundColor: bgColor,
+                                color: textColor,
+                                minWidth: '24px',
+                                textAlign: 'center',
+                              }}
+                              title={`${judgeModel}: ${deviationStr} from average`}
+                            >
+                              {deviationStr}
+                            </span>
+                          )
+                        })}
+                      </div>
+                    </td>
+                  ))}
+                  
+                  <td style={{ padding: '12px', textAlign: 'center' }}>
+                    <div style={{ display: 'flex', justifyContent: 'center', gap: '4px', flexWrap: 'wrap' }}>
+                      {evaluators.map((judgeModel) => {
+                        const totalDeviation = evalDeviations[judgeModel]?.__TOTAL__
+                        
+                        if (totalDeviation === undefined) {
+                          return (
+                            <span
+                              key={judgeModel}
+                              style={{
+                                display: 'inline-block',
+                                padding: '2px 6px',
+                                borderRadius: '4px',
+                                fontSize: '11px',
+                                fontWeight: 700,
+                                backgroundColor: '#374151',
+                                color: '#9ca3af',
+                              }}
+                              title={`${judgeModel}: No total deviation`}
+                            >
+                              —
+                            </span>
+                          )
+                        }
+
+                        // Color coding: positive = green, negative = red, near-zero = gray
+                        let bgColor = '#6b7280'  // gray for near-zero
+                        let textColor = 'white'
+                        if (totalDeviation > 1) { bgColor = '#22c55e'; textColor = 'white' }  // green
+                        else if (totalDeviation > 0) { bgColor = '#86efac'; textColor = '#166534' }  // light green
+                        else if (totalDeviation < -1) { bgColor = '#ef4444'; textColor = 'white' }  // red
+                        else if (totalDeviation < 0) { bgColor = '#fca5a5'; textColor = '#991b1b' }  // light red
+
+                        // Format with explicit sign
+                        const deviationStr = totalDeviation > 0 ? `+${totalDeviation}` : `${totalDeviation}`
+
+                        return (
+                          <span
+                            key={judgeModel}
+                            style={{
+                              display: 'inline-block',
+                              padding: '2px 6px',
+                              borderRadius: '4px',
+                              fontSize: '11px',
+                              fontWeight: 800,
+                              backgroundColor: bgColor,
+                              color: textColor,
+                              minWidth: '24px',
+                              textAlign: 'center',
+                            }}
+                            title={`${judgeModel}: ${deviationStr} total average deviation`}
+                          >
+                            {deviationStr}
+                          </span>
+                        )
+                      })}
+                    </div>
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -373,6 +520,22 @@ export default function SourceDocEvaluationContent({
                         color: '#86efac'
                       }}>
                         WINNER
+                      </span>
+                    )}
+                    {/* Show cost if available */}
+                    {sourceDocResult.generated_doc_costs?.[doc.id] !== undefined && (
+                      <span
+                        style={{
+                          fontSize: '10px',
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                          backgroundColor: '#064e3b',
+                          color: '#10b981',
+                          fontWeight: 700,
+                        }}
+                        title={`Generation cost: $${sourceDocResult.generated_doc_costs[doc.id].toFixed(4)}`}
+                      >
+                        ${sourceDocResult.generated_doc_costs[doc.id].toFixed(4)}
                       </span>
                     )}
                   </div>
@@ -522,10 +685,17 @@ export default function SourceDocEvaluationContent({
   return (
     <div>
       {/* Pre-combine evaluations */}
-      <h4 style={{ color: '#60a5fa', fontSize: '14px', fontWeight: 600, marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <Target size={16} />
-        Generated Documents ({generated_docs.length})
-      </h4>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+        <h4 style={{ color: '#60a5fa', fontSize: '14px', fontWeight: 600, margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <Target size={16} />
+          Generated Documents ({generated_docs.length})
+        </h4>
+        {sourceDocResult.cost_usd > 0 && (
+          <div style={{ fontSize: '13px', color: '#10b981', fontWeight: 700 }}>
+            Total Cost: ${sourceDocResult.cost_usd.toFixed(4)}
+          </div>
+        )}
+      </div>
 
       {hasDetailedHeatmapData
         ? renderACM1StyleHeatmap(

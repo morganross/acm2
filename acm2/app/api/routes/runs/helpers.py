@@ -182,6 +182,8 @@ def to_detail(run) -> RunDetail:
                 winner_doc_id=pw.get("winner_doc_id"),
                 rankings=rankings,
                 comparisons=comparisons,
+                pairwise_deviations=pw.get("pairwise_deviations") or {},
+                total_cost=pw.get("total_cost", 0.0),
             )
     except Exception as e:
         logger.warning(f"Failed to parse pairwise for run {run.id}: {e}")
@@ -216,6 +218,8 @@ def to_detail(run) -> RunDetail:
                 winner_doc_id=pce.get("winner_doc_id"),
                 rankings=pc_rankings,
                 comparisons=pc_comparisons,
+                pairwise_deviations=pce.get("pairwise_deviations") or {},
+                total_cost=pce.get("total_cost", 0.0),
             )
     except Exception as e:
         logger.warning(f"Failed to parse post_combine_eval for run {run.id}: {e}")
@@ -332,6 +336,7 @@ def to_detail(run) -> RunDetail:
                         winner_doc_id=pw.get("winner_doc_id"),
                         rankings=rankings,
                         comparisons=comparisons,
+                        pairwise_deviations=pw.get("pairwise_deviations") or {},
                     )
 
                 # GUI format: { total_comparisons, winner_doc_id, rankings: [...], comparisons: [...] }
@@ -342,6 +347,7 @@ def to_detail(run) -> RunDetail:
                     winner_doc_id=pw.get("winner_doc_id"),
                     rankings=rankings,
                     comparisons=comparisons,
+                    pairwise_deviations=pw.get("pairwise_deviations") or {},
                 )
             except Exception:
                 return None
@@ -483,6 +489,33 @@ def to_detail(run) -> RunDetail:
             except ValueError:
                 status = SourceDocStatus.PENDING
             
+            # Extract deviation data - first try top-level field, then reconstruct from summaries
+            sdr_eval_deviations = sdr.get("eval_deviations")
+            
+            # If no top-level deviations, reconstruct from single_eval_results summaries
+            # This enables past runs to display deviations that were calculated but not stored at top level
+            if not sdr_eval_deviations:
+                try:
+                    # Get single_eval_results from either key name
+                    single_eval_results = sdr.get("single_eval_results") or sdr.get("single_eval_summaries") or {}
+                    
+                    # Extract deviations from any summary that has them
+                    # All summaries should have the same deviation dict (it's calculated once for all docs)
+                    for summary_data in single_eval_results.values():
+                        if isinstance(summary_data, dict):
+                            summary_deviations = summary_data.get("deviations_by_judge_criterion")
+                            if summary_deviations:
+                                sdr_eval_deviations = summary_deviations
+                                break  # All summaries have same deviation dict, so we only need one
+                except Exception:
+                    pass  # Keep sdr_eval_deviations as None
+            
+            # Build per-document cost breakdown
+            sdr_generated_doc_costs: dict[str, float] = {}
+            for doc in sdr_generated_docs:
+                if hasattr(doc, 'cost_usd') and doc.cost_usd is not None:
+                    sdr_generated_doc_costs[doc.id] = doc.cost_usd
+            
             source_doc_results[source_doc_id] = SourceDocResultResponse(
                 source_doc_id=source_doc_id,
                 source_doc_name=sdr.get("source_doc_name", source_doc_id),
@@ -502,6 +535,8 @@ def to_detail(run) -> RunDetail:
                 duration_seconds=sdr.get("duration_seconds", 0.0),
                 started_at=sdr.get("started_at"),
                 completed_at=sdr.get("completed_at"),
+                eval_deviations=sdr_eval_deviations,
+                generated_doc_costs=sdr_generated_doc_costs,
             )
     except Exception as e:
         logger.warning(f"Failed to parse source_doc_results for run {run.id}: {e}", exc_info=True)
@@ -550,6 +585,7 @@ def to_detail(run) -> RunDetail:
         combined_doc_ids=results_summary.get("combined_doc_ids") or [],
         pre_combine_evals_detailed=pre_combine_evals_detailed,
         post_combine_evals_detailed=post_combine_evals_detailed,
+        eval_deviations=results_summary.get("eval_deviations") or {},
         criteria_list=results_summary.get("criteria_list") or [],
         evaluator_list=results_summary.get("evaluator_list") or [],
         timeline_events=timeline_events,

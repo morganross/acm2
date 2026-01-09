@@ -236,6 +236,15 @@ async def execute_run_background(run_id: str, config: RunConfig):
                 for combined_doc in (result.combined_docs or []):
                     doc_generation_costs[combined_doc.doc_id] = combined_doc.cost_usd or 0.0
                 
+                # Extract deviations from single_eval_results (calculated across all docs)
+                eval_deviations = {}
+                if result.single_eval_results:
+                    # Get deviations from any summary (they're all the same)
+                    for summary in result.single_eval_results.values():
+                        if hasattr(summary, 'deviations_by_judge_criterion') and summary.deviations_by_judge_criterion:
+                            eval_deviations = summary.deviations_by_judge_criterion
+                            break
+                
                 # Build pre-combine evaluation scores
                 # First, check if we have incrementally-saved data that we should preserve
                 # The incremental callbacks (on_eval_complete) save data to DB during execution,
@@ -369,6 +378,7 @@ async def execute_run_background(run_id: str, config: RunConfig):
                             for r in (result.pairwise_results.elo_ratings or [])
                         ] if result.pairwise_results.elo_ratings else [],
                         "comparisons": comparisons,
+                        "pairwise_deviations": result.pairwise_results.deviations_by_judge or {},
                     }
                 
                 # Legacy eval_scores format
@@ -529,6 +539,7 @@ async def execute_run_background(run_id: str, config: RunConfig):
                         "pairwise": pairwise_data,
                         "pre_combine_evals_detailed": pre_combine_evals_detailed,
                         "post_combine_evals_detailed": post_combine_evals_detailed,
+                        "eval_deviations": eval_deviations,  # NEW: Judge deviations across all documents
                         "criteria_list": sorted(list(all_criteria)),
                         "evaluator_list": sorted(list(all_evaluators)),
                         "generation_events": generation_events,

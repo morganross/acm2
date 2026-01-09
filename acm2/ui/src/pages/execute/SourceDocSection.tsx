@@ -248,6 +248,7 @@ export default function SourceDocSection({
                 runId={currentRun.id}
                 criteriaList={currentRun.criteria_list || []}
                 evaluatorList={currentRun.evaluator_list || []}
+                evalDeviations={sourceDocResult.eval_deviations}
               />
             )}
             {activeTab === 'pairwise' && (

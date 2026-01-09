@@ -44,6 +44,8 @@ export interface PairwiseResults {
   winner_doc_id?: string
   rankings: PairwiseRanking[]
   comparisons?: PairwiseComparison[]  // ACM1-style head-to-head comparisons
+  pairwise_deviations?: Record<string, number>  // { judge_model: deviation_int } - percentage deviation from mean agreement rate
+  total_cost?: number  // Total cost of all pairwise evaluations
 }
 
 // ============================================================================
@@ -165,6 +167,12 @@ export interface SourceDocResult {
   duration_seconds: number
   started_at?: string
   completed_at?: string
+  
+  // Deviation data for judges
+  eval_deviations?: Record<string, Record<string, number>>  // { judge_model: { criterion: deviation, __TOTAL__: total } }
+  
+  // Per-document cost breakdown
+  generated_doc_costs?: Record<string, number>  // { gen_doc_id: cost_usd }
 }
 
 export interface Run {
@@ -209,6 +217,7 @@ export interface Run {
   // ACM1-style detailed evaluation data with criteria breakdown
   pre_combine_evals_detailed?: Record<string, DocumentEvalDetail>  // { gen_doc_id: DocumentEvalDetail }
   post_combine_evals_detailed?: Record<string, DocumentEvalDetail>  // { combined_doc_id: DocumentEvalDetail }
+  eval_deviations?: Record<string, Record<string, number>>  // { judge_model: { criterion: deviation_int } }
   criteria_list?: string[]  // All criteria used
   evaluator_list?: string[]  // All evaluator model names
   // ACM1-style timeline and generation events

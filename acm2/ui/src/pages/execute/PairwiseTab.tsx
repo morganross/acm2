@@ -18,6 +18,7 @@ interface DocViewerState {
 export default function PairwiseTab({ currentRun }: PairwiseTabProps) {
   const pairwiseResults = currentRun?.pairwise_results
   const postCombinePairwise = currentRun?.post_combine_pairwise
+  const pairwiseDeviations = pairwiseResults?.pairwise_deviations || {}
   
   // Document viewer modal state
   const [docViewer, setDocViewer] = useState<DocViewerState>({
@@ -237,6 +238,72 @@ export default function PairwiseTab({ currentRun }: PairwiseTabProps) {
           </span>
         </div>
       </div>
+
+      {/* Judge Deviations: Consensus Agreement */}
+      {Object.keys(pairwiseDeviations).length > 0 && (
+        <div className="mt-6 p-4 rounded-lg" style={{ backgroundColor: '#f8f9fa', border: '1px solid #e9ecef' }}>
+          <h4 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: '#495057' }}>
+            <Trophy className="w-4 h-4" style={{ color: '#2563eb' }} />
+            Judge Consensus Agreement Deviation
+          </h4>
+          <div className="text-xs mb-3 p-2 rounded" style={{ backgroundColor: '#e3f2fd', color: '#495057' }}>
+            Shows how much each judge's agreement with consensus winners deviates from the average agreement rate.
+            Positive values indicate higher agreement (conformist), negative values indicate lower agreement (contrarian).
+          </div>
+          <div className="flex flex-wrap gap-3">
+            {Object.entries(pairwiseDeviations)
+              .sort(([, a], [, b]) => (b as number) - (a as number))
+              .map(([judge, deviation]) => {
+                const devNum = deviation as number
+                let bgColor = '#6c757d'
+                let textColor = 'white'
+                
+                if (devNum > 1) {
+                  bgColor = '#28a745'
+                  textColor = 'white'
+                } else if (devNum > 0) {
+                  bgColor = '#d4edda'
+                  textColor = '#155724'
+                } else if (devNum < -1) {
+                  bgColor = '#dc3545'
+                  textColor = 'white'
+                } else if (devNum < 0) {
+                  bgColor = '#f8d7da'
+                  textColor = '#721c24'
+                }
+                
+                const displayValue = devNum > 0 ? `+${devNum}%` : `${devNum}%`
+                
+                return (
+                  <div
+                    key={judge}
+                    className="flex flex-col p-3 rounded"
+                    style={{
+                      backgroundColor: '#ffffff',
+                      border: '1px solid #dee2e6',
+                      minWidth: '140px',
+                    }}
+                  >
+                    <div className="text-xs font-medium mb-1" style={{ color: '#6c757d' }}>
+                      {judge}
+                    </div>
+                    <div
+                      className="inline-block px-3 py-1 rounded text-center font-semibold"
+                      style={{
+                        backgroundColor: bgColor,
+                        color: textColor,
+                        fontSize: '14px',
+                      }}
+                      title={`Deviation: ${displayValue}`}
+                    >
+                      {displayValue}
+                    </div>
+                  </div>
+                )
+              })}
+          </div>
+        </div>
+      )}
       
       {/* Head-to-Head Comparison Matrix */}
       {pairwiseResults?.comparisons && pairwiseResults.comparisons.length > 0 && (

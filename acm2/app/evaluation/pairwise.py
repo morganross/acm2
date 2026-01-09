@@ -89,11 +89,85 @@ class PairwiseSummary:
     results: List[PairwiseResult]
     elo_ratings: List[EloRating]
     winner_doc_id: Optional[str]
+    deviations_by_judge: Optional[Dict[str, int]] = None  # { judge_model: deviation_int }
     
     @property
     def rankings(self) -> List[Tuple[str, float]]:
         """Get rankings as (doc_id, rating) tuples."""
         return [(r.doc_id, r.rating) for r in self.elo_ratings]
+    
+    @staticmethod
+    def calculate_deviations(results: List[PairwiseResult]) -> Dict[str, int]:
+        """
+        Calculate consensus agreement deviation for each judge.
+        
+        For each comparison (A vs B), determine consensus winner (most votes).
+        Track per-judge: did they pick the consensus winner?
+        Calculate agreement rate: agreements / total_comparisons
+        Compute deviation from mean agreement rate.
+        
+        Args:
+            results: All pairwise results
+            
+        Returns:
+            Dict mapping judge_model to deviation (signed integer percentage)
+        """
+        if not results:
+            return {}
+        
+        # Group results by comparison pair
+        comparisons: Dict[Tuple[str, str], List[PairwiseResult]] = {}
+        for result in results:
+            # Normalize pair order (sort doc IDs to treat A-vs-B same as B-vs-A)
+            pair = tuple(sorted([result.doc_id_1, result.doc_id_2]))
+            if pair not in comparisons:
+                comparisons[pair] = []
+            comparisons[pair].append(result)
+        
+        # For each comparison, determine consensus winner
+        # and track which judges agreed
+        judge_agreements: Dict[str, List[bool]] = {}
+        
+        for pair, pair_results in comparisons.items():
+            # Count votes for each document
+            votes: Dict[str, int] = {}
+            for result in pair_results:
+                winner = result.winner_doc_id
+                votes[winner] = votes.get(winner, 0) + 1
+            
+            # Determine consensus winner (most votes)
+            if not votes:
+                continue
+            consensus_winner = max(votes.items(), key=lambda x: x[1])[0]
+            
+            # Track agreement for each judge
+            for result in pair_results:
+                judge = result.model
+                agreed = (result.winner_doc_id == consensus_winner)
+                
+                if judge not in judge_agreements:
+                    judge_agreements[judge] = []
+                judge_agreements[judge].append(agreed)
+        
+        # Calculate agreement rates
+        agreement_rates: Dict[str, float] = {}
+        for judge, agreements in judge_agreements.items():
+            if agreements:
+                agreement_rates[judge] = sum(agreements) / len(agreements) * 100.0
+        
+        if not agreement_rates:
+            return {}
+        
+        # Calculate mean agreement rate
+        mean_rate = sum(agreement_rates.values()) / len(agreement_rates)
+        
+        # Calculate deviations from mean
+        deviations: Dict[str, int] = {}
+        for judge, rate in agreement_rates.items():
+            deviation = round(rate - mean_rate)
+            deviations[judge] = deviation
+        
+        return deviations
 
 
 PairwiseProgressCallback = Callable[[int, int, str, str], None]  # (completed, total, doc1, doc2)
