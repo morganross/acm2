@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     anthropic_api_key: Optional[str] = None
     google_api_key: Optional[str] = None
     tavily_api_key: Optional[str] = None
+    encryption_key: Optional[str] = None
 
     # ACM API key + rate limiting
     api_key: Optional[str] = None

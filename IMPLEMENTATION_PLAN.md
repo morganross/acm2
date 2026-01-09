@@ -8,71 +8,1176 @@
 
 ---
 
+## Expected Challenges & How to Handle Them
+
+### 🔴 HARD: User ID Propagation Through Evaluation Pipeline
+
+**Problem:**
+The evaluation pipeline has 10+ nested function calls. You need to pass `user_id` through ALL of them:
+```
+create_run() → execute_run() → evaluate_single_doc() → call_judge() → 
+call_openai() → get_provider_key(user_id) 
+```
+
+**Why it's hard:**
+- Touch 15-20 files across the codebase
+- Easy to miss one function call, which breaks at runtime
+- Type signatures need updating everywhere
+- Existing code doesn't have this parameter
+
+**Solution:**
+1. **Bottom-up approach**: Start with adapters, work backwards
+   - Update `call_openai(user_id, ...)` first
+   - Then update all callers of `call_openai()`
+   - Repeat until you reach the top-level route
+2. **Use TypeScript-style type hints**: Python type checker will catch missing params
+3. **Add a test that fails if user_id not passed**: 
+   ```python
+   # In adapter
+   assert user_id is not None, "user_id is required"
+   ```
+
+**Time estimate:** 2-3 hours of careful editing
+
+---
+
+### 🟡 MEDIUM: WordPress Security (API Key Proxy)
+
+**Problem:**
+If you mess up the proxy, API keys could be exposed to the browser. This is the CRITICAL security boundary.
+
+**Common mistakes:**
+```php
+// ❌ WRONG - Exposes key to browser
+function get_user_key() {
+    return ['api_key' => get_user_meta($user_id, 'acm2_api_key', true)];
+}
+
+// ✅ RIGHT - Key never leaves WordPress backend
+function proxy_request($endpoint) {
+    $key = get_user_meta($user_id, 'acm2_api_key', true);
+    $response = wp_remote_post($endpoint, ['headers' => ['X-ACM2-API-Key' => $key]]);
+    return json_decode($response['body']);  // NO key in response
+}
+```
+
+**How to verify it's secure:**
+1. Open browser DevTools → Network tab
+2. Make API call from React app
+3. Search for "acm2_" in request/response
+4. If you find the full API key anywhere → YOU HAVE A SECURITY BUG
+
+**Solution:**
+- NEVER return the API key in any API response
+- ONLY return the key prefix (first 8 chars) for display
+- Add unit test that verifies key not in response
+
+---
+
+### 🟡 MEDIUM: Database Migration (Single → Multi-User)
+
+**Problem:**
+You have existing runs in `acm2.db`. You need to migrate them to `user_1.db` without losing data.
+
+**Gotchas:**
+- Old database might have different schema (missing columns)
+- Run IDs might collide if multiple users migrated
+- Evaluation results reference models that might not exist in new user's keys
+
+**Solution:**
+```python
+async def migrate_existing_database():
+    # 1. Create first user
+    user_id = await create_user("admin@example.com")
+    
+    # 2. Copy all tables
+    async with aiosqlite.connect("data/acm2.db") as old:
+        async with aiosqlite.connect(f"data/user_{user_id}.db") as new:
+            # Get table names
+            cursor = await old.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+            tables = [row[0] for row in await cursor.fetchall()]
+            
+            for table in tables:
+                # Copy all rows
+                cursor = await old.execute(f"SELECT * FROM {table}")
+                rows = await cursor.fetchall()
+                
+                if rows:
+                    # Get column count
+                    placeholders = ",".join(["?" for _ in rows[0]])
+                    await new.executemany(
+                        f"INSERT INTO {table} VALUES ({placeholders})",
+                        rows
+                    )
+            await new.commit()
+    
+    # 3. Backup old database
+    import shutil
+    shutil.move("data/acm2.db", "data/acm2.db.backup")
+    
+    print(f"✅ Migrated to user {user_id}")
+```
+
+**Test before running on real data:**
+1. Make a copy of `acm2.db` → `acm2_test.db`
+2. Run migration on test copy
+3. Verify all runs still accessible
+4. Only then run on real database
+
+---
+
+### 🟡 MEDIUM: Frontend Build & WordPress Integration
+
+**Problem:**
+Vite generates files with random hashes: `index-abc123.js`. WordPress needs to know the exact filename to enqueue.
+
+**Why it's hard:**
+- Build output changes every time
+- WordPress plugin needs to find the current filename
+- Path references might break (CSS loading images, etc.)
+
+**Solution:**
+```php
+// In WordPress plugin
+function acm2_enqueue_react_app() {
+    $assets_dir = ACM2_PLUGIN_DIR . 'assets/react-app/assets/';
+    
+    // Find current JS file
+    $js_files = glob($assets_dir . 'index-*.js');
+    if (empty($js_files)) {
+        wp_die('React app not built. Run: cd frontend && npm run build');
+    }
+    
+    $js_file = basename($js_files[0]);
+    $css_file = basename(glob($assets_dir . 'index-*.css')[0]);
+    
+    wp_enqueue_script('acm2-app', 
+        ACM2_PLUGIN_URL . 'assets/react-app/assets/' . $js_file, 
+        [], 
+        filemtime($js_files[0]),  // Use file modification time as version
+        true
+    );
+}
+```
+
+**Alternative (cleaner):** Generate a manifest file
+```json
+// frontend/dist/manifest.json
+{
+  "index.js": "assets/index-abc123.js",
+  "index.css": "assets/index-def456.css"
+}
+```
+
+Then WordPress just reads the manifest.
+
+---
+
+### 🔴 HARD: Async Context Propagation (Python)
+
+**Problem:**
+Python's `asyncio` makes it tricky to pass context (like `user_id`) through deeply nested async calls.
+
+**Current architecture:**
+```python
+# Multiple functions need user_id
+await evaluate_single_doc(user_id, doc, models)
+    await call_judge(user_id, model, messages)
+        await call_openai(user_id, model, messages)
+            await get_provider_key(user_id, "openai")
+```
+
+**Pain points:**
+- Every function signature needs `user_id` parameter
+- Easy to forget in one place
+- Function signatures become long
+
+**Better solution (optional, advanced):**
+Use Python's `contextvars` to store user_id in async context:
+
+```python
+from contextvars import ContextVar
+
+# Global context variable
+current_user_id: ContextVar[int] = ContextVar('current_user_id')
+
+# In FastAPI route
+@router.post("/runs")
+async def create_run(user_id: CurrentUser, ...):
+    # Set context for this request
+    current_user_id.set(user_id)
+    
+    # Now all nested functions can access it
+    await execute_run(...)  # No user_id parameter needed!
+
+# In adapter
+async def get_provider_key(provider: str) -> str:
+    user_id = current_user_id.get()  # Get from context
+    async with get_user_db(user_id) as db:
+        ...
+```
+
+**Pros:**
+- Cleaner function signatures
+- Can't forget to pass user_id
+
+**Cons:**
+- Harder to understand for someone reading code
+- Context can be confusing in concurrent scenarios
+
+**Recommendation:** Start simple (pass user_id everywhere), refactor to contextvars later if needed.
+
+---
+
+### 🟡 MEDIUM: Long-Running Requests (Timeouts)
+
+**Problem:**
+Evaluations can take 5-10 minutes. Default WordPress/Apache/Nginx timeouts are 30-60 seconds.
+
+**Symptoms:**
+- Request works for small runs, fails for large ones
+- 504 Gateway Timeout errors
+- WordPress shows "The site is experiencing technical difficulties"
+
+**What needs to be configured:**
+```apache
+# Apache config
+ProxyPass /api http://localhost:8199/api timeout=600
+
+# PHP config (php.ini)
+max_execution_time = 600
+
+# WordPress plugin
+wp_remote_post($url, [
+    'timeout' => 600  // 10 minutes
+]);
+
+# FastAPI (Uvicorn)
+# Default is no timeout - good!
+```
+
+**Better solution:** Use background jobs
+```python
+# Instead of waiting for evaluation to complete:
+@router.post("/runs")
+async def create_run(...):
+    run_id = generate_uuid()
+    
+    # Start evaluation in background
+    asyncio.create_task(execute_run_async(run_id, user_id, ...))
+    
+    # Return immediately
+    return {"run_id": run_id, "status": "pending"}
+
+# Frontend polls for status
+GET /runs/{run_id}  # Returns status: pending/running/completed/failed
+```
+
+---
+
+### 🔴 HARD: Encryption Key Management
+
+**Problem:**
+The encryption key is in `.env` file. If you lose it, ALL provider keys become unrecoverable.
+
+**Scenarios:**
+1. **Server crashes, .env file lost** → All user provider keys gone forever
+2. **You commit .env to git, need to rotate key** → Need to re-encrypt all keys
+3. **Encryption key compromised** → Attacker can decrypt all provider keys
+
+**Solution - Key Backup:**
+```bash
+# Store encryption key in multiple places
+echo $ACM2_ENCRYPTION_KEY > ~/acm2_encryption_key.backup
+gpg --encrypt ~/acm2_encryption_key.backup  # Encrypt the backup!
+scp ~/acm2_encryption_key.backup.gpg user@backup-server:/backups/
+```
+
+**Solution - Key Rotation:**
+```python
+async def rotate_encryption_key(old_key: str, new_key: str):
+    """Re-encrypt all provider keys with new encryption key"""
+    old_fernet = Fernet(old_key.encode())
+    new_fernet = Fernet(new_key.encode())
+    
+    # Find all user databases
+    for db_file in Path("data").glob("user_*.db"):
+        async with aiosqlite.connect(db_file) as db:
+            cursor = await db.execute("SELECT id, encrypted_key FROM provider_keys")
+            rows = await cursor.fetchall()
+            
+            for key_id, encrypted_key in rows:
+                # Decrypt with old key
+                plaintext = old_fernet.decrypt(encrypted_key.encode())
+                # Re-encrypt with new key
+                new_encrypted = new_fernet.encrypt(plaintext).decode()
+                # Update database
+                await db.execute(
+                    "UPDATE provider_keys SET encrypted_key = ? WHERE id = ?",
+                    [new_encrypted, key_id]
+                )
+            await db.commit()
+```
+
+---
+
+### 🟡 MEDIUM: Testing Multi-Tenancy (Data Isolation)
+
+**Problem:**
+How do you prove User A can't access User B's data? Manual testing is tedious and error-prone.
+
+**What to test:**
+1. User A creates run → User B can't see it
+2. User A adds provider key → User B can't use it
+3. User A's evaluation doesn't affect User B's quota/rate limits
+
+**Solution - Automated test:**
+```python
+import pytest
+
+@pytest.mark.asyncio
+async def test_data_isolation():
+    # Create two users
+    user1_id = await create_user("user1@example.com")
+    user2_id = await create_user("user2@example.com")
+    
+    # User 1 creates run
+    async with get_user_db(user1_id) as db:
+        await db.execute(
+            "INSERT INTO runs (id, prompt) VALUES (?, ?)",
+            ["run1", "User 1's secret prompt"]
+        )
+        await db.commit()
+    
+    # User 2 should NOT see it
+    async with get_user_db(user2_id) as db:
+        cursor = await db.execute("SELECT * FROM runs WHERE id = ?", ["run1"])
+        row = await cursor.fetchone()
+        assert row is None, "User 2 can see User 1's run!"
+    
+    # User 2 creates run with same ID
+    async with get_user_db(user2_id) as db:
+        await db.execute(
+            "INSERT INTO runs (id, prompt) VALUES (?, ?)",
+            ["run1", "User 2's different prompt"]
+        )
+        await db.commit()
+    
+    # Verify they're separate
+    async with get_user_db(user1_id) as db:
+        cursor = await db.execute("SELECT prompt FROM runs WHERE id = ?", ["run1"])
+        prompt = (await cursor.fetchone())[0]
+        assert prompt == "User 1's secret prompt"
+    
+    async with get_user_db(user2_id) as db:
+        cursor = await db.execute("SELECT prompt FROM runs WHERE id = ?", ["run1"])
+        prompt = (await cursor.fetchone())[0]
+        assert prompt == "User 2's different prompt"
+```
+
+---
+
+### 🟡 MEDIUM: WordPress Development Environment
+
+**Problem:**
+If you're not familiar with WordPress, setting up a local dev environment is painful.
+
+**What you need:**
+- PHP 8.0+
+- MySQL/MariaDB
+- WordPress installation
+- Understanding of WordPress hooks/filters
+
+**Quick setup (LocalWP - easiest):**
+```bash
+# Download LocalWP from localwp.com
+# Click "Create New Site"
+# Site name: acm2-dev
+# PHP: 8.2, MySQL: 8.0
+# Click "Add Site"
+
+# Done! WordPress running at: http://acm2-dev.local
+```
+
+**Alternative (Docker):**
+```yaml
+# docker-compose.yml
+version: '3'
+services:
+  wordpress:
+    image: wordpress:latest
+    ports:
+      - "8080:80"
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_PASSWORD: password
+  db:
+    image: mysql:8
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: wordpress
+```
+
+**Where to put plugin during development:**
+```bash
+# Option 1: Symlink (hot reload)
+ln -s /path/to/acm2/wordpress-plugin /path/to/wordpress/wp-content/plugins/acm2
+
+# Option 2: Copy (must rebuild each time)
+cp -r wordpress-plugin /path/to/wordpress/wp-content/plugins/acm2
+```
+
+---
+
+### 🔴 HARD: Debugging Async Python Errors
+
+**Problem:**
+When an async function fails deep in the evaluation pipeline, the error message is cryptic.
+
+**Example error:**
+```
+Task exception was never retrieved
+Future exception was never retrieved
+Traceback (most recent call last):
+  ...
+  (no useful information)
+```
+
+**Solution - Add better error handling:**
+```python
+# In evaluation pipeline
+async def execute_run(user_id: int, ...):
+    try:
+        result = await evaluate_single_doc(user_id, ...)
+        return result
+    except Exception as e:
+        # Log full context
+        logger.error(
+            f"Evaluation failed for user {user_id}",
+            extra={
+                "user_id": user_id,
+                "run_id": run_id,
+                "models": models,
+                "error": str(e),
+                "traceback": traceback.format_exc()
+            }
+        )
+        # Re-raise with more context
+        raise RuntimeError(f"Evaluation failed: {e}") from e
+```
+
+**Solution - Use `asyncio.create_task` with error handler:**
+```python
+async def safe_background_task(coro):
+    """Wrapper that logs errors from background tasks"""
+    try:
+        await coro
+    except Exception as e:
+        logger.error(f"Background task failed: {e}", exc_info=True)
+
+# Usage
+asyncio.create_task(safe_background_task(execute_run(...)))
+```
+
+---
+
+## Summary: What's Hard, What's Not
+
+### ✅ Easy Parts (1-2 hours each):
+- Creating database schemas (just SQL)
+- API key generation (bcrypt is simple)
+- Encryption setup (Fernet is easy)
+- WordPress plugin structure (copy/paste)
+- Frontend environment detection (one if statement)
+
+### 🟡 Medium Parts (3-5 hours each):
+- Authentication middleware (FastAPI dependency injection)
+- Database router (context manager)
+- WordPress API proxy (PHP is annoying but straightforward)
+- Frontend build integration (path hell)
+- Provider keys UI (React CRUD is tedious)
+
+### 🔴 Hard Parts (1-2 days each):
+- **User ID propagation through evaluation pipeline** (touch many files)
+- **Database migration** (can't afford to lose data)
+- **Testing multi-tenancy thoroughly** (need comprehensive test suite)
+- **Security audit** (one mistake = all API keys leaked)
+- **Production deployment** (Apache config, SSL, systemd, all the DevOps)
+
+---
+
+## Risk Mitigation Strategy
+
+1. **Start with Phase 1 & 2 ONLY**
+   - Get multi-user backend working
+   - Test with curl/Postman
+   - Don't touch WordPress yet
+
+2. **Test data isolation BEFORE adding WordPress**
+   - Create 2 users
+   - Add runs for each
+   - Verify they can't see each other's data
+
+3. **WordPress is just a proxy**
+   - If WordPress breaks, backend still works
+   - You can always use API directly
+   - WordPress is optional (nice to have)
+
+4. **Backup before migration**
+   - Copy `acm2.db` multiple times
+   - Test migration on copy first
+   - Keep old database as backup
+
+5. **Security checklist before production**
+   - [ ] API keys never in logs
+   - [ ] Encryption key backed up
+   - [ ] Provider keys encrypted in DB
+   - [ ] WordPress proxy doesn't expose keys
+   - [ ] Rate limiting on API endpoints
+   - [ ] HTTPS enforced
+
+---
+
+## The Complete User Flow - Plain English Narrative
+
+### Scenario: Bob wants to run an LLM evaluation
+
+---
+
+### Step 1: Bob Opens His Browser
+
+Bob is a lawyer who wants to use AI to analyze a contract. He's heard about your ACM2 service that can run the same prompt through multiple AI models (OpenAI, Google, Anthropic) and compare their responses.
+
+Bob types your website address into his browser and presses Enter. The browser sends a request across the internet to your web server.
+
+Your web server (Apache) receives the request. It looks at the URL and sees it's asking for a WordPress page. Apache hands the request to WordPress to figure out what to show.
+
+---
+
+### Step 2: WordPress Checks Who Bob Is
+
+WordPress looks at the cookies the browser sent along with the request. There's a cookie called something like "wordpress_logged_in" that was created when Bob logged in earlier today.
+
+WordPress reads this cookie and thinks: "Ah, this is Bob. He logged in this morning. His user ID in my database is 42."
+
+---
+
+### Step 3: WordPress Checks If Bob Has Set Up ACM2
+
+WordPress queries its database to see if Bob has ever generated an ACM2 API key. It looks in a table where it stores extra information about users.
+
+It finds a record that says "User 42 (Bob) has an ACM2 API key: acm2_xyz789..." This key is stored securely in the WordPress database. Bob has never seen it and doesn't need to know what it is.
+
+WordPress also checks: "Does Bob have provider keys set up?" (OpenAI, Google, Anthropic). If not, it would show a message telling Bob to add them first. But Bob already did that, so we're good.
+
+---
+
+### Step 4: WordPress Builds the Page
+
+WordPress starts building the HTML page to send to Bob's browser. It includes:
+
+- Your website's header and navigation menu
+- A special container where the React app will load
+- Some critical information injected into the page as JavaScript variables:
+  - Where to send API requests (the WordPress proxy endpoint)
+  - A special security token called a "nonce" (a random string that proves this page came from your website)
+  - Bob's user ID and email (just for display purposes)
+
+WordPress sends this complete HTML page across the internet to Bob's browser.
+
+---
+
+### Step 5: Bob's Browser Receives and Renders the Page
+
+Bob's browser receives the HTML. It starts parsing it from top to bottom.
+
+When it encounters the JavaScript code, it executes it. The code creates a variable called "acm2Config" with all that information WordPress injected.
+
+Then the browser loads the React application code. The React app starts up and immediately checks: "Is there an acm2Config variable?" 
+
+It finds it and thinks: "Great! I'm running inside WordPress. That means I don't need to ask Bob for an API key. WordPress will handle authentication for me."
+
+The React app hides the "Enter API Key" input field (since it's not needed in WordPress mode) and shows Bob the main dashboard interface.
+
+---
+
+### Step 6: Bob Fills Out the Evaluation Form
+
+Bob sees a form where he can:
+- Enter the text he wants evaluated (the contract)
+- Choose which AI models to use (he checks boxes for GPT-4, Gemini, and Claude)
+- Choose evaluation criteria (accuracy, completeness, tone, etc.)
+
+Bob types his contract text into the box, selects all three models, and clicks the big "Start Evaluation" button.
+
+---
+
+### Step 7: React Prepares the Request
+
+The React app collects all the information Bob entered and packages it up into a neat bundle of data. It needs to send this to the backend to actually run the evaluation.
+
+But here's the key: The React app doesn't send the request directly to your ACM2 backend. Instead, it sends it to WordPress.
+
+The React app makes a network request to "yoursite.com/wp-json/acm2/v1/runs" (a WordPress endpoint). Along with the request, it includes:
+- The data Bob entered (contract text, selected models)
+- The security token (nonce) that WordPress gave it earlier
+- The browser automatically includes WordPress session cookies
+
+---
+
+### Step 8: The Request Travels to WordPress
+
+The request goes from Bob's computer across the internet to your web server. Apache receives it and looks at the URL. It sees "/wp-json/" in the path and knows this should go to WordPress, so it hands it over.
+
+---
+
+### Step 9: WordPress Performs Security Checks
+
+WordPress receives the request and immediately starts validating it:
+
+**First check:** Is the nonce valid? WordPress looks at the security token and checks if it's one it recently created and hasn't expired. This proves the request came from a page WordPress served, not from some malicious website trying to trick Bob's browser. ✓ Valid.
+
+**Second check:** Is there a session cookie, and is it valid? WordPress checks the cookie and confirms Bob is logged in. ✓ Valid.
+
+**Third check:** What's Bob's user ID? WordPress extracts from the session that this is user 42 (Bob). ✓ Identified.
+
+**Fourth check:** Does Bob have an ACM2 API key? WordPress queries its database and finds Bob's ACM2 API key: "acm2_xyz789..." ✓ Found.
+
+All security checks passed! WordPress now has everything it needs.
+
+---
+
+### Step 10: WordPress Acts as a Middleman (The Proxy)
+
+Here's where the security magic happens. WordPress doesn't send Bob's ACM2 API key to his browser. It keeps it secret in its database. Instead, WordPress itself will use the key to talk to your ACM2 backend.
+
+WordPress takes the data Bob submitted and makes a NEW request - this time to your ACM2 backend running on the same server at "localhost:8199/api/v1/runs"
+
+This is an internal request - it never goes over the internet. It stays inside your server.
+
+With this request, WordPress includes Bob's ACM2 API key in the headers. The ACM2 backend will use this to know who Bob is and which database to use.
+
+---
+
+### Step 11: ACM2 Backend Validates the API Key
+
+Your ACM2 backend (the Python FastAPI application) receives the request. It immediately looks for the API key in the headers.
+
+It finds "X-ACM2-API-Key: acm2_xyz789..."
+
+The backend takes this key and hashes it with bcrypt (a secure one-way function). Then it queries the master database looking for a matching hash.
+
+It finds a record that says: "This key belongs to ACM2 user ID 5". So Bob's WordPress user ID is 42, but his ACM2 user ID is 5. The backend makes note: "This request is for user 5."
+
+---
+
+### Step 12: ACM2 Opens Bob's Personal Database
+
+The backend has a directory full of database files. Each user has their own file. Bob's is called "user_5.db"
+
+The backend opens Bob's database file. This file contains:
+- All of Bob's previous evaluation runs
+- Bob's OpenAI, Google, and Anthropic API keys (encrypted)
+- Bob's usage statistics
+- Everything that belongs to Bob and ONLY Bob
+
+The backend queries this database to get Bob's provider keys. It finds three encrypted strings.
+
+---
+
+### Step 13: ACM2 Decrypts Bob's Provider Keys
+
+The backend needs to actually call OpenAI, Google, and Anthropic to run the evaluation. But to do that, it needs Bob's API keys for those services.
+
+The backend reads an encryption key from an environment file (a secret file on the server). Using this encryption key, it decrypts Bob's three provider API keys:
+- OpenAI key: "sk-proj-bob-secret-key-12345"
+- Google key: "AIza-bob-google-key-67890"
+- Anthropic key: "sk-ant-bob-anthropic-key-abcdef"
+
+Now the backend has everything it needs to run the evaluation.
+
+---
+
+### Step 14: ACM2 Calls the LLM Providers
+
+The backend starts making API calls to the actual AI companies. It's like the backend is acting as Bob, using Bob's keys.
+
+**First, it calls OpenAI:**
+"Hey OpenAI, using Bob's account, please analyze this contract text with GPT-4."
+
+OpenAI's servers receive the request, process it (takes about 10 seconds), and send back GPT-4's analysis.
+
+**Then it calls Google:**
+"Hey Google, using Bob's account, please analyze this contract text with Gemini."
+
+Google's servers process it and send back Gemini's analysis.
+
+**Then it calls Anthropic:**
+"Hey Anthropic, using Bob's account, please analyze this contract text with Claude."
+
+Anthropic's servers process it and send back Claude's analysis.
+
+This whole process takes 1-2 minutes because each AI model needs time to think and generate a response.
+
+---
+
+### Step 15: ACM2 Compares the Results
+
+Now the backend has three responses from three different AI models. It runs its analysis algorithm to compare them:
+
+- Which model was most thorough?
+- Where did they agree?
+- Where did they disagree?
+- What were the deviations in their scores?
+- How much did this cost? (Based on token usage and each provider's pricing)
+
+The backend calculates all these statistics and stores everything in Bob's database file (user_5.db). It generates a run ID like "abc-123-def-456" so Bob can reference this specific evaluation later.
+
+---
+
+### Step 16: ACM2 Sends Results Back to WordPress
+
+The backend packages up all the results into a response and sends it back to WordPress. The response includes:
+- The run ID
+- Status: "completed"
+- All three AI responses
+- Comparison statistics
+- Deviation analysis
+- Cost breakdown
+
+**Critically, the response does NOT include:**
+- Bob's ACM2 API key
+- Bob's OpenAI/Google/Anthropic keys
+- Any sensitive information
+
+Just the evaluation results.
+
+---
+
+### Step 17: WordPress Forwards Results to Bob's Browser
+
+WordPress receives this response from the ACM2 backend. It doesn't modify it - it just acts as a messenger, passing it along to Bob's browser.
+
+The response travels across the internet back to Bob's computer.
+
+---
+
+### Step 18: Bob Sees the Results
+
+Bob's browser receives the response. The React app processes it and updates the user interface.
+
+Bob now sees:
+- A success message: "Evaluation complete!"
+- A table showing all three AI model responses side-by-side
+- Highlighting where they agreed and disagreed
+- Statistics about which model was most confident
+- A breakdown showing this evaluation cost $2.47 (charged to Bob's accounts with OpenAI, Google, and Anthropic - your service didn't charge anything extra)
+- A button to download the results or run another evaluation
+
+---
+
+### Why This Architecture is Secure
+
+**Bob's browser never knew:**
+- What his ACM2 API key was (stored in WordPress)
+- What his OpenAI/Google/Anthropic keys were (stored encrypted in ACM2)
+
+**WordPress acted as a gatekeeper:**
+- Verified Bob was logged in before doing anything
+- Checked the security token to prevent attacks
+- Stored Bob's API key safely and used it on his behalf
+- Never exposed the key to Bob's browser
+
+**The ACM2 backend enforced isolation:**
+- Each user has a separate database file
+- Bob can only access his own data
+- Even if Bob somehow got another user's ACM2 API key, it would open that user's database, not Bob's
+
+**If an attacker tried to interfere:**
+- They can't get Bob's nonce (browser security prevents it)
+- They can't get Bob's session cookie (browser security prevents it)
+- They can't guess Bob's ACM2 API key (bcrypt hashing makes this impossible)
+- They can't decrypt the provider keys (they don't have the encryption key from the server)
+
+---
+
+### Later That Day
+
+Bob wants to see his previous evaluations. He clicks "My Runs" in the navigation.
+
+The whole flow happens again - WordPress checks Bob is logged in, gets his API key, forwards the request to ACM2, ACM2 opens Bob's database, retrieves all his runs, sends them back through WordPress to Bob's browser.
+
+Bob sees a list of all his previous evaluations and can click any one to see the full results again.
+
+Everything is stored safely in his personal database file. When he comes back tomorrow, next week, or next year, all his data will still be there, isolated from everyone else's data.
+
+---
+
+## Database Architecture Decision: Hybrid Approach
+
+### Why Hybrid (MySQL Master + SQLite Users)?
+
+After evaluating three approaches (all SQLite, all MySQL, or hybrid), we're implementing **the hybrid approach** for optimal balance:
+
+**MySQL for Master Database:**
+- Small, shared data (users, API keys)
+- Benefits from server features (replication, monitoring)
+- Already running in XAMPP alongside WordPress
+- Easy admin queries: "How many users?" "List all active keys"
+
+**SQLite for User Databases:**
+- Large, isolated data (runs, provider keys, usage stats)
+- Physical isolation = bulletproof security
+- No concurrent write conflicts (separate files)
+- Easy per-user backup/deletion
+
+### The Architecture
+
+```
+┌─────────────────────────────────────┐
+│   WordPress (MySQL: acm2_wordpress) │
+│   - wp_users, wp_posts, wp_options │
+└─────────────────────────────────────┘
+                ↕
+┌─────────────────────────────────────┐
+│   ACM2 Master (MySQL: acm2_master)  │
+│   - users (ACM2 accounts)           │
+│   - api_keys (authentication)       │
+│   Size: < 1 MB                      │
+└─────────────────────────────────────┘
+                ↕
+┌─────────────────────────────────────┐
+│   ACM2 User Data (SQLite per-user)  │
+│   data/user_1.db  ← Alice           │
+│   data/user_2.db  ← Bob             │
+│   data/user_3.db  ← Carol           │
+│   - runs, provider_keys, stats      │
+│   Size: 10-500 MB each              │
+└─────────────────────────────────────┘
+```
+
+### Benefits of This Approach
+
+**Security:**
+- LLM API keys physically isolated in separate SQLite files
+- Impossible to accidentally query wrong user's data
+- Delete user = delete one file
+
+**Performance:**
+- Master lookups fast (MySQL indexed)
+- User operations fast (small SQLite files)
+- No lock contention (each user has own file)
+
+**Operations:**
+- Easy admin queries (MySQL master)
+- Easy per-user backups (copy SQLite files)
+- MySQL already running (XAMPP)
+
+**Scalability:**
+- Master can upgrade to MySQL replication/HA
+- User files can migrate to Postgres independently
+- Scales to 10,000-50,000 users comfortably
+
+### What Goes Where
+
+| Data | Storage | Reason |
+|------|---------|--------|
+| User accounts | MySQL master | Shared, small, needs queries |
+| API keys (hashes) | MySQL master | Shared, small, needs lookups |
+| Evaluation runs | SQLite per-user | Large, isolated, high volume |
+| Provider keys | SQLite per-user | Sensitive, encrypted, isolated |
+| Usage statistics | SQLite per-user | Per-user metrics |
+
+### Implementation Impact
+
+**Phase 1 Changes:**
+- Master database uses MySQL instead of SQLite
+- User databases remain SQLite (no change)
+- Code uses `aiomysql` for master, `aiosqlite` for users
+
+**Connection Pattern:**
+```python
+# Master connection (shared, pooled)
+master_pool = await aiomysql.create_pool(
+    host='localhost',
+    user='root',
+    db='acm2_master'
+)
+
+# User connection (per-request, file-based)
+user_db = await aiosqlite.connect(f'data/user_{user_id}.db')
+```
+
+---
+
 ## Phase 1: Multi-User Database Foundation (Week 1-2)
 
 **Goal:** Transform single-user ACM2 into multi-tenant system with per-user data isolation
 
+**Database Strategy:** Hybrid (MySQL master + SQLite per-user)
+
 ---
 
-### 1.1 Create Master Database Schema
+### 1.1 Create Master Database in MySQL
 
-**File:** `acm2/app/db/master_schema.sql`
+**Step 1: Create Database**
 
 ```sql
--- Master database: data/master.db
--- This is the ONLY shared database across all users
+-- Connect to MySQL via phpMyAdmin or command line
+CREATE DATABASE acm2_master
+    CHARACTER SET utf8mb4
+    COLLATE utf8mb4_unicode_ci;
+```
+
+**Step 2: Create Tables**
+
+**File:** `acm2/app/db/master_schema_mysql.sql`
+
+```sql
+-- Master database: MySQL acm2_master
+-- Stores user accounts and API keys (shared data)
+
+USE acm2_master;
 
 CREATE TABLE users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    email TEXT UNIQUE NOT NULL,
-    wordpress_user_id INTEGER,  -- Optional: link to WordPress user ID
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    username VARCHAR(255) NOT NULL UNIQUE,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    wordpress_user_id INT UNIQUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    database_file TEXT NOT NULL,  -- e.g., "user_123.db"
-    is_active BOOLEAN DEFAULT 1
-);
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_wordpress_user (wordpress_user_id),
+    INDEX idx_email (email)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE api_keys (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    key_hash TEXT NOT NULL,  -- bcrypt hash of API key
-    key_prefix TEXT NOT NULL,  -- e.g., "acm2_abc" for display/logs
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT NOT NULL,
+    key_hash VARCHAR(255) NOT NULL UNIQUE,
+    key_prefix VARCHAR(20) NOT NULL,
+    name VARCHAR(255),
+    last_used_at TIMESTAMP NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    last_used_at TIMESTAMP,
-    is_active BOOLEAN DEFAULT 1,
-    note TEXT,  -- Optional: "WordPress Key", "Production Server", etc.
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
-
--- Indexes for fast lookup
-CREATE INDEX idx_api_keys_hash ON api_keys(key_hash);
-CREATE INDEX idx_api_keys_user ON api_keys(user_id);
-CREATE INDEX idx_api_keys_active ON api_keys(is_active);
-CREATE INDEX idx_users_email ON users(email);
-CREATE INDEX idx_users_wordpress ON users(wordpress_user_id);
+    revoked_at TIMESTAMP NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_key_hash (key_hash),
+    INDEX idx_user_id (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
+
+**Tasks:**
+- [ ] Create `acm2_master` database in MySQL
+- [ ] Create `master_schema_mysql.sql` with schema above
+- [ ] Execute schema: `mysql -u root acm2_master < master_schema_mysql.sql`
+- [ ] Verify tables: `SHOW TABLES;` should show `users` and `api_keys`
+
+---
+
+### 1.2 Create Master Database Manager (MySQL)
 
 **File:** `acm2/app/db/master.py`
 
 ```python
-"""Master database initialization and access"""
-import aiosqlite
-from pathlib import Path
-from typing import Optional
+"""
+Master Database Manager (MySQL)
+Handles user accounts and API keys
+"""
+import aiomysql
+from typing import Optional, Dict, Any, List
+from datetime import datetime
+import logging
+from contextlib import asynccontextmanager
 
-MASTER_DB_PATH = Path("data/master.db")
+logger = logging.getLogger(__name__)
 
-async def init_master_db() -> None:
-    """Initialize master database with schema"""
-    MASTER_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+class MasterDB:
+    """Manages master database with user accounts and API keys."""
     
-    schema = Path("acm2/app/db/master_schema.sql").read_text()
+    def __init__(self, host: str = 'localhost', user: str = 'root', 
+                 password: str = '', db: str = 'acm2_master'):
+        """Initialize master database connection pool.
+        
+        Args:
+            host: MySQL host
+            user: MySQL username
+            password: MySQL password
+            db: Database name
+        """
+        self.config = {
+            'host': host,
+            'user': user,
+            'password': password,
+            'db': db,
+            'charset': 'utf8mb4',
+            'autocommit': True
+        }
+        self._pool: Optional[aiomysql.Pool] = None
     
-    async with aiosqlite.connect(MASTER_DB_PATH) as db:
-        await db.executescript(schema)
-        await db.commit()
+    async def connect(self):
+        """Create connection pool."""
+        if self._pool is None:
+            self._pool = await aiomysql.create_pool(**self.config)
+            logger.info("Master database pool created")
     
-    print(f"✅ Master database initialized: {MASTER_DB_PATH}")
+    async def close(self):
+        """Close connection pool."""
+        if self._pool:
+            self._pool.close()
+            await self._pool.wait_closed()
+            logger.info("Master database pool closed")
+    
+    @asynccontextmanager
+    async def get_connection(self):
+        """Get a connection from the pool."""
+        if not self._pool:
+            await self.connect()
+        async with self._pool.acquire() as conn:
+            yield conn
+    
+    async def create_user(self, username: str, email: str,
+                         wordpress_user_id: Optional[int] = None) -> int:
+        """Create a new user.
+        
+        Args:
+            username: Unique username
+            email: User email address
+            wordpress_user_id: Optional WordPress user ID
+            
+        Returns:
+            New user's ID
+        """
+        async with self.get_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(
+                    """INSERT INTO users (username, email, wordpress_user_id)
+                       VALUES (%s, %s, %s)""",
+                    (username, email, wordpress_user_id)
+                )
+                user_id = cursor.lastrowid
+                logger.info(f"Created user: {username} (ID: {user_id})")
+                return user_id
+    
+    async def get_user_by_id(self, user_id: int) -> Optional[Dict[str, Any]]:
+        """Get user by ID."""
+        async with self.get_connection() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                await cursor.execute(
+                    "SELECT * FROM users WHERE id = %s", (user_id,)
+                )
+                return await cursor.fetchone()
+    
+    async def get_user_by_wordpress_id(self, wordpress_id: int) -> Optional[Dict[str, Any]]:
+        """Get user by WordPress user ID."""
+        async with self.get_connection() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                await cursor.execute(
+                    "SELECT * FROM users WHERE wordpress_user_id = %s",
+                    (wordpress_id,)
+                )
+                return await cursor.fetchone()
+    
+    async def create_api_key(self, user_id: int, key_hash: str,
+                           key_prefix: str, name: Optional[str] = None) -> int:
+        """Store API key for user.
+        
+        Args:
+            user_id: User ID
+            key_hash: bcrypt hash of the API key
+            key_prefix: First 8 chars for display
+            name: Optional name for the key
+            
+        Returns:
+            API key record ID
+        """
+        async with self.get_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(
+                    """INSERT INTO api_keys (user_id, key_hash, key_prefix, name)
+                       VALUES (%s, %s, %s, %s)""",
+                    (user_id, key_hash, key_prefix, name)
+                )
+                key_id = cursor.lastrowid
+                logger.info(f"Created API key for user {user_id}: {key_prefix}...")
+                return key_id
+    
+    async def get_user_by_api_key_hash(self, key_hash: str) -> Optional[Dict[str, Any]]:
+        """Get user by API key hash.
+        
+        Args:
+            key_hash: bcrypt hash of API key
+            
+        Returns:
+            User dict or None if key not found/revoked
+        """
+        async with self.get_connection() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                # Get user and update last_used_at
+                await cursor.execute(
+                    """SELECT u.* FROM users u
+                       JOIN api_keys k ON u.id = k.user_id
+                       WHERE k.key_hash = %s AND k.revoked_at IS NULL""",
+                    (key_hash,)
+                )
+                user = await cursor.fetchone()
+                
+                if user:
+                    # Update last_used_at
+                    await cursor.execute(
+                        "UPDATE api_keys SET last_used_at = %s WHERE key_hash = %s",
+                        (datetime.utcnow(), key_hash)
+                    )
+                
+                return user
+    
+    async def revoke_api_key(self, key_id: int):
+        """Revoke an API key."""
+        async with self.get_connection() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute(
+                    "UPDATE api_keys SET revoked_at = %s WHERE id = %s",
+                    (datetime.utcnow(), key_id)
+                )
+                logger.info(f"Revoked API key ID: {key_id}")
+    
+    async def list_user_api_keys(self, user_id: int) -> List[Dict[str, Any]]:
+        """List all API keys for a user."""
+        async with self.get_connection() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                await cursor.execute(
+                    """SELECT id, key_prefix, name, created_at, last_used_at, 
+                              revoked_at
+                       FROM api_keys
+                       WHERE user_id = %s
+                       ORDER BY created_at DESC""",
+                    (user_id,)
+                )
+                return await cursor.fetchall()
+
+
+# Global instance
+_master_db: Optional[MasterDB] = None
+
+
+async def get_master_db() -> MasterDB:
+    """Get or create master database singleton."""
+    global _master_db
+    if _master_db is None:
+        _master_db = MasterDB()
+        await _master_db.connect()
+    return _master_db
+```
+
+**Tasks:**
+- [ ] Install MySQL driver: `pip install aiomysql`
+- [ ] Create `master.py` with code above
+- [ ] Test connection: Import and call `get_master_db()`
+
+---
+
+### 1.3 Create Per-User Database Schema (SQLite - Unchanged)
 
 async def get_master_db():
     """Context manager for master database connection"""

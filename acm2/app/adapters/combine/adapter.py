@@ -28,6 +28,7 @@ class CombineAdapter:
         reports: List[str], 
         instructions: str, 
         config: GenerationConfig,
+        user_id: int,
         original_instructions: Optional[str] = None
     ) -> GenerationResult:
         """
@@ -37,6 +38,7 @@ class CombineAdapter:
             reports: List of report content strings to combine
             instructions: The specific instructions for combination
             config: Generation configuration (model, provider, etc.)
+            user_id: User ID for fetching encrypted provider API keys
             original_instructions: Optional original query/instructions to include in context
             
         Returns:
@@ -77,6 +79,7 @@ class CombineAdapter:
         result = await self.generator.generate(
             query=instructions,
             config=config,
+            user_id=user_id,
             document_content=full_context
         )
         

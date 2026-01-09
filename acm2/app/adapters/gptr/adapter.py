@@ -243,6 +243,7 @@ class GptrAdapter(BaseAdapter):
         query: str,
         config: GenerationConfig, 
         *,
+        user_id: int,
         document_content: Optional[str] = None,
         progress_callback: Optional[ProgressCallback] = None,
     ) -> GenerationResult:
@@ -265,13 +266,13 @@ class GptrAdapter(BaseAdapter):
         # 2. Prepare Environment
         env = os.environ.copy()
         
-        # Load API keys from FilePromptForge .env file
-        if FPF_ENV_PATH.exists():
-            fpf_env = dotenv_values(FPF_ENV_PATH)
-            env.update(fpf_env)
-            logger.debug(f"GPT-R: Loaded {len(fpf_env)} environment variables from {FPF_ENV_PATH}")
-        else:
-            logger.warning(f"GPT-R: FilePromptForge .env not found at {FPF_ENV_PATH}")
+        # Inject encrypted provider API keys for this user
+        from app.security.key_injection import inject_provider_keys_for_user
+        try:
+            env = await inject_provider_keys_for_user(user_id, env)
+            logger.debug(f"GPT-R: Injected encrypted API keys for user_id={user_id}")
+        except Exception as e:
+            logger.warning(f"GPT-R: Failed to inject provider keys for user {user_id}: {e}")
         
         # Handle Model Selection
         full_model = f"{config.provider}:{config.model}" if config.provider and config.model else config.model

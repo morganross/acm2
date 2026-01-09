@@ -81,6 +81,9 @@ class GeneratedDocument:
 class RunConfig:
     """Configuration for a run. All fields are REQUIRED unless explicitly Optional."""
     
+    # User Context - REQUIRED for multi-user system
+    user_id: int  # User ID for fetching encrypted provider API keys
+    
     # Inputs - REQUIRED (no defaults)
     document_ids: List[str]
     document_contents: Dict[str, str]  # doc_id -> content
@@ -1447,6 +1450,7 @@ Optimize your response to score highly on each criterion:
                     gen_result = await adapter.generate(
                         query=fpf_instructions,  # Use instructions with optional criteria
                         config=gen_config,
+                        user_id=config.user_id,
                         document_content=content,
                         progress_callback=progress_callback,
                         fpf_log_output=fpf_log_output,
@@ -1482,6 +1486,7 @@ Optimize your output to score highly on each criterion:
                     gen_result = await adapter.generate(
                         query=full_query,
                         config=gen_config,
+                        user_id=config.user_id,
                         progress_callback=progress_callback,
                 )
             
@@ -1747,6 +1752,7 @@ Optimize your output to score highly on each criterion:
                         reports=top_docs,
                         instructions=combine_instructions,
                         config=combine_gen_config,
+                        user_id=config.user_id,
                         original_instructions=original_instructions
                     )
                     combine_completed_at = datetime.utcnow()

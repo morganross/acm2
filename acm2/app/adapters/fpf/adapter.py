@@ -62,6 +62,7 @@ class FpfAdapter(BaseAdapter):
         query: str,
         config: GenerationConfig,
         *,
+        user_id: int,
         document_content: Optional[str] = None,
         progress_callback: Optional[ProgressCallback] = None,
         fpf_log_output: str = "console",
@@ -74,6 +75,7 @@ class FpfAdapter(BaseAdapter):
         Args:
             query: The research question/instructions
             config: Generation configuration (model, provider, etc.)
+            user_id: User ID for fetching encrypted provider API keys
             document_content: Optional document content for file_a
             progress_callback: Optional callback for progress updates
             fpf_log_output: FPF log destination ("console", "file", "both", "none")
@@ -127,8 +129,15 @@ class FpfAdapter(BaseAdapter):
             )
             timeout_val = extra.get("timeout")
 
-            # Prepare environment - inherit current env to pass API keys
+            # Prepare environment - inject encrypted provider API keys for this user
             env = os.environ.copy()
+            
+            from app.security.key_injection import inject_provider_keys_for_user
+            try:
+                env = await inject_provider_keys_for_user(user_id, env)
+                logger.debug(f"FPF: Injected encrypted API keys for user_id={user_id}")
+            except Exception as e:
+                logger.warning(f"FPF: Failed to inject provider keys for user {user_id}: {e}")
             
             # Set FPF log environment variables so FPF writes structured JSON logs
             run_id = extra.get("run_id")

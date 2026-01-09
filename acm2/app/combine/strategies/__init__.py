@@ -21,6 +21,9 @@ class CombineStrategyType(str, Enum):
 @dataclass
 class CombineInput:
     """Input for a combine operation."""
+    # User context
+    user_id: int
+    
     # Winner reports (content)
     reports: list[str]
     report_paths: list[str] = field(default_factory=list)
