@@ -1,0 +1,67 @@
+"""
+Per-user path resolution utilities.
+
+All file access for runs must use these helpers to ensure proper isolation.
+"""
+from pathlib import Path
+
+from app.config import get_settings
+
+
+def get_user_data_root(user_id: int) -> Path:
+    """Get the root data directory for a user."""
+    settings = get_settings()
+    return settings.data_dir / f"user_{user_id}"
+
+
+def get_user_run_path(user_id: int, run_id: str, subdir: str = "") -> Path:
+    """
+    Get canonical path for per-user run files.
+    
+    Args:
+        user_id: The user's ID
+        run_id: The run's UUID
+        subdir: Optional subdirectory (generated, logs, reports)
+        
+    Returns:
+        Path to user's run directory or subdirectory
+    """
+    base = get_user_data_root(user_id) / "runs" / run_id
+    if subdir:
+        return base / subdir
+    return base
+
+
+def get_generated_doc_path(user_id: int, run_id: str, doc_id: str) -> Path:
+    """Get path to a generated document file."""
+    safe_doc_id = doc_id.replace(':', '_').replace('/', '_').replace('\\', '_')
+    return get_user_run_path(user_id, run_id, "generated") / f"{safe_doc_id}.md"
+
+
+def get_report_path(user_id: int, run_id: str, filename: str) -> Path:
+    """Get path to a report file."""
+    return get_user_run_path(user_id, run_id, "reports") / filename
+
+
+def get_log_path(user_id: int, run_id: str, filename: str) -> Path:
+    """Get path to a log file."""
+    return get_user_run_path(user_id, run_id, "logs") / filename
+
+
+def get_fpf_log_path(user_id: int, run_id: str) -> Path:
+    """Get path to FPF output log file."""
+    return get_log_path(user_id, run_id, "fpf_output.log")
+
+
+def validate_path_ownership(path: Path, user_id: int) -> bool:
+    """
+    Validate that a path is within the user's data directory.
+    
+    Use this to prevent path traversal attacks.
+    """
+    settings = get_settings()
+    user_root = settings.data_dir / f"user_{user_id}"
+    try:
+        return path.resolve().is_relative_to(user_root.resolve())
+    except ValueError:
+        return False

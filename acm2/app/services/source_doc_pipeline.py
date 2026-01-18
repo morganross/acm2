@@ -15,6 +15,7 @@ import asyncio
 import logging
 from dataclasses import asdict
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 from uuid import uuid4
 
@@ -117,6 +118,12 @@ class SourceDocPipeline:
         
         # Cancellation flag (can be set externally)
         self._cancelled = False
+
+    def _get_run_root(self) -> Path:
+        from ..config import get_settings
+
+        settings = get_settings()
+        return settings.data_dir / f"user_{self.config.user_id}" / "runs" / self.run_id
         
     def cancel(self) -> None:
         """Cancel this pipeline."""
@@ -288,9 +295,8 @@ class SourceDocPipeline:
     async def _save_generated_content(self, gen_doc: GeneratedDocument) -> None:
         """Save generated document content to a file for later retrieval.
         
-        Files are stored in logs/{run_id}/generated/{doc_id}.md
+        Files are stored in data/user_{user_id}/runs/{run_id}/generated/{doc_id}.md
         """
-        from pathlib import Path
         import aiofiles
         
         try:
@@ -302,7 +308,7 @@ class SourceDocPipeline:
                 raise ValueError(f"Cannot save document {gen_doc.doc_id}: content is only whitespace")
             
             # Create directory structure
-            gen_dir = Path("logs") / self.run_id / "generated"
+            gen_dir = self._get_run_root() / "generated"
             gen_dir.mkdir(parents=True, exist_ok=True)
             
             # Sanitize doc_id for filename (replace invalid chars)
@@ -670,14 +676,11 @@ Optimize your response to score highly on each criterion:
                 
                 # If file output, ensure log directory exists and set paths
                 if self.run_id and fpf_log_output == 'file':
-                    from pathlib import Path
-                    log_dir = Path("logs") / self.run_id
+                    log_dir = self._get_run_root() / "logs"
                     log_dir.mkdir(parents=True, exist_ok=True)
                     run_log_file = str(log_dir / "run.log")
-                    if not fpf_log_file and task_id:
-                        # Default file path - make unique per task to avoid file locking
-                        safe_task_id = task_id.replace(":", "_")
-                        fpf_log_file = str(log_dir / f"fpf_{safe_task_id}.log")
+                    if not fpf_log_file:
+                        raise ValueError("fpf_log_file_path required when fpf_log_output='file'")
                 
                 # Apply provider-level rate limiting
                 async with RateLimitedRequest(provider):

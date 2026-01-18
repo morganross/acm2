@@ -8,9 +8,12 @@ from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Dict, Any
 
-from app.infra.db.session import get_db, async_session_factory
+from app.infra.db.session import get_user_db, get_user_session_by_id
 from app.infra.db.repositories import RunRepository, ContentRepository
+from app.auth.middleware import get_current_user
+from app.utils.paths import get_user_run_path
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -20,7 +23,8 @@ router = APIRouter()
 async def reevaluate_run(
     run_id: str,
     background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db)
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db)
 ) -> dict:
     """
     Re-run evaluation on all generated documents from an existing run.
@@ -34,7 +38,7 @@ async def reevaluate_run(
     """
     from app.evaluation.single_doc import SingleDocEvaluator, SingleEvalConfig, DocumentInput
     
-    repo = RunRepository(db)
+    repo = RunRepository(db, user_id=user['id'])
     run = await repo.get_by_id(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -46,7 +50,7 @@ async def reevaluate_run(
     
     # Get preset to load eval config
     from app.infra.db.repositories import PresetRepository
-    preset_repo = PresetRepository(db)
+    preset_repo = PresetRepository(db, user_id=user['id'])
     preset = await preset_repo.get_by_id(run.preset_id) if run.preset_id else None
     if not preset:
         raise HTTPException(status_code=400, detail="Run has no associated preset")
@@ -57,7 +61,7 @@ async def reevaluate_run(
     eval_config = run_config.get("eval", config_overrides.get("eval", {}))
     
     # Get criteria from Content Library
-    content_repo = ContentRepository(db)
+    content_repo = ContentRepository(db, user_id=user['id'])
     eval_criteria_id = preset.eval_criteria_id or config_overrides.get("eval_criteria_id") or results_summary.get("eval_criteria_id")
     custom_criteria = None
     if eval_criteria_id:
@@ -98,8 +102,8 @@ async def reevaluate_run(
         import asyncio
         from app.evaluation.models import SingleEvalResult
         
-        async with async_session_factory() as session:
-            repo_inner = RunRepository(session)
+        async with get_user_session_by_id(user['id']) as session:
+            repo_inner = RunRepository(session, user_id=user['id'])
             
             # Lock for serializing DB writes
             db_lock = asyncio.Lock()
@@ -114,7 +118,7 @@ async def reevaluate_run(
                 # Build list of document inputs (parallel preparation)
                 doc_inputs = []
                 doc_metadata = {}  # Map doc_id -> (source_doc_id, model)
-                logs_dir = Path("logs")
+                generated_dir = get_user_run_path(user['id'], run_id, "generated")
                 
                 for gen_doc in generated_docs:
                     doc_id = gen_doc.get("id")
@@ -124,8 +128,8 @@ async def reevaluate_run(
                     if not doc_id:
                         continue
                     
-                    # Read the generated document content from disk
-                    doc_path = logs_dir / run_id / "generated" / f"{doc_id}.md"
+                    # Read the generated document content from per-user directory
+                    doc_path = generated_dir / f"{doc_id}.md"
                     
                     if not doc_path.exists():
                         logger.warning(f"Generated doc not found: {doc_path}")

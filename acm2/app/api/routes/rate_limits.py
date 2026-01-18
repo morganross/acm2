@@ -5,11 +5,12 @@ Provides endpoints for viewing and modifying provider rate limit settings.
 """
 
 import logging
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from app.auth.middleware import get_current_user
 from ...services.rate_limiter import ProviderRegistry
 
 logger = logging.getLogger(__name__)
@@ -51,7 +52,9 @@ class UpdateLimitsRequest(BaseModel):
 
 
 @router.get("", response_model=AllProvidersResponse)
-async def get_all_rate_limits():
+async def get_all_rate_limits(
+    user: Dict[str, Any] = Depends(get_current_user),
+):
     """
     Get rate limit settings for all configured providers.
     
@@ -78,7 +81,10 @@ async def get_all_rate_limits():
 
 
 @router.get("/{provider}", response_model=ProviderLimitsResponse)
-async def get_provider_rate_limits(provider: str):
+async def get_provider_rate_limits(
+    provider: str,
+    user: Dict[str, Any] = Depends(get_current_user),
+):
     """
     Get rate limit settings for a specific provider.
     
@@ -112,7 +118,11 @@ async def get_provider_rate_limits(provider: str):
 
 
 @router.put("/{provider}", response_model=ProviderLimitsResponse)
-async def update_provider_rate_limits(provider: str, request: UpdateLimitsRequest):
+async def update_provider_rate_limits(
+    provider: str,
+    request: UpdateLimitsRequest,
+    user: Dict[str, Any] = Depends(get_current_user),
+):
     """
     Update rate limit settings for a specific provider.
     

@@ -11,6 +11,8 @@ from app.infra.db.repositories.task import TaskRepository
 from app.infra.db.repositories.artifact import ArtifactRepository
 from app.infra.db.repositories.content import ContentRepository
 from app.infra.db.repositories.github_connection import GitHubConnectionRepository
+from app.infra.db.repositories.provider_key import ProviderKeyRepository
+from app.infra.db.repositories.usage_stats import UsageStatsRepository
 
 __all__ = [
     "BaseRepository",
@@ -21,4 +23,6 @@ __all__ = [
     "ArtifactRepository",
     "ContentRepository",
     "GitHubConnectionRepository",
+    "ProviderKeyRepository",
+    "UsageStatsRepository",
 ]

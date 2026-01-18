@@ -267,9 +267,9 @@ class GptrAdapter(BaseAdapter):
         env = os.environ.copy()
         
         # Inject encrypted provider API keys for this user
-        from app.security.key_injection import inject_provider_keys_for_user
+        from app.security.key_injection import inject_provider_keys_for_user_auto
         try:
-            env = await inject_provider_keys_for_user(user_id, env)
+            env = await inject_provider_keys_for_user_auto(user_id, env)
             logger.debug(f"GPT-R: Injected encrypted API keys for user_id={user_id}")
         except Exception as e:
             logger.warning(f"GPT-R: Failed to inject provider keys for user {user_id}: {e}")

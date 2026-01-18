@@ -11,10 +11,12 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Optional, Dict, Any
 
-from app.infra.db.session import get_db
+from app.infra.db.session import get_user_db
 from app.infra.db.repositories import DocumentRepository
 from app.infra.db.models.document import Document
+from app.auth.middleware import get_current_user
 from ..schemas.documents import (
     DocumentCreate,
     DocumentUpdate,
@@ -102,14 +104,15 @@ def _to_detail(doc: Document, include_content: bool = False) -> DocumentDetail:
 @router.post("", response_model=DocumentSummary)
 async def create_document(
     data: DocumentCreate,
-    db: AsyncSession = Depends(get_db),
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db),
 ) -> DocumentSummary:
     """
     Create a new document.
     
     Provide content directly, a file_path to read from, or a url to fetch.
     """
-    repo = DocumentRepository(db)
+    repo = DocumentRepository(db, user_id=user['id'])
     
     # Get content from one of the sources
     content = ""
@@ -156,12 +159,13 @@ async def create_document(
 async def upload_document(
     file: UploadFile = File(...),
     tags: str = Query("", description="Comma-separated tags"),
-    db: AsyncSession = Depends(get_db),
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db),
 ) -> DocumentSummary:
     """
     Upload a document file.
     """
-    repo = DocumentRepository(db)
+    repo = DocumentRepository(db, user_id=user['id'])
     
     # Read file content
     content = await file.read()
@@ -207,12 +211,13 @@ async def list_documents(
     tags: Optional[str] = Query(None, description="Comma-separated tags to filter by"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    db: AsyncSession = Depends(get_db),
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db),
 ) -> DocumentList:
     """
     List all documents with pagination.
     """
-    repo = DocumentRepository(db)
+    repo = DocumentRepository(db, user_id=user['id'])
     offset = (page - 1) * page_size
     
     # Get documents from DB
@@ -242,12 +247,13 @@ async def list_documents(
 async def get_document(
     doc_id: str,
     include_content: bool = Query(False, description="Include full content"),
-    db: AsyncSession = Depends(get_db),
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db),
 ) -> DocumentDetail:
     """
     Get detailed information about a document.
     """
-    repo = DocumentRepository(db)
+    repo = DocumentRepository(db, user_id=user['id'])
     doc = await repo.get_by_id(doc_id)
     if not doc or doc.is_deleted:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -257,12 +263,13 @@ async def get_document(
 @router.get("/{doc_id}/content", response_model=DocumentContent)
 async def get_document_content(
     doc_id: str,
-    db: AsyncSession = Depends(get_db),
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db),
 ) -> DocumentContent:
     """
     Get the full content of a document.
     """
-    repo = DocumentRepository(db)
+    repo = DocumentRepository(db, user_id=user['id'])
     doc = await repo.get_by_id(doc_id)
     if not doc or doc.is_deleted:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -279,12 +286,13 @@ async def get_document_content(
 async def update_document(
     doc_id: str,
     data: DocumentUpdate,
-    db: AsyncSession = Depends(get_db),
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db),
 ) -> DocumentDetail:
     """
     Update document metadata.
     """
-    repo = DocumentRepository(db)
+    repo = DocumentRepository(db, user_id=user['id'])
     doc = await repo.get_by_id(doc_id)
     if not doc or doc.is_deleted:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -303,12 +311,13 @@ async def update_document(
 @router.delete("/{doc_id}")
 async def delete_document(
     doc_id: str,
-    db: AsyncSession = Depends(get_db),
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db),
 ) -> dict:
     """
     Soft delete a document.
     """
-    repo = DocumentRepository(db)
+    repo = DocumentRepository(db, user_id=user['id'])
     deleted = await repo.soft_delete(doc_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Document not found")

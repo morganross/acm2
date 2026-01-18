@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     documents_dir: Path = Path("./data/documents")
     artifacts_dir: Path = Path("./data/artifacts")
     logs_dir: Path = Path("./logs")
+
+    # Seed package (required for deterministic per-user initialization)
+    seed_preset_id: Optional[str] = None
+    seed_version: Optional[str] = None
     
     # Execution
     max_concurrent_tasks: int = 3

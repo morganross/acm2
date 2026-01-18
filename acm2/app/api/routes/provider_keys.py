@@ -8,8 +8,11 @@ from pydantic import BaseModel, Field
 from typing import Dict, List, Optional
 import logging
 
-from acm2.app.auth.middleware import get_current_user
-from acm2.app.security.provider_keys import get_provider_key_manager, ProviderKeyManager
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.auth.middleware import get_current_user
+from app.infra.db.session import get_user_db
+from app.security.provider_keys import get_provider_key_manager, ProviderKeyManager
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +42,8 @@ class ProviderKeysList(BaseModel):
 @router.post("/", status_code=status.HTTP_201_CREATED)
 async def save_provider_key(
     key_data: ProviderKeyCreate,
-    user: dict = Depends(get_current_user)
+    user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db)
 ):
     """Save a provider API key (encrypted).
     
@@ -47,7 +51,7 @@ async def save_provider_key(
     to call the LLM API.
     """
     user_id = user['id']
-    key_manager = await get_provider_key_manager(user_id)
+    key_manager = get_provider_key_manager(db, user_id)
     
     try:
         await key_manager.save_key(key_data.provider, key_data.api_key)
@@ -69,10 +73,13 @@ async def save_provider_key(
 
 
 @router.get("/", response_model=ProviderKeysList)
-async def list_provider_keys(user: dict = Depends(get_current_user)):
+async def list_provider_keys(
+    user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db)
+):
     """List all configured providers (without exposing the actual keys)."""
     user_id = user['id']
-    key_manager = await get_provider_key_manager(user_id)
+    key_manager = get_provider_key_manager(db, user_id)
     
     try:
         providers = await key_manager.list_configured_providers()
@@ -88,11 +95,12 @@ async def list_provider_keys(user: dict = Depends(get_current_user)):
 @router.get("/{provider}", response_model=ProviderKeyInfo)
 async def get_provider_key_info(
     provider: str,
-    user: dict = Depends(get_current_user)
+    user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db)
 ):
     """Check if a provider key is configured (without exposing the actual key)."""
     user_id = user['id']
-    key_manager = await get_provider_key_manager(user_id)
+    key_manager = get_provider_key_manager(db, user_id)
     
     try:
         has_key = await key_manager.has_key(provider)
@@ -120,11 +128,12 @@ async def get_provider_key_info(
 @router.delete("/{provider}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_provider_key(
     provider: str,
-    user: dict = Depends(get_current_user)
+    user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db)
 ):
     """Delete a provider API key."""
     user_id = user['id']
-    key_manager = await get_provider_key_manager(user_id)
+    key_manager = get_provider_key_manager(db, user_id)
     
     try:
         # Check if key exists
@@ -149,14 +158,15 @@ async def delete_provider_key(
 @router.get("/test/{provider}")
 async def test_provider_key(
     provider: str,
-    user: dict = Depends(get_current_user)
+    user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db)
 ):
     """Test if a provider key is valid by making a simple API call.
     
     This is useful for validating keys after configuration.
     """
     user_id = user['id']
-    key_manager = await get_provider_key_manager(user_id)
+    key_manager = get_provider_key_manager(db, user_id)
     
     try:
         api_key = await key_manager.get_key(provider)

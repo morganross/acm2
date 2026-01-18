@@ -4,8 +4,9 @@ API Router - Combines all route modules.
 from fastapi import APIRouter
 
 from .routes import (
-    documents, generation, runs, presets, evaluation, models, 
-    contents, github_connections, rate_limits, health, users, provider_keys
+    documents, generation, runs, presets, evaluation, models,
+    contents, github_connections, rate_limits, health, users, provider_keys,
+    settings
 )
 
 # Main API router
@@ -24,9 +25,7 @@ api_router.include_router(rate_limits.router)
 api_router.include_router(health.router)
 api_router.include_router(users.router)
 api_router.include_router(provider_keys.router)
-api_router.include_router(health.router)
-api_router.include_router(users.router)
-api_router.include_router(provider_keys.router)
+api_router.include_router(settings.router)
 
 
 # Legacy health check (kept for backwards compatibility)

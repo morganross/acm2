@@ -13,8 +13,8 @@ from app.infra.db.repositories.base import BaseRepository
 class ContentRepository(BaseRepository[Content]):
     """Repository for Content CRUD operations."""
     
-    def __init__(self, session: AsyncSession):
-        super().__init__(Content, session)
+    def __init__(self, session: AsyncSession, user_id: Optional[int] = None):
+        super().__init__(Content, session, user_id)
     
     async def get_by_type(
         self, 
@@ -22,7 +22,7 @@ class ContentRepository(BaseRepository[Content]):
         limit: int = 100,
         offset: int = 0
     ) -> Sequence[Content]:
-        """Get all contents of a specific type."""
+        """Get all contents of a specific type (scoped to user if user_id is set)."""
         stmt = (
             select(Content)
             .where(Content.content_type == content_type.value)
@@ -31,6 +31,7 @@ class ContentRepository(BaseRepository[Content]):
             .limit(limit)
             .order_by(Content.name)
         )
+        stmt = self._apply_user_filter(stmt)
         result = await self.session.execute(stmt)
         return result.scalars().all()
     
@@ -39,7 +40,7 @@ class ContentRepository(BaseRepository[Content]):
         limit: int = 100, 
         offset: int = 0
     ) -> Sequence[Content]:
-        """Get non-deleted contents."""
+        """Get non-deleted contents (scoped to user if user_id is set)."""
         stmt = (
             select(Content)
             .where(Content.is_deleted == False)
@@ -47,16 +48,18 @@ class ContentRepository(BaseRepository[Content]):
             .limit(limit)
             .order_by(Content.created_at.desc())
         )
+        stmt = self._apply_user_filter(stmt)
         result = await self.session.execute(stmt)
         return result.scalars().all()
     
     async def get_by_name(self, name: str) -> Optional[Content]:
-        """Get a content by its exact name."""
+        """Get a content by its exact name (scoped to user if user_id is set)."""
         stmt = (
             select(Content)
             .where(Content.name == name)
             .where(Content.is_deleted == False)
         )
+        stmt = self._apply_user_filter(stmt)
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
     
@@ -66,12 +69,13 @@ class ContentRepository(BaseRepository[Content]):
         content_type: Optional[ContentType] = None,
         limit: int = 50
     ) -> Sequence[Content]:
-        """Search contents by name (case-insensitive contains)."""
+        """Search contents by name (case-insensitive contains, scoped to user if user_id is set)."""
         stmt = (
             select(Content)
             .where(Content.name.ilike(f"%{query}%"))
             .where(Content.is_deleted == False)
         )
+        stmt = self._apply_user_filter(stmt)
         if content_type:
             stmt = stmt.where(Content.content_type == content_type.value)
         stmt = stmt.limit(limit).order_by(Content.name)
@@ -84,13 +88,14 @@ class ContentRepository(BaseRepository[Content]):
         content_type: Optional[ContentType] = None,
         limit: int = 50
     ) -> Sequence[Content]:
-        """Search contents by tag."""
+        """Search contents by tag (scoped to user if user_id is set)."""
         # Note: This is a simple approach; for complex JSON queries,
         # consider using JSON operators specific to your database
         stmt = (
             select(Content)
             .where(Content.is_deleted == False)
         )
+        stmt = self._apply_user_filter(stmt)
         if content_type:
             stmt = stmt.where(Content.content_type == content_type.value)
         stmt = stmt.limit(limit).order_by(Content.name)
@@ -109,7 +114,7 @@ class ContentRepository(BaseRepository[Content]):
         return False
     
     async def get_by_ids(self, ids: list[str]) -> Sequence[Content]:
-        """Get multiple contents by their IDs."""
+        """Get multiple contents by their IDs (scoped to user if user_id is set)."""
         if not ids:
             return []
         stmt = (
@@ -117,6 +122,7 @@ class ContentRepository(BaseRepository[Content]):
             .where(Content.id.in_(ids))
             .where(Content.is_deleted == False)
         )
+        stmt = self._apply_user_filter(stmt)
         result = await self.session.execute(stmt)
         return result.scalars().all()
     
@@ -138,12 +144,13 @@ class ContentRepository(BaseRepository[Content]):
         return None
     
     async def count_by_type(self, content_type: ContentType) -> int:
-        """Count contents of a specific type."""
+        """Count contents of a specific type (scoped to user if user_id is set)."""
         stmt = (
             select(Content)
             .where(Content.content_type == content_type.value)
             .where(Content.is_deleted == False)
         )
+        stmt = self._apply_user_filter(stmt)
         result = await self.session.execute(stmt)
         return len(result.scalars().all())
     

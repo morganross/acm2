@@ -9,10 +9,12 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Optional, Dict, Any
 
-from app.infra.db.session import get_db
+from app.infra.db.session import get_user_db
 from app.infra.db.repositories import ContentRepository
 from app.infra.db.models.content import ContentType as DBContentType
+from app.auth.middleware import get_current_user
 from ..schemas.content import (
     ContentCreate,
     ContentUpdate,
@@ -69,7 +71,8 @@ async def list_contents(
     tag: Optional[str] = Query(None, description="Filter by tag"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    db: AsyncSession = Depends(get_db),
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db),
 ) -> ContentList:
     """
     List contents with optional filtering.
@@ -78,7 +81,7 @@ async def list_contents(
     - Search by name for partial matches
     - Filter by tag
     """
-    repo = ContentRepository(db)
+    repo = ContentRepository(db, user_id=user['id'])
     offset = (page - 1) * page_size
     
     if search:
@@ -112,10 +115,11 @@ async def list_contents(
 
 @router.get("/counts", response_model=ContentTypeCounts)
 async def get_content_counts(
-    db: AsyncSession = Depends(get_db),
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db),
 ) -> ContentTypeCounts:
     """Get count of contents by type."""
-    repo = ContentRepository(db)
+    repo = ContentRepository(db, user_id=user['id'])
     
     counts = ContentTypeCounts()
     counts.generation_instructions = await repo.count_by_type(DBContentType.GENERATION_INSTRUCTIONS)
@@ -145,10 +149,11 @@ async def get_content_counts(
 @router.post("", response_model=ContentDetail, status_code=201)
 async def create_content(
     data: ContentCreate,
-    db: AsyncSession = Depends(get_db),
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db),
 ) -> ContentDetail:
     """Create new content."""
-    repo = ContentRepository(db)
+    repo = ContentRepository(db, user_id=user['id'])
     
     # Check if name already exists for this type
     existing = await repo.get_by_name(data.name)
@@ -174,10 +179,11 @@ async def create_content(
 @router.get("/{content_id}", response_model=ContentDetail)
 async def get_content(
     content_id: str,
-    db: AsyncSession = Depends(get_db),
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db),
 ) -> ContentDetail:
     """Get content by ID."""
-    repo = ContentRepository(db)
+    repo = ContentRepository(db, user_id=user['id'])
     content = await repo.get_by_id(content_id)
     
     if not content or content.is_deleted:
@@ -190,10 +196,11 @@ async def get_content(
 async def update_content(
     content_id: str,
     data: ContentUpdate,
-    db: AsyncSession = Depends(get_db),
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db),
 ) -> ContentDetail:
     """Update content."""
-    repo = ContentRepository(db)
+    repo = ContentRepository(db, user_id=user['id'])
     content = await repo.get_by_id(content_id)
     
     if not content or content.is_deleted:
@@ -222,10 +229,11 @@ async def update_content(
 @router.delete("/{content_id}", status_code=204)
 async def delete_content(
     content_id: str,
-    db: AsyncSession = Depends(get_db),
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db),
 ):
     """Delete content (soft delete)."""
-    repo = ContentRepository(db)
+    repo = ContentRepository(db, user_id=user['id'])
     
     success = await repo.soft_delete(content_id)
     if not success:
@@ -242,7 +250,8 @@ async def delete_content(
 async def resolve_content(
     content_id: str,
     data: ContentResolveRequest,
-    db: AsyncSession = Depends(get_db),
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db),
 ) -> ContentResolved:
     """
     Resolve/preview content with variables substituted.
@@ -250,7 +259,7 @@ async def resolve_content(
     Static variables (linked to other content) are resolved recursively.
     Runtime variables are substituted from the request body.
     """
-    repo = ContentRepository(db)
+    repo = ContentRepository(db, user_id=user['id'])
     content = await repo.get_by_id(content_id)
     
     if not content or content.is_deleted:
@@ -333,10 +342,11 @@ async def _resolve_variables(
 async def duplicate_content(
     content_id: str,
     name: Optional[str] = Query(None, description="Name for the duplicate"),
-    db: AsyncSession = Depends(get_db),
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db),
 ) -> ContentDetail:
     """Create a copy of existing content."""
-    repo = ContentRepository(db)
+    repo = ContentRepository(db, user_id=user['id'])
     content = await repo.get_by_id(content_id)
     
     if not content or content.is_deleted:

@@ -15,27 +15,29 @@ from app.infra.db.repositories.base import BaseRepository
 class RunRepository(BaseRepository[Run]):
     """Repository for Run CRUD operations."""
     
-    def __init__(self, session: AsyncSession):
-        super().__init__(Run, session)
+    def __init__(self, session: AsyncSession, user_id: Optional[int] = None):
+        super().__init__(Run, session, user_id)
     
     async def get_by_preset(self, preset_id: str, limit: int = 100) -> Sequence[Run]:
-        """Get all runs for a specific preset."""
+        """Get all runs for a specific preset (scoped to user if user_id is set)."""
         stmt = (
             select(Run)
             .where(Run.preset_id == preset_id)
             .order_by(Run.created_at.desc())
             .limit(limit)
         )
+        stmt = self._apply_user_filter(stmt)
         result = await self.session.execute(stmt)
         return result.scalars().all()
     
     async def get_with_tasks(self, id: str) -> Optional[Run]:
-        """Get a run with its tasks eagerly loaded."""
+        """Get a run with its tasks eagerly loaded (scoped to user if user_id is set)."""
         stmt = (
             select(Run)
             .options(selectinload(Run.tasks))
             .where(Run.id == id)
         )
+        stmt = self._apply_user_filter(stmt)
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
     
@@ -45,10 +47,13 @@ class RunRepository(BaseRepository[Run]):
         offset: int = 0,
         status: Optional[str] = None
     ) -> Sequence[Run]:
-        """Get all runs with tasks eagerly loaded."""
+        """Get all runs with tasks eagerly loaded (scoped to user if user_id is set)."""
         stmt = select(Run).options(selectinload(Run.tasks))
         
-        # Apply filter first
+        # Apply user filter
+        stmt = self._apply_user_filter(stmt)
+        
+        # Apply status filter
         if status:
             stmt = stmt.where(Run.status == status)
         
@@ -59,29 +64,34 @@ class RunRepository(BaseRepository[Run]):
         return result.scalars().all()
     
     async def count(self, status: Optional[str] = None) -> int:
-        """Return the total number of runs (optionally filtered by status)."""
+        """Return the total number of runs (optionally filtered by status, scoped to user if user_id is set)."""
         stmt = select(func.count()).select_from(Run)
+        if self.user_id is not None:
+            stmt = stmt.where(Run.user_id == self.user_id)
         if status:
             stmt = stmt.where(Run.status == status)
         result = await self.session.execute(stmt)
         return result.scalar_one()
 
     async def bulk_delete_by_status(self, statuses: list[str]) -> int:
-        """Delete all runs whose status is in the provided list."""
+        """Delete all runs whose status is in the provided list (scoped to user if user_id is set)."""
         if not statuses:
             return 0
         stmt = delete(Run).where(Run.status.in_(statuses))
+        if self.user_id is not None:
+            stmt = stmt.where(Run.user_id == self.user_id)
         result = await self.session.execute(stmt)
         await self.session.commit()
         return result.rowcount or 0
     
     async def get_active_runs(self) -> Sequence[Run]:
-        """Get all runs that are currently in progress."""
+        """Get all runs that are currently in progress (scoped to user if user_id is set)."""
         stmt = (
             select(Run)
             .where(Run.status.in_([RunStatus.PENDING.value, RunStatus.RUNNING.value]))
             .order_by(Run.created_at.asc())
         )
+        stmt = self._apply_user_filter(stmt)
         result = await self.session.execute(stmt)
         return result.scalars().all()
     

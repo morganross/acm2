@@ -23,29 +23,55 @@ class EncryptionService:
             key: 32-byte encryption key (base64 encoded).
                  If None, loads from ENCRYPTION_KEY env var.
         """
+        self._key = None
+        self.fernet = None
+        
         if key is None:
             key = self._load_key_from_env()
         
-        self.fernet = Fernet(key)
-        self._key = key
-        logger.info("Encryption service initialized")
+        if key:
+            self.fernet = Fernet(key)
+            self._key = key
+            logger.info("Encryption service initialized")
+        else:
+            logger.warning("Encryption service initialized without key - encryption operations will fail")
     
-    def _load_key_from_env(self) -> bytes:
+    def _load_key_from_env(self) -> Optional[bytes]:
         """Load encryption key from environment variable.
         
         Returns:
-            Encryption key
-            
+            Encryption key or None if not set
+        """
+        key_str = os.getenv('ENCRYPTION_KEY')
+
+        # If the key is not present in the process environment, fall back to
+        # app settings, which reads from `.env` via pydantic-settings.
+        if not key_str:
+            try:
+                from app.config import get_settings
+
+                key_str = get_settings().encryption_key
+            except Exception:
+                key_str = None
+        if not key_str:
+            logger.warning(
+                "ENCRYPTION_KEY environment variable not set. "
+                "Generate one with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
+            )
+            return None
+        return key_str.encode('utf-8')
+    
+    def _ensure_key(self):
+        """Ensure encryption key is available.
+        
         Raises:
             ValueError: If ENCRYPTION_KEY not set
         """
-        key_str = os.getenv('ENCRYPTION_KEY')
-        if not key_str:
+        if self.fernet is None:
             raise ValueError(
                 "ENCRYPTION_KEY environment variable not set. "
                 "Generate one with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
             )
-        return key_str.encode('utf-8')
     
     def encrypt(self, plaintext: str) -> str:
         """Encrypt a string.
@@ -56,6 +82,7 @@ class EncryptionService:
         Returns:
             Base64-encoded encrypted string
         """
+        self._ensure_key()
         encrypted_bytes = self.fernet.encrypt(plaintext.encode('utf-8'))
         return encrypted_bytes.decode('utf-8')
     
@@ -71,6 +98,7 @@ class EncryptionService:
         Raises:
             cryptography.fernet.InvalidToken: If decryption fails
         """
+        self._ensure_key()
         decrypted_bytes = self.fernet.decrypt(ciphertext.encode('utf-8'))
         return decrypted_bytes.decode('utf-8')
     
@@ -112,10 +140,22 @@ def get_encryption_service() -> EncryptionService:
     
     Returns:
         EncryptionService instance
+        
+    Raises:
+        RuntimeError: If ENCRYPTION_KEY is not configured
     """
     global _encryption_service
     if _encryption_service is None:
         _encryption_service = EncryptionService()
+    
+    # Fail loudly if encryption is not configured
+    if _encryption_service.fernet is None:
+        raise RuntimeError(
+            "ENCRYPTION_KEY environment variable not set. "
+            "The application cannot start without encryption configured. "
+            "Generate one with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
+        )
+    
     return _encryption_service
 
 

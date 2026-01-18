@@ -8,8 +8,9 @@ from datetime import datetime
 from typing import List, Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Depends
 from pydantic import BaseModel, Field
+from typing import List, Optional, Dict, Any
 
 from ...evaluation import (
     DocumentInput,
@@ -21,6 +22,7 @@ from ...evaluation import (
     PairwiseEvaluator,
     PairwiseConfig,
 )
+from app.auth.middleware import get_current_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/evaluation", tags=["evaluation"])
@@ -115,7 +117,10 @@ eval_jobs: dict[str, dict] = {}
 # ============================================================================
 
 @router.post("/single", response_model=dict[str, SingleEvalResponse])
-async def evaluate_single_docs(request: SingleEvalRequest) -> dict[str, SingleEvalResponse]:
+async def evaluate_single_docs(
+    request: SingleEvalRequest,
+    user: Dict[str, Any] = Depends(get_current_user),
+) -> dict[str, SingleEvalResponse]:
     """
     Run single-document graded evaluation.
     
@@ -154,7 +159,10 @@ async def evaluate_single_docs(request: SingleEvalRequest) -> dict[str, SingleEv
 
 
 @router.post("/pairwise", response_model=PairwiseEvalResponse)
-async def evaluate_pairwise(request: PairwiseEvalRequest) -> PairwiseEvalResponse:
+async def evaluate_pairwise(
+    request: PairwiseEvalRequest,
+    user: Dict[str, Any] = Depends(get_current_user),
+) -> PairwiseEvalResponse:
     """
     Run pairwise comparison evaluation.
     
@@ -201,7 +209,10 @@ async def evaluate_pairwise(request: PairwiseEvalRequest) -> PairwiseEvalRespons
 
 
 @router.post("/full", response_model=FullEvalResponse)
-async def evaluate_full(request: BatchEvalRequest) -> FullEvalResponse:
+async def evaluate_full(
+    request: BatchEvalRequest,
+    user: Dict[str, Any] = Depends(get_current_user),
+) -> FullEvalResponse:
     """
     Run full evaluation pipeline: single-doc + pairwise.
     
@@ -279,6 +290,7 @@ async def evaluate_full(request: BatchEvalRequest) -> FullEvalResponse:
 async def evaluate_full_async(
     request: BatchEvalRequest,
     background_tasks: BackgroundTasks,
+    user: Dict[str, Any] = Depends(get_current_user),
 ) -> dict:
     """
     Start full evaluation pipeline as a background job.
@@ -313,7 +325,10 @@ async def evaluate_full_async(
 
 
 @router.get("/jobs/{job_id}", response_model=EvalJobStatus)
-async def get_eval_job_status(job_id: str) -> EvalJobStatus:
+async def get_eval_job_status(
+    job_id: str,
+    user: Dict[str, Any] = Depends(get_current_user),
+) -> EvalJobStatus:
     """
     Get status of an async evaluation job.
     """
@@ -331,7 +346,9 @@ async def get_eval_job_status(job_id: str) -> EvalJobStatus:
 
 
 @router.get("/criteria")
-async def get_evaluation_criteria() -> dict:
+async def get_evaluation_criteria(
+    user: Dict[str, Any] = Depends(get_current_user),
+) -> dict:
     """
     Get evaluation criteria.
     

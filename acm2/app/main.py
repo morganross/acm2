@@ -24,7 +24,9 @@ from .infra.db.session import engine, async_session_factory
 from .infra.db.models import Base
 from .infra.db.repositories import PresetRepository, DocumentRepository, RunRepository
 from .config import get_settings
-from .middleware.auth import ApiKeyMiddleware, RateLimitMiddleware
+from .db.master import get_master_db
+# Per-user auth is now handled per-route via Depends(get_current_user)
+# from .middleware.auth import ApiKeyMiddleware, RateLimitMiddleware
 
 # Configure logging
 logging.basicConfig(
@@ -38,6 +40,10 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     logger.info("Starting ACM2 API server...")
+
+    settings = get_settings()
+    if not settings.seed_preset_id or not settings.seed_version:
+        raise RuntimeError("Seed package settings missing: SEED_PRESET_ID and SEED_VERSION are required")
     
     # Initialize database tables
     async with engine.begin() as conn:
@@ -65,6 +71,15 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     await engine.dispose()
+    
+    # Close master MySQL pool
+    try:
+        master_db = await get_master_db()
+        await master_db.close()
+        logger.info("Master database pool closed")
+    except Exception as e:
+        logger.warning(f"Error closing master DB pool: {e}")
+    
     logger.info("Shutting down ACM2 API server...")
 
 
@@ -97,14 +112,9 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # API key auth + simple per-key rate limiting
-    app.add_middleware(
-        RateLimitMiddleware,
-        api_key=settings.api_key,
-        max_requests=settings.rate_limit_max_requests,
-        window_seconds=settings.rate_limit_window_seconds,
-    )
-    app.add_middleware(ApiKeyMiddleware, api_key=settings.api_key)
+    # Per-user authentication is now handled per-route via Depends(get_current_user)
+    # The old static API key middleware has been removed.
+    # See: acm2/app/auth/middleware.py for the per-user auth implementation
     
     # Include API routes
     app.include_router(api_router)
@@ -148,8 +158,26 @@ def create_app() -> FastAPI:
             if full_path.startswith(("api", "docs", "redoc", "openapi")):
                 raise HTTPException(status_code=404)
             candidate = static_dir / full_path
-            if candidate.exists():
-                return FileResponse(candidate)
+            if candidate.exists() and candidate.is_file():
+                # Determine media type for proper MIME handling
+                suffix = candidate.suffix.lower()
+                media_types = {
+                    ".js": "application/javascript",
+                    ".mjs": "application/javascript",
+                    ".css": "text/css",
+                    ".html": "text/html",
+                    ".json": "application/json",
+                    ".png": "image/png",
+                    ".jpg": "image/jpeg",
+                    ".jpeg": "image/jpeg",
+                    ".svg": "image/svg+xml",
+                    ".ico": "image/x-icon",
+                    ".woff": "font/woff",
+                    ".woff2": "font/woff2",
+                    ".ttf": "font/ttf",
+                }
+                media_type = media_types.get(suffix)
+                return FileResponse(candidate, media_type=media_type)
             index_path = static_dir / "index.html"
             if index_path.exists():
                 return FileResponse(index_path)
@@ -180,4 +208,4 @@ if __name__ == "__main__":
         import asyncio
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
     
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8002, reload=False)
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=False)

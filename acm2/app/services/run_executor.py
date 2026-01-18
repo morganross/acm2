@@ -15,6 +15,7 @@ import traceback
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 from uuid import uuid4
 
@@ -585,7 +586,7 @@ class RunExecutor:
     async def _save_generated_content(self, run_id: str, gen_doc: GeneratedDocument) -> None:
         """Save generated document content to a file. FAILS if content is empty.
         
-        Files are stored in logs/{run_id}/generated/{doc_id}.md
+        Files are stored in data/user_{user_id}/runs/{run_id}/generated/{doc_id}.md
         """
         from pathlib import Path
         import aiofiles
@@ -599,7 +600,8 @@ class RunExecutor:
                 raise ValueError(f"Cannot save document {gen_doc.doc_id}: content is only whitespace")
             
             # Create directory structure
-            gen_dir = Path("logs") / run_id / "generated"
+            run_root = self._get_run_root(run_id)
+            gen_dir = run_root / "generated"
             gen_dir.mkdir(parents=True, exist_ok=True)
             
             # Sanitize doc_id for filename (replace invalid chars)
@@ -616,6 +618,12 @@ class RunExecutor:
             self.logger.error(f"Failed to save generated content for {gen_doc.doc_id}: {e}")
             raise RuntimeError(f"Failed to save {gen_doc.doc_id}: {e}") from e
             self.logger.exception(f"Failed to save generated content for {gen_doc.doc_id}: {e}")
+
+    def _get_run_root(self, run_id: str) -> Path:
+        from ..config import get_settings
+
+        settings = get_settings()
+        return settings.data_dir / f"user_{self.config.user_id}" / "runs" / run_id
     
     async def execute(self, run_id: str, config: RunConfig) -> RunResult:
         """
@@ -1436,14 +1444,11 @@ Optimize your response to score highly on each criterion:
                 
                 # If file output, ensure log directory exists and set paths
                 if run_id and fpf_log_output == 'file':
-                    from pathlib import Path
-                    log_dir = Path("logs") / run_id
+                    log_dir = self._get_run_root(run_id) / "logs"
                     log_dir.mkdir(parents=True, exist_ok=True)
                     run_log_file = str(log_dir / "run.log")
                     if not fpf_log_file:
-                        # Default file path if not specified - make unique per task to avoid file locking
-                        safe_task_id = task_id.replace(":", "_")
-                        fpf_log_file = str(log_dir / f"fpf_{safe_task_id}.log")
+                        raise ValueError("fpf_log_file_path required when fpf_log_output='file'")
                 
                 # Apply provider-level rate limiting before making API call
                 async with RateLimitedRequest(provider):

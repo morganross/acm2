@@ -15,9 +15,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from dotenv import load_dotenv
 load_dotenv()
 
-from acm2.app.security.encryption import get_encryption_service
-from acm2.app.security.provider_keys import get_provider_key_manager
-from acm2.app.db.user_db import get_user_db
+from app.security.encryption import get_encryption_service
+from app.security.provider_keys import get_provider_key_manager
+from app.db.user_db import get_user_db
 
 
 async def test_encryption():

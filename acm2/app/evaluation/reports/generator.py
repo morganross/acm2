@@ -27,10 +27,9 @@ class ReportGenerator:
         
         # Ensure output dir exists
         run_id = run.get("id") if isinstance(run, dict) else run.id
-        run_dir = self.output_dir / run_id
-        run_dir.mkdir(parents=True, exist_ok=True)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
         
-        output_path = run_dir / "eval_timeline_chart.json"
+        output_path = self.output_dir / "eval_timeline_chart.json"
         
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(chart.to_dict(), f, indent=2)
@@ -55,7 +54,8 @@ class ReportGenerator:
             timeline=chart
         )
         
-        html_path = self.output_dir / run_id / "report.html"
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        html_path = self.output_dir / "report.html"
         with open(html_path, "w", encoding="utf-8") as f:
             f.write(html_content)
             

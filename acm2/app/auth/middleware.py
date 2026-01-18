@@ -7,8 +7,8 @@ from fastapi import Header, HTTPException, status
 from typing import Optional, Dict, Any
 import logging
 
-from acm2.app.db.master import get_master_db
-from acm2.app.auth.api_keys import is_valid_key_format, validate_api_key
+from app.db.master import get_master_db
+from app.auth.api_keys import is_valid_key_format, validate_api_key
 
 logger = logging.getLogger(__name__)
 

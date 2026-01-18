@@ -11,12 +11,15 @@ from typing import Dict, Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Dict, Any
 
-from app.infra.db.session import get_db, async_session_factory
+from app.infra.db.session import get_user_db, get_user_session_by_id
+from app.auth.middleware import get_current_user
 from app.infra.db.repositories import RunRepository, ContentRepository
 from app.services.run_executor import RunConfig, RunExecutor
 from app.adapters.base import GeneratorType as AdapterGeneratorType
 from app.utils.logging_utils import get_run_logger
+from app.utils.paths import get_fpf_log_path
 from app.evaluation.models import SingleEvalResult
 
 from ...schemas.runs import RunStatus
@@ -88,8 +91,8 @@ async def execute_run_background(run_id: str, config: RunConfig):
                 logger.info(f"[on_gen_complete] generated_docs_incremental now has {len(generated_docs_incremental)} items")
                 
                 # Write to DB using append method (safe against race conditions)
-                async with async_session_factory() as session:
-                    repo = RunRepository(session)
+                async with get_user_session_by_id(config.user_id) as session:
+                    repo = RunRepository(session, user_id=config.user_id)
                     result = await repo.append_generated_doc(run_id, doc_info)
                     if result:
                         logger.info(f"[on_gen_complete] Appended to DB: generated_docs count now {len(result.results_summary.get('generated_docs', []))}")
@@ -97,8 +100,8 @@ async def execute_run_background(run_id: str, config: RunConfig):
                         logger.warning(f"[on_gen_complete] Run {run_id} not found in DB!")
 
                 # Also write per-source-doc generated_docs so per-doc tabs populate
-                async with async_session_factory() as session:
-                    repo = RunRepository(session)
+                async with get_user_session_by_id(config.user_id) as session:
+                    repo = RunRepository(session, user_id=config.user_id)
                     await repo.append_source_doc_generated_doc(run_id, source_doc_id, doc_info)
                 
                 logger.info(f"[DB] Saved gen #{gen_count}: {doc_id} | {model}")
@@ -149,8 +152,8 @@ async def execute_run_background(run_id: str, config: RunConfig):
                     pre_combine_evals[d_id] = {c: sum(s)/len(s) for c, s in criterion_scores.items()}
                 
                 # Write to DB
-                async with async_session_factory() as session:
-                    repo = RunRepository(session)
+                async with get_user_session_by_id(config.user_id) as session:
+                    repo = RunRepository(session, user_id=config.user_id)
                     run_fresh = await repo.get_by_id(run_id)
                     if run_fresh:
                         results_summary_updated = dict(run_fresh.results_summary or {})
@@ -164,8 +167,8 @@ async def execute_run_background(run_id: str, config: RunConfig):
                 # Also write per-source-doc single_eval_results so per-doc evaluation tab fills
                 if source_doc_id:
                     overall_avg = float(pre_combine_evals_detailed_incremental[doc_id]["overall_average"])
-                    async with async_session_factory() as session:
-                        repo = RunRepository(session)
+                    async with get_user_session_by_id(config.user_id) as session:
+                        repo = RunRepository(session, user_id=config.user_id)
                         await repo.upsert_source_doc_single_eval_result(
                             run_id,
                             source_doc_id,
@@ -182,8 +185,8 @@ async def execute_run_background(run_id: str, config: RunConfig):
         result = await executor.execute(run_id, config)
         
         # Update run in DB
-        async with async_session_factory() as session:
-            run_repo = RunRepository(session)
+        async with get_user_session_by_id(config.user_id) as session:
+            run_repo = RunRepository(session, user_id=config.user_id)
             
             if result.status.value == "completed":
                 # Build generated docs list for frontend display
@@ -558,8 +561,8 @@ async def execute_run_background(run_id: str, config: RunConfig):
                 
     except Exception as e:
         logger.exception(f"Unexpected error executing run {run_id}")
-        async with async_session_factory() as session:
-            run_repo = RunRepository(session)
+        async with get_user_session_by_id(config.user_id) as session:
+            run_repo = RunRepository(session, user_id=config.user_id)
             await run_repo.fail(run_id, error_message=str(e))
     finally:
         try:
@@ -580,12 +583,13 @@ async def execute_run_background(run_id: str, config: RunConfig):
 async def start_run(
     run_id: str,
     background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db)
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db)
 ) -> dict:
     """
     Start executing a run.
     """
-    repo = RunRepository(db)
+    repo = RunRepository(db, user_id=user['id'])
     run = await repo.get_by_id(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -600,7 +604,7 @@ async def start_run(
         raise HTTPException(status_code=400, detail="Cannot start run: run was not created from a preset")
 
     from app.infra.db.repositories import PresetRepository
-    preset_repo = PresetRepository(db)
+    preset_repo = PresetRepository(db, user_id=user['id'])
     preset = await preset_repo.get_by_id(run.preset_id)
     if not preset:
         raise HTTPException(status_code=404, detail=f"Preset {run.preset_id} not found for this run")
@@ -610,7 +614,7 @@ async def start_run(
     run_config = run.config or {}
     
     # Fetch documents from Content Library
-    content_repo = ContentRepository(db)
+    content_repo = ContentRepository(db, user_id=user['id'])
     document_contents = {}
     doc_ids = run_config.get("document_ids") or []
     
@@ -843,6 +847,7 @@ async def start_run(
         raise ValueError("eval_config.strict_json must be set in preset")
 
     executor_config = RunConfig(
+        user_id=user['id'],  # User ID for fetching encrypted provider API keys
         document_ids=list(document_contents.keys()),
         document_contents=document_contents,
         instructions=instructions,
@@ -875,7 +880,7 @@ async def start_run(
         expose_criteria_to_generators=run_config.get("expose_criteria_to_generators", False),
         log_level=log_level,
         fpf_log_output="file",
-        fpf_log_file_path=str(Path("logs") / run_id / "fpf_output.log"),
+        fpf_log_file_path=str(get_fpf_log_path(user['id'], run_id)),
         generation_concurrency=gen_concurrency,
         eval_concurrency=eval_concurrency_val,
         request_timeout=request_timeout,
@@ -918,12 +923,13 @@ async def start_run(
 @router.post("/runs/{run_id}/pause")
 async def pause_run(
     run_id: str,
-    db: AsyncSession = Depends(get_db)
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db)
 ) -> dict:
     """
     Pause a running run.
     """
-    repo = RunRepository(db)
+    repo = RunRepository(db, user_id=user['id'])
     run = await repo.get_by_id(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -941,12 +947,13 @@ async def pause_run(
 @router.post("/runs/{run_id}/resume")
 async def resume_run(
     run_id: str,
-    db: AsyncSession = Depends(get_db)
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db)
 ) -> dict:
     """
     Resume a paused run.
     """
-    repo = RunRepository(db)
+    repo = RunRepository(db, user_id=user['id'])
     run = await repo.get_by_id(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -964,12 +971,13 @@ async def resume_run(
 @router.post("/runs/{run_id}/cancel")
 async def cancel_run(
     run_id: str,
-    db: AsyncSession = Depends(get_db)
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db)
 ) -> dict:
     """
     Cancel a running or paused run.
     """
-    repo = RunRepository(db)
+    repo = RunRepository(db, user_id=user['id'])
     run = await repo.get_by_id(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")

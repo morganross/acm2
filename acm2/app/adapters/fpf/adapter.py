@@ -23,6 +23,7 @@ from ..base import (
     TaskStatus,
 )
 from .errors import FpfExecutionError, FpfTimeoutError
+from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -132,9 +133,9 @@ class FpfAdapter(BaseAdapter):
             # Prepare environment - inject encrypted provider API keys for this user
             env = os.environ.copy()
             
-            from app.security.key_injection import inject_provider_keys_for_user
+            from app.security.key_injection import inject_provider_keys_for_user_auto
             try:
-                env = await inject_provider_keys_for_user(user_id, env)
+                env = await inject_provider_keys_for_user_auto(user_id, env)
                 logger.debug(f"FPF: Injected encrypted API keys for user_id={user_id}")
             except Exception as e:
                 logger.warning(f"FPF: Failed to inject provider keys for user {user_id}: {e}")
@@ -143,8 +144,8 @@ class FpfAdapter(BaseAdapter):
             run_id = extra.get("run_id")
             if run_id:
                 env["FPF_RUN_GROUP_ID"] = run_id
-                # Point FPF logs to ACM2's logs directory  
-                logs_dir = Path("logs") / run_id
+                # Point FPF logs to ACM2's per-user logs directory
+                logs_dir = self._get_run_root(user_id, run_id) / "logs"
                 logs_dir.mkdir(parents=True, exist_ok=True)
                 env["FPF_LOG_DIR"] = str(logs_dir.resolve())
             
@@ -194,7 +195,7 @@ class FpfAdapter(BaseAdapter):
             cost_usd = 0.0
             
             if run_id:
-                cost_info = self._parse_fpf_cost_log(run_id)
+                cost_info = self._parse_fpf_cost_log(run_id, user_id)
                 if cost_info:
                     input_tokens = cost_info.get("input_tokens", 0)
                     output_tokens = cost_info.get("output_tokens", 0)
@@ -392,10 +393,10 @@ class FpfAdapter(BaseAdapter):
 
         return cmd
 
-    def _parse_fpf_cost_log(self, run_id: str) -> dict | None:
+    def _parse_fpf_cost_log(self, run_id: str, user_id: int) -> dict | None:
         """Parse FPF's JSON log file to extract cost and token usage.
         
-        FPF writes logs to logs/{run_group_id}/YYYYMMDDTHHMMSS-{run_id}.json
+        FPF writes logs to data/user_{user_id}/runs/{run_id}/logs/YYYYMMDDTHHMMSS-{run_id}.json
         with fields: total_cost_usd, usage.prompt_tokens, usage.completion_tokens
         """
         import json
@@ -403,7 +404,7 @@ class FpfAdapter(BaseAdapter):
         
         try:
             # Use absolute path - same as when writing logs
-            logs_dir = Path("logs") / run_id
+            logs_dir = self._get_run_root(user_id, run_id) / "logs"
             logs_dir = logs_dir.resolve()
             if not logs_dir.exists():
                 logger.debug(f"FPF logs dir not found: {logs_dir}")
@@ -443,6 +444,10 @@ class FpfAdapter(BaseAdapter):
         except Exception as e:
             logger.error(f"Failed to parse FPF cost log for run {run_id}: {e}", exc_info=True)
             return None
+
+    def _get_run_root(self, user_id: int, run_id: str) -> Path:
+        settings = get_settings()
+        return settings.data_dir / f"user_{user_id}" / "runs" / run_id
 
     def _get_fpf_directory(self) -> str:
         """Get the FilePromptForge directory path."""

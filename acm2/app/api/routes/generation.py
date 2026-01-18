@@ -10,10 +10,12 @@ from datetime import datetime
 from typing import Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, WebSocket, WebSocketDisconnect, Depends
 from pydantic import BaseModel, Field
+from typing import Optional, Dict, Any
 
-from ...adapters import FpfAdapter, GptrAdapter, GenerationConfig, GeneratorType
+from ...adapters import FpfAdapter, GptrAdapter, GenerationConfig, GeneratorType, get_adapter
+from app.auth.middleware import get_current_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/generation", tags=["generation"])
@@ -71,6 +73,14 @@ class TaskStatusResponse(BaseModel):
     
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+
+
+class AdapterInfo(BaseModel):
+    """Information about available generation adapters."""
+    name: str
+    display_name: str
+    available: bool
+    health_message: Optional[str] = None
 
 
 # ============================================================================
@@ -234,10 +244,42 @@ async def run_generation_task(
 # REST Endpoints
 # ============================================================================
 
+@router.get("/adapters", response_model=list[AdapterInfo])
+async def list_adapters(
+    user: Dict[str, Any] = Depends(get_current_user),
+) -> list[AdapterInfo]:
+    """List available generation adapters and their health."""
+    adapters: list[AdapterInfo] = []
+
+    for generator_type in GeneratorType:
+        try:
+            adapter = get_adapter(generator_type)
+        except ValueError:
+            continue
+
+        try:
+            available = await adapter.health_check()
+            health_message = None if available else "Unavailable"
+        except Exception as exc:
+            available = False
+            health_message = str(exc)
+
+        adapters.append(
+            AdapterInfo(
+                name=generator_type.value,
+                display_name=adapter.display_name,
+                available=available,
+                health_message=health_message,
+            )
+        )
+
+    return adapters
+
 @router.post("/generate", response_model=GenerateResponse)
 async def generate(
     request: GenerateRequest,
     background_tasks: BackgroundTasks,
+    user: Dict[str, Any] = Depends(get_current_user),
 ) -> GenerateResponse:
     """
     Start a new generation task.
@@ -262,7 +304,10 @@ async def generate(
 
 
 @router.get("/status/{task_id}", response_model=TaskStatusResponse)
-async def get_task_status(task_id: str) -> TaskStatusResponse:
+async def get_task_status(
+    task_id: str,
+    user: Dict[str, Any] = Depends(get_current_user),
+) -> TaskStatusResponse:
     """
     Get the status of a generation task.
     """
@@ -274,7 +319,10 @@ async def get_task_status(task_id: str) -> TaskStatusResponse:
 
 
 @router.post("/cancel/{task_id}")
-async def cancel_task(task_id: str) -> dict:
+async def cancel_task(
+    task_id: str,
+    user: Dict[str, Any] = Depends(get_current_user),
+) -> dict:
     """
     Cancel a running generation task.
     """
@@ -325,6 +373,7 @@ async def cancel_task(task_id: str) -> dict:
 async def list_tasks(
     status: Optional[str] = Query(None, description="Filter by status"),
     limit: int = Query(20, ge=1, le=100),
+    user: Dict[str, Any] = Depends(get_current_user),
 ) -> dict:
     """
     List recent generation tasks.
@@ -377,13 +426,41 @@ class ConnectionManager:
 ws_manager = ConnectionManager()
 
 
+async def _authenticate_ws(websocket: WebSocket, api_key: Optional[str]) -> bool:
+    """Authenticate WebSocket connection via API key query parameter."""
+    if not api_key:
+        await websocket.close(code=4001, reason="Missing API key")
+        return False
+    
+    try:
+        user = await get_current_user(api_key)
+        if not user:
+            await websocket.close(code=4001, reason="Invalid API key")
+            return False
+        return True
+    except Exception as e:
+        logger.warning(f"WebSocket auth failed: {e}")
+        await websocket.close(code=4001, reason="Authentication failed")
+        return False
+
+
 @router.websocket("/ws/{task_id}")
-async def websocket_task_updates(websocket: WebSocket, task_id: str):
+async def websocket_task_updates(
+    websocket: WebSocket,
+    task_id: str,
+    api_key: Optional[str] = Query(None, description="API key for authentication"),
+):
     """
     WebSocket endpoint for real-time task updates.
     
     Connect to receive progress updates for a specific task.
+    Authentication is required via 'api_key' query parameter.
+    Example: ws://host/generation/ws/{task_id}?api_key=<your_api_key>
     """
+    # Authenticate before accepting the connection
+    if not await _authenticate_ws(websocket, api_key):
+        return
+    
     await ws_manager.connect(websocket, task_id)
     
     try:

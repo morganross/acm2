@@ -6,12 +6,13 @@ Endpoints for managing GitHub repository connections.
 import base64
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.infra.db.session import get_db
+from app.infra.db.session import get_user_db
+from app.auth.middleware import get_current_user
 from app.infra.db.repositories import GitHubConnectionRepository, ContentRepository
 from app.infra.db.models.content import ContentType as DBContentType
 from ..schemas.github_connection import (
@@ -138,10 +139,11 @@ def _connection_to_detail(conn) -> GitHubConnectionDetail:
 
 @router.get("", response_model=GitHubConnectionList)
 async def list_connections(
-    db: AsyncSession = Depends(get_db),
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db),
 ) -> GitHubConnectionList:
     """List all GitHub connections."""
-    repo = GitHubConnectionRepository(db)
+    repo = GitHubConnectionRepository(db, user_id=user['id'])
     connections = await repo.get_active()
     
     return GitHubConnectionList(
@@ -153,10 +155,11 @@ async def list_connections(
 @router.post("", response_model=GitHubConnectionDetail, status_code=201)
 async def create_connection(
     data: GitHubConnectionCreate,
-    db: AsyncSession = Depends(get_db),
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db),
 ) -> GitHubConnectionDetail:
     """Create a new GitHub connection."""
-    repo = GitHubConnectionRepository(db)
+    repo = GitHubConnectionRepository(db, user_id=user['id'])
     
     # Check if connection to this repo already exists
     existing = await repo.get_by_repo(data.repo)
@@ -190,10 +193,11 @@ async def create_connection(
 @router.get("/{connection_id}", response_model=GitHubConnectionDetail)
 async def get_connection(
     connection_id: str,
-    db: AsyncSession = Depends(get_db),
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db),
 ) -> GitHubConnectionDetail:
     """Get a GitHub connection by ID."""
-    repo = GitHubConnectionRepository(db)
+    repo = GitHubConnectionRepository(db, user_id=user['id'])
     connection = await repo.get_by_id(connection_id)
     
     if not connection or connection.is_deleted:
@@ -206,10 +210,11 @@ async def get_connection(
 async def update_connection(
     connection_id: str,
     data: GitHubConnectionUpdate,
-    db: AsyncSession = Depends(get_db),
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db),
 ) -> GitHubConnectionDetail:
     """Update a GitHub connection."""
-    repo = GitHubConnectionRepository(db)
+    repo = GitHubConnectionRepository(db, user_id=user['id'])
     connection = await repo.get_by_id(connection_id)
     
     if not connection or connection.is_deleted:
@@ -242,10 +247,11 @@ async def update_connection(
 @router.delete("/{connection_id}", status_code=204)
 async def delete_connection(
     connection_id: str,
-    db: AsyncSession = Depends(get_db),
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db),
 ):
     """Delete a GitHub connection (soft delete)."""
-    repo = GitHubConnectionRepository(db)
+    repo = GitHubConnectionRepository(db, user_id=user['id'])
     
     success = await repo.soft_delete(connection_id)
     if not success:
@@ -261,10 +267,11 @@ async def delete_connection(
 @router.post("/{connection_id}/test", response_model=GitHubConnectionTestResult)
 async def test_connection(
     connection_id: str,
-    db: AsyncSession = Depends(get_db),
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db),
 ) -> GitHubConnectionTestResult:
     """Test a GitHub connection and update its status."""
-    repo = GitHubConnectionRepository(db)
+    repo = GitHubConnectionRepository(db, user_id=user['id'])
     connection = await repo.get_by_id(connection_id)
     
     if not connection or connection.is_deleted:
@@ -295,10 +302,11 @@ async def test_connection(
 async def browse_repository(
     connection_id: str,
     path: str = Query("/", description="Path in repository to browse"),
-    db: AsyncSession = Depends(get_db),
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db),
 ) -> GitHubBrowseResponse:
     """Browse files and directories in a GitHub repository."""
-    repo = GitHubConnectionRepository(db)
+    repo = GitHubConnectionRepository(db, user_id=user['id'])
     connection = await repo.get_by_id(connection_id)
     
     if not connection or connection.is_deleted:
@@ -362,10 +370,11 @@ async def browse_repository(
 async def get_file_content(
     connection_id: str,
     path: str = Query(..., description="Path to file in repository"),
-    db: AsyncSession = Depends(get_db),
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db),
 ) -> GitHubFileContent:
     """Get the content of a file from GitHub."""
-    repo = GitHubConnectionRepository(db)
+    repo = GitHubConnectionRepository(db, user_id=user['id'])
     connection = await repo.get_by_id(connection_id)
     
     if not connection or connection.is_deleted:
@@ -415,11 +424,12 @@ async def get_file_content(
 async def import_file_as_content(
     connection_id: str,
     data: GitHubImportRequest,
-    db: AsyncSession = Depends(get_db),
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db),
 ) -> ContentDetail:
     """Import a file from GitHub as content in the database."""
-    gh_repo = GitHubConnectionRepository(db)
-    content_repo = ContentRepository(db)
+    gh_repo = GitHubConnectionRepository(db, user_id=user['id'])
+    content_repo = ContentRepository(db, user_id=user['id'])
     
     connection = await gh_repo.get_by_id(connection_id)
     if not connection or connection.is_deleted:

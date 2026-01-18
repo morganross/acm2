@@ -3,13 +3,17 @@ User Management Endpoints
 
 Handles user creation and API key generation for WordPress integration.
 """
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
 from pydantic import BaseModel, EmailStr
 from typing import Optional
 
-from acm2.app.db.master import MasterDB
-from acm2.app.auth.api_keys import generate_api_key
-from acm2.app.db.user_db import UserDB
+from app.db.master import get_master_db
+from app.auth.api_keys import generate_api_key
+from app.db.seed_user import initialize_user
+from app.auth.middleware import get_current_user
+from app.infra.db.session import get_user_session_by_id
+from app.infra.db.models.user_meta import UserMeta
+from sqlalchemy import select
 
 router = APIRouter(tags=["Users"])
 
@@ -39,7 +43,7 @@ async def create_user(request: CreateUserRequest):
     It creates the user in the master database, generates an API key,
     and initializes their user database.
     """
-    master_db = MasterDB()
+    master_db = await get_master_db()
     
     try:
         # Check if user already exists
@@ -77,9 +81,9 @@ async def create_user(request: CreateUserRequest):
             name=f"WordPress API Key for {request.username}"
         )
         
-        # Initialize user's personal database
-        user_db = UserDB(user_id)
-        await user_db.init_db()
+        # Initialize user's personal database and seed with default preset/run
+        # initialize_user handles both per-user SQLite and shared DB seeding
+        await initialize_user(user_id)
         
         return CreateUserResponse(
             user_id=user_id,
@@ -99,14 +103,29 @@ async def create_user(request: CreateUserRequest):
 
 
 @router.get("/users/me")
-async def get_current_user_info():
+async def get_current_user_info(user: dict = Depends(get_current_user)):
     """
     Get information about the current authenticated user.
     
     Requires authentication via X-ACM2-API-Key header.
     """
-    # TODO: Implement this endpoint with authentication
-    # For now, return placeholder
+    async with get_user_session_by_id(user["id"]) as session:
+        result = await session.execute(
+            select(UserMeta).where(UserMeta.user_id == user["id"])
+        )
+        meta = result.scalar_one_or_none()
+
+    if not meta:
+        raise HTTPException(
+            status_code=status.HTTP_425_TOO_EARLY,
+            detail="User setup in progress"
+        )
+
     return {
-        "message": "This endpoint requires authentication implementation"
+        "user_id": user["id"],
+        "username": user.get("username"),
+        "email": user.get("email"),
+        "seed_status": meta.seed_status,
+        "seed_version": meta.seed_version,
+        "seeded_at": meta.seeded_at.isoformat() if meta.seeded_at else None,
     }

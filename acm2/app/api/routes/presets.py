@@ -12,9 +12,11 @@ from dataclasses import asdict
 
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Optional, Dict, Any
 
-from app.infra.db.session import get_db, async_session_factory
+from app.infra.db.session import get_user_db, get_user_session_by_id
 from app.infra.db.repositories import PresetRepository, RunRepository, DocumentRepository, ContentRepository
+from app.auth.middleware import get_current_user
 from app.infra.db.models.run import RunStatus
 from app.services.run_executor import get_executor, RunConfig, RunExecutor
 from app.utils.logging_utils import get_run_logger
@@ -89,8 +91,8 @@ async def execute_run_background(run_id: str, config: RunConfig):
         }
     
     # Save initial source_doc_results to DB immediately so UI shows collapsible sections
-    async with async_session_factory() as session:
-        repo = RunRepository(session)
+    async with get_user_session_by_id(config.user_id) as session:
+        repo = RunRepository(session, user_id=config.user_id)
         run_fresh = await repo.get_by_id(run_id)
         if run_fresh:
             results_summary_updated = dict(run_fresh.results_summary or {})
@@ -149,8 +151,8 @@ async def execute_run_background(run_id: str, config: RunConfig):
                 "iteration": iteration,
             })
             
-            async with async_session_factory() as session:
-                repo = RunRepository(session)
+            async with get_user_session_by_id(config.user_id) as session:
+                repo = RunRepository(session, user_id=config.user_id)
                 run_fresh = await repo.get_by_id(run_id)
                 if run_fresh:
                     results_summary_updated = dict(run_fresh.results_summary or {})
@@ -223,8 +225,8 @@ async def execute_run_background(run_id: str, config: RunConfig):
                 source_doc_results_incremental[source_doc_id]["single_eval_results"][doc_id]["avg_score"] = \
                     pre_combine_evals_detailed_incremental[doc_id]["overall_average"]
             
-            async with async_session_factory() as session:
-                repo = RunRepository(session)
+            async with get_user_session_by_id(config.user_id) as session:
+                repo = RunRepository(session, user_id=config.user_id)
                 run_fresh = await repo.get_by_id(run_id)
                 if run_fresh:
                     results_summary_updated = dict(run_fresh.results_summary or {})
@@ -247,8 +249,8 @@ async def execute_run_background(run_id: str, config: RunConfig):
     logger.info(f"Executor returned for run {run_id}: status={result.status.value}, docs={len(result.generated_docs)}, errors={result.errors}")
     
     # Update run in DB
-    async with async_session_factory() as session:
-        run_repo = RunRepository(session)
+    async with get_user_session_by_id(config.user_id) as session:
+        run_repo = RunRepository(session, user_id=config.user_id)
         
         if result.status.value == "completed":
             logger.info(f"Run {run_id}: Saving completed results to DB...")
@@ -562,12 +564,13 @@ def _preset_to_summary(preset) -> PresetSummary:
 @router.post("", response_model=PresetResponse)
 async def create_preset(
     data: PresetCreate,
-    db: AsyncSession = Depends(get_db)
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db)
 ) -> PresetResponse:
     """
     Create a new preset configuration.
     """
-    repo = PresetRepository(db)
+    repo = PresetRepository(db, user_id=user['id'])
     
     # Check for duplicate name
     existing = await repo.get_by_name(data.name)
@@ -682,12 +685,13 @@ async def create_preset(
 async def list_presets(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    db: AsyncSession = Depends(get_db)
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db)
 ) -> PresetList:
     """
     List all presets with pagination.
     """
-    repo = PresetRepository(db)
+    repo = PresetRepository(db, user_id=user['id'])
     
     # Get active (non-deleted) presets
     offset = (page - 1) * page_size
@@ -707,12 +711,13 @@ async def list_presets(
 @router.get("/{preset_id}", response_model=PresetResponse)
 async def get_preset(
     preset_id: str,
-    db: AsyncSession = Depends(get_db)
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db)
 ) -> PresetResponse:
     """
     Get a specific preset by ID.
     """
-    repo = PresetRepository(db)
+    repo = PresetRepository(db, user_id=user['id'])
     preset = await repo.get_by_id(preset_id)
     
     if not preset or preset.is_deleted:
@@ -725,12 +730,13 @@ async def get_preset(
 async def update_preset(
     preset_id: str,
     data: PresetUpdate,
-    db: AsyncSession = Depends(get_db)
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db)
 ) -> PresetResponse:
     """
     Update a preset.
     """
-    repo = PresetRepository(db)
+    repo = PresetRepository(db, user_id=user['id'])
     preset = await repo.get_by_id(preset_id)
     
     if not preset or preset.is_deleted:
@@ -886,14 +892,15 @@ async def update_preset(
 async def delete_preset(
     preset_id: str,
     permanent: bool = Query(False, description="Permanently delete instead of soft delete"),
-    db: AsyncSession = Depends(get_db)
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db)
 ) -> dict:
     """
     Delete a preset.
     
     By default performs a soft delete. Use permanent=true for hard delete.
     """
-    repo = PresetRepository(db)
+    repo = PresetRepository(db, user_id=user['id'])
     preset = await repo.get_by_id(preset_id)
     
     if not preset:
@@ -911,12 +918,13 @@ async def delete_preset(
 async def duplicate_preset(
     preset_id: str,
     new_name: str = Query(..., min_length=1, max_length=200),
-    db: AsyncSession = Depends(get_db)
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db)
 ) -> PresetResponse:
     """
     Create a copy of an existing preset with a new name.
     """
-    repo = PresetRepository(db)
+    repo = PresetRepository(db, user_id=user['id'])
     
     # Check original exists
     original = await repo.get_by_id(preset_id)
@@ -940,7 +948,8 @@ async def duplicate_preset(
 async def execute_preset(
     preset_id: str,
     background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db)
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db)
 ) -> dict:
     """
     Execute a preset by creating and starting a new run.
@@ -951,14 +960,14 @@ async def execute_preset(
     
     Returns the created run ID.
     """
-    repo = PresetRepository(db)
+    repo = PresetRepository(db, user_id=user['id'])
     preset = await repo.get_by_id(preset_id)
     
     if not preset or preset.is_deleted:
         raise HTTPException(status_code=404, detail="Preset not found")
     
     # Create a new run from the preset
-    run_repo = RunRepository(db)
+    run_repo = RunRepository(db, user_id=user['id'])
     run = await run_repo.create(
         preset_id=preset_id,
         title=f"Run from {preset.name} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
@@ -973,8 +982,8 @@ async def execute_preset(
         raise HTTPException(status_code=500, detail="Failed to start run")
         
     # Fetch document contents for execution
-    doc_repo = DocumentRepository(db)
-    content_repo = ContentRepository(db)
+    doc_repo = DocumentRepository(db, user_id=user['id'])
+    content_repo = ContentRepository(db, user_id=user['id'])
     document_contents = {}
     
     # preset.documents is a list of IDs that can reference either:

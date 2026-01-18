@@ -16,9 +16,9 @@ from dotenv import load_dotenv
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 load_dotenv()
 
-from acm2.app.security.key_injection import inject_provider_keys_for_user, get_provider_key
-from acm2.app.security.provider_keys import ProviderKeyManager
-from acm2.app.db.user_db import UserDB
+from app.security.key_injection import inject_provider_keys_for_user, get_provider_key
+from app.security.provider_keys import ProviderKeyManager
+from app.db.user_db import UserDB
 
 
 async def test_key_injection():

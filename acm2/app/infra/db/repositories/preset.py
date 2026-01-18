@@ -14,17 +14,18 @@ from app.infra.db.repositories.base import BaseRepository
 class PresetRepository(BaseRepository[Preset]):
     """Repository for Preset CRUD operations."""
     
-    def __init__(self, session: AsyncSession):
-        super().__init__(Preset, session)
+    def __init__(self, session: AsyncSession, user_id: Optional[int] = None):
+        super().__init__(Preset, session, user_id)
     
     async def get_by_name(self, name: str) -> Optional[Preset]:
-        """Get a preset by name."""
+        """Get a preset by name (scoped to user if user_id is set)."""
         stmt = select(Preset).where(Preset.name == name)
+        stmt = self._apply_user_filter(stmt)
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
     
     async def get_active(self, limit: int = 100, offset: int = 0) -> Sequence[Preset]:
-        """Get non-deleted presets with runs eagerly loaded."""
+        """Get non-deleted presets with runs eagerly loaded (scoped to user if user_id is set)."""
         stmt = (
             select(Preset)
             .options(selectinload(Preset.runs))
@@ -33,16 +34,18 @@ class PresetRepository(BaseRepository[Preset]):
             .limit(limit)
             .order_by(Preset.created_at.desc())
         )
+        stmt = self._apply_user_filter(stmt)
         result = await self.session.execute(stmt)
         return result.scalars().all()
     
     async def get_by_id(self, id: str) -> Optional[Preset]:
-        """Get a preset by ID with runs eagerly loaded."""
+        """Get a preset by ID with runs eagerly loaded (scoped to user if user_id is set)."""
         stmt = (
             select(Preset)
             .options(selectinload(Preset.runs))
             .where(Preset.id == id)
         )
+        stmt = self._apply_user_filter(stmt)
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
@@ -57,12 +60,13 @@ class PresetRepository(BaseRepository[Preset]):
         return preset
 
     async def get_by_id_with_runs(self, id: str) -> Optional[Preset]:
-        """Get a preset by ID with runs eagerly loaded."""
+        """Get a preset by ID with runs eagerly loaded (scoped to user if user_id is set)."""
         stmt = (
             select(Preset)
             .options(selectinload(Preset.runs))
             .where(Preset.id == id)
         )
+        stmt = self._apply_user_filter(stmt)
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
     

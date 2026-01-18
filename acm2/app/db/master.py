@@ -37,15 +37,13 @@ class MasterDB:
     async def connect(self):
         """Create connection pool."""
         if self._pool is None:
-            self._pool = await aiomysql.create_pool(**self.config)
-            logger.info("Master database pool created")
-    
-    async def close(self):
-        """Close connection pool."""
-        if self._pool:
-            self._pool.close()
-            await self._pool.wait_closed()
-            logger.info("Master database pool closed")
+            self._pool = await aiomysql.create_pool(
+                **self.config,
+                minsize=1,
+                maxsize=5,
+                pool_recycle=3600  # Recycle connections after 1 hour
+            )
+            logger.info("Master database pool created (minsize=1, maxsize=5)")
     
     async def close(self):
         """Close connection pool."""
@@ -188,6 +186,13 @@ class MasterDB:
                        ORDER BY created_at DESC""",
                     (user_id,)
                 )
+                return await cursor.fetchall()
+
+    async def list_users(self) -> List[Dict[str, Any]]:
+        """List all users in the master database."""
+        async with self.get_connection() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                await cursor.execute("SELECT * FROM users ORDER BY id ASC")
                 return await cursor.fetchall()
 
 

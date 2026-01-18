@@ -8,9 +8,11 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Any, Optional, Dict
 
-from app.infra.db.session import get_db
+from app.infra.db.session import get_user_db
 from app.infra.db.repositories import RunRepository
+from app.auth.middleware import get_current_user
 
 from ...schemas.runs import (
     RunCreate,
@@ -29,7 +31,8 @@ router = APIRouter()
 @router.post("/runs", response_model=RunSummary)
 async def create_run(
     data: RunCreate,
-    db: AsyncSession = Depends(get_db)
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db)
 ) -> RunSummary:
     """
     Create a new run configuration.
@@ -39,8 +42,8 @@ async def create_run(
     """
     from app.infra.db.repositories import PresetRepository
     
-    repo = RunRepository(db)
-    preset_repo = PresetRepository(db)
+    repo = RunRepository(db, user_id=user['id'])
+    preset_repo = PresetRepository(db, user_id=user['id'])
     
     # Require a preset_id: runs must be created from an existing preset
     if not data.preset_id:
@@ -148,10 +151,11 @@ async def create_run(
 @router.get("/runs/count")
 async def count_runs(
     status: Optional[str] = Query(None, description="Filter by status"),
-    db: AsyncSession = Depends(get_db)
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db)
 ) -> dict:
     """Return total number of runs (optionally filtered by status)."""
-    repo = RunRepository(db)
+    repo = RunRepository(db, user_id=user['id'])
     total = await repo.count(status=status)
     return {"total": total, "status": status}
 
@@ -161,12 +165,13 @@ async def list_runs(
     status: Optional[str] = Query(None, description="Filter by status"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    db: AsyncSession = Depends(get_db)
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db)
 ) -> RunList:
     """
     List all runs with pagination.
     """
-    repo = RunRepository(db)
+    repo = RunRepository(db, user_id=user['id'])
     offset = (page - 1) * page_size
     
     runs = await repo.get_all_with_tasks(limit=page_size, offset=offset, status=status)
@@ -187,13 +192,14 @@ async def list_runs(
 @router.get("/runs/{run_id}", response_model=RunDetail)
 async def get_run(
     run_id: str,
-    db: AsyncSession = Depends(get_db)
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db)
 ) -> Any:
     """
     Get detailed information about a specific run.
     """
     logger.debug(f"Getting run {run_id}")
-    repo = RunRepository(db)
+    repo = RunRepository(db, user_id=user['id'])
     run = await repo.get_with_tasks(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -207,10 +213,11 @@ async def get_run(
 @router.delete("/runs/bulk")
 async def bulk_delete_runs(
     target: str = Query(..., regex="^(failed|completed_failed)$", description="failed or completed_failed"),
-    db: AsyncSession = Depends(get_db)
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db)
 ) -> dict:
     """Bulk delete runs by status groups."""
-    repo = RunRepository(db)
+    repo = RunRepository(db, user_id=user['id'])
     if target == "failed":
         statuses = [RunStatus.FAILED.value, RunStatus.CANCELLED.value]
     else:
@@ -222,14 +229,15 @@ async def bulk_delete_runs(
 @router.delete("/runs/{run_id}")
 async def delete_run(
     run_id: str,
-    db: AsyncSession = Depends(get_db)
+    user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_user_db)
 ) -> dict:
     """
     Delete a run.
     
     Only allowed for runs in PENDING, COMPLETED, FAILED, or CANCELLED status.
     """
-    repo = RunRepository(db)
+    repo = RunRepository(db, user_id=user['id'])
     run = await repo.get_by_id(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
