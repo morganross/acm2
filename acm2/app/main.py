@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.exceptions import RequestValidationError
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from .api.router import api_router
 from .infra.db.session import engine, async_session_factory
@@ -27,6 +28,28 @@ from .config import get_settings
 from .db.master import get_master_db
 # Per-user auth is now handled per-route via Depends(get_current_user)
 # from .middleware.auth import ApiKeyMiddleware, RateLimitMiddleware
+
+
+class NoCacheMiddleware(BaseHTTPMiddleware):
+    """
+    Middleware to disable ALL caching on API responses.
+    
+    CRITICAL: Caching has caused 3 years of "works once, never again" bugs.
+    Old cached responses mask code changes, causing developers to stare at
+    new code while the browser/proxy serves stale data.
+    
+    This middleware adds aggressive no-cache headers to EVERY response.
+    """
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        # Disable all caching
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0, private"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "Thu, 01 Jan 1970 00:00:00 GMT"
+        response.headers["X-Accel-Expires"] = "0"  # nginx
+        response.headers["Surrogate-Control"] = "no-store"  # CDNs
+        return response
+
 
 # Configure logging
 logging.basicConfig(
@@ -106,11 +129,20 @@ def create_app() -> FastAPI:
             "http://localhost:3000",  # Common React port
             "http://127.0.0.1:5173",
             "http://127.0.0.1:5174",
+            "http://localhost",        # WordPress on port 80
+            "http://127.0.0.1",        # WordPress on port 80
+            "http://localhost:80",
+            "http://127.0.0.1:80",
         ],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    
+    # NO-CACHE MIDDLEWARE - CRITICAL
+    # Caching has caused 3 years of "works once, never again" bugs.
+    # This middleware ensures NO API response is ever cached.
+    app.add_middleware(NoCacheMiddleware)
 
     # Per-user authentication is now handled per-route via Depends(get_current_user)
     # The old static API key middleware has been removed.

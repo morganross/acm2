@@ -115,7 +115,14 @@ async def get_current_user_info(user: dict = Depends(get_current_user)):
         )
         meta = result.scalar_one_or_none()
 
-    if not meta:
+        if not meta or meta.seed_status != "ready":
+            await initialize_user(user["id"])
+            result = await session.execute(
+                select(UserMeta).where(UserMeta.user_id == user["id"])
+            )
+            meta = result.scalar_one_or_none()
+
+    if not meta or meta.seed_status != "ready":
         raise HTTPException(
             status_code=status.HTTP_425_TOO_EARLY,
             detail="User setup in progress"

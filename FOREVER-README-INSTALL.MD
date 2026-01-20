@@ -275,3 +275,183 @@ This file is meant to be permanent. Update it only when installation steps or re
 - No manual PATH edits; script handles all required PATH changes.
 - Strict version pinning (Python + Node + npm).
 - Service‑based backend (no manual terminal needed).
+
+---
+
+## 15) Cache Clearing — CRITICAL FOR DEVELOPMENT
+
+### 15.1 The Problem
+
+Caching has caused **3 years of "works once, never again" bugs**. The symptom:
+- You change code
+- You test it
+- It works once
+- You test again — it fails
+- You stare at working code that doesn't run
+
+**The cause**: Old cached versions of code are being executed while you look at new code.
+
+### 15.2 The Solution: Cache Destruction Script
+
+**Location**: `C:\dev\godzilla\clear_all_caches.ps1`
+
+**Run this script:**
+- AFTER every code change
+- BEFORE every test
+- NO EXCEPTIONS
+
+```powershell
+& "C:\dev\godzilla\clear_all_caches.ps1"
+```
+
+The script is **fully automatic** — no human interaction required. It clears all caches and restarts both Apache and ACM2.
+
+### 15.3 What the Script Clears
+
+| Step | Cache Type | Location | Why It Matters |
+|------|------------|----------|----------------|
+| 1 | Python `__pycache__` | `*/__pycache__/` | Compiled bytecode masks source changes |
+| 2 | Python `.pyc` files | `*.pyc` | Loose compiled files |
+| 3 | Vite/npm cache | `node_modules/.vite` | Old bundles served instead of new |
+| 4 | WordPress transients | `wp_options` table | Cached API responses/settings |
+| 5 | WordPress object cache | `wp-content/cache/` | File-based cache if enabled |
+| 6 | SQLite WAL | `*.db-wal` | Uncommitted transactions |
+| 7 | TypeScript build info | `*.tsbuildinfo` | Incremental build cache |
+| 8 | Windows DNS cache | System | Stale DNS resolutions |
+| 9 | ACM2 server | Port 8000 | Stops server to reload code |
+| 10 | Apache | httpd.exe | **Clears PHP OPcache from memory** |
+| 11 | ACM2 server | Port 8000 | Restarts with fresh code |
+
+### 15.4 All 40 Cache Types (Complete Reference)
+
+These are ALL the caches that can cause "works once, never again" bugs:
+
+**Browser-Side Caches:**
+1. HTTP Response Cache (Cache-Control headers)
+2. Browser Memory Cache (in-memory JS/CSS)
+3. Service Worker Cache (if installed)
+4. Local Storage (localStorage API)
+5. Session Storage (sessionStorage API)
+6. IndexedDB (browser database)
+7. Browser DNS Cache (chrome://net-internals/#dns)
+8. HSTS Cache (security policy cache)
+9. Favicon Cache (site icons)
+10. Font Cache (web fonts)
+
+**JavaScript/React Caches:**
+11. React Query Cache (API response memoization)
+12. React State (useState/useReducer)
+13. React Context Cache
+14. Zustand/Redux Store
+15. SWR Cache (if using SWR)
+16. Axios Interceptor Cache
+17. fetch() Response Cache
+
+**Build Tool Caches:**
+18. Vite Cache (`node_modules/.vite`)
+19. npm Cache (`~/.npm/_cacache`)
+20. TypeScript Incremental Build (`.tsbuildinfo`)
+21. ESLint Cache (`.eslintcache`)
+22. Babel Cache (`node_modules/.cache/babel-loader`)
+
+**PHP/WordPress Caches:**
+23. PHP OPcache (compiled bytecode in memory) — **CRITICAL**
+24. PHP Realpath Cache (file path resolution)
+25. WordPress Transients (database cache)
+26. WordPress Object Cache (file or Redis)
+27. WordPress Autoload Cache (class loading)
+28. Plugin-specific Caches (various plugins)
+
+**Python Caches:**
+29. `__pycache__` directories (compiled bytecode)
+30. `.pyc` files (compiled Python)
+31. pip Cache (`~/.cache/pip`)
+32. Python import cache (`sys.modules`)
+33. SQLAlchemy Connection Pool
+34. SQLAlchemy Query Cache (if enabled)
+
+**Database Caches:**
+35. SQLite WAL (write-ahead log)
+36. SQLite Page Cache
+37. MySQL Query Cache (deprecated but may exist)
+38. MySQL Buffer Pool
+
+**System Caches:**
+39. Windows DNS Cache
+40. Windows File System Cache
+
+### 15.5 No-Cache Headers Added to Code
+
+The following code changes were made to prevent caching at the HTTP level:
+
+**FastAPI Backend (`app/main.py`):**
+```python
+class NoCacheMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0, private"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "Thu, 01 Jan 1970 00:00:00 GMT"
+        response.headers["X-Accel-Expires"] = "0"  # nginx
+        response.headers["Surrogate-Control"] = "no-store"  # CDNs
+        return response
+
+app.add_middleware(NoCacheMiddleware)
+```
+
+**WordPress Plugin (`acm2-integration.php`):**
+```php
+function acm2_disable_browser_caching() {
+    if (strpos($_SERVER['REQUEST_URI'], 'acm2') !== false) {
+        header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+        header('Pragma: no-cache');
+        header('Expires: Thu, 01 Jan 1970 00:00:00 GMT');
+    }
+}
+add_action('admin_init', 'acm2_disable_browser_caching');
+
+function acm2_disable_rest_caching($response) {
+    $response->header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+    $response->header('Pragma', 'no-cache');
+    $response->header('Expires', 'Thu, 01 Jan 1970 00:00:00 GMT');
+    return $response;
+}
+add_filter('rest_post_dispatch', 'acm2_disable_rest_caching');
+```
+
+**Vite Config (`vite.config.ts`):**
+```typescript
+export default defineConfig({
+  cacheDir: '.vite_temp',
+  server: {
+    headers: {
+      'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+      'Pragma': 'no-cache',
+      'Expires': '0',
+    },
+  },
+})
+```
+
+**React App Enqueue (`class-react-app.php`):**
+```php
+// Cache buster using timestamp to guarantee no caching
+$cache_bust = time();
+wp_enqueue_script('acm2-react-app', $url, [], filemtime($file) . '.' . $cache_bust, true);
+```
+
+### 15.6 Why This Matters
+
+Without aggressive cache clearing:
+- You change `main.py` line 50
+- Python runs the OLD compiled bytecode from `__pycache__`
+- Your fix doesn't execute
+- You think your fix is wrong
+- You revert it or change it again
+- Eventually the cache expires or you restart
+- The fix works
+- You try to reproduce
+- The old cache is back
+- "Works once, never again"
+
+**The script prevents this by nuking ALL caches on every run.**

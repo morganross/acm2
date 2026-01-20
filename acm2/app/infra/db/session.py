@@ -19,6 +19,7 @@ print(f"SESSION DB URL: {settings.database_url}")
 # Cache for per-user engines to avoid creating new engine for each request
 _user_engines: Dict[int, Any] = {}
 _user_session_factories: Dict[int, async_sessionmaker] = {}
+_user_schema_valid: Dict[int, bool] = {}
 
 
 def _set_sqlite_pragma(dbapi_conn, connection_record):
@@ -86,18 +87,42 @@ def _get_user_db_url(user_id: int) -> str:
     return f"sqlite+aiosqlite:///{db_path}"
 
 
+def _get_user_db_path(user_id: int) -> Path:
+    data_dir = Path("data")
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir / f"user_{user_id}.db"
+
+
+def _build_user_engine(db_url: str):
+    user_engine = create_async_engine(
+        db_url,
+        echo=settings.debug,
+        future=True,
+    )
+    event.listen(user_engine.sync_engine, "connect", _set_sqlite_pragma)
+    return user_engine
+
+
+async def _has_required_runs_schema(conn) -> bool:
+    result = await conn.execute(text("PRAGMA table_info(runs)"))
+    columns = {row[1] for row in result.fetchall()}
+    return "preset_id" in columns
+
+
+async def _rebuild_user_db(user_id: int) -> None:
+    db_path = _get_user_db_path(user_id)
+    for suffix in ("", "-wal", "-shm"):
+        path = Path(f"{db_path}{suffix}")
+        if path.exists():
+            path.unlink()
+
+
 async def _get_or_create_user_engine(user_id: int):
     """Get or create SQLAlchemy engine for a user's database."""
     if user_id not in _user_engines:
         db_url = _get_user_db_url(user_id)
-        user_engine = create_async_engine(
-            db_url,
-            echo=settings.debug,
-            future=True,
-        )
-        # Enable WAL mode for per-user SQLite databases
-        event.listen(user_engine.sync_engine, "connect", _set_sqlite_pragma)
-        
+        user_engine = _build_user_engine(db_url)
+
         _user_engines[user_id] = user_engine
         _user_session_factories[user_id] = async_sessionmaker(
             user_engine,
@@ -106,13 +131,50 @@ async def _get_or_create_user_engine(user_id: int):
             autocommit=False,
             autoflush=False,
         )
-        
+
         # Initialize tables for this user's database
         from app.infra.db.base import Base
         from app.infra.db.models import preset, run, document, artifact, content, github_connection, user_meta, user_settings  # noqa: F401
-        
+
         async with user_engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+
+    if not _user_schema_valid.get(user_id):
+        user_engine = _user_engines[user_id]
+        async with user_engine.begin() as conn:
+            is_valid = await _has_required_runs_schema(conn)
+
+        if not is_valid:
+            await user_engine.dispose()
+            _user_engines.pop(user_id, None)
+            _user_session_factories.pop(user_id, None)
+            _user_schema_valid.pop(user_id, None)
+            await _rebuild_user_db(user_id)
+
+            db_url = _get_user_db_url(user_id)
+            user_engine = _build_user_engine(db_url)
+            _user_engines[user_id] = user_engine
+            _user_session_factories[user_id] = async_sessionmaker(
+                user_engine,
+                class_=AsyncSession,
+                expire_on_commit=False,
+                autocommit=False,
+                autoflush=False,
+            )
+
+            from app.infra.db.base import Base
+            from app.infra.db.models import preset, run, document, artifact, content, github_connection, user_meta, user_settings  # noqa: F401
+
+            async with user_engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+
+            async with user_engine.begin() as conn:
+                is_valid = await _has_required_runs_schema(conn)
+
+            if not is_valid:
+                raise RuntimeError("Per-user database schema is invalid after rebuild")
+
+        _user_schema_valid[user_id] = True
     
     return _user_engines[user_id], _user_session_factories[user_id]
 
@@ -240,16 +302,24 @@ async def get_user_db(request: Request) -> AsyncGenerator[AsyncSession, None]:
 
 async def _ensure_seed_ready(session: AsyncSession, user_id: int) -> None:
     from app.infra.db.models.user_meta import UserMeta
+    from app.db.seed_user import initialize_user
 
     result = await session.execute(
         select(UserMeta).where(UserMeta.user_id == user_id)
     )
     meta = result.scalar_one_or_none()
     if not meta or meta.seed_status != "ready":
-        raise HTTPException(
-            status_code=status.HTTP_425_TOO_EARLY,
-            detail="User setup in progress"
+        await initialize_user(user_id)
+
+        result = await session.execute(
+            select(UserMeta).where(UserMeta.user_id == user_id)
         )
+        meta = result.scalar_one_or_none()
+        if not meta or meta.seed_status != "ready":
+            raise HTTPException(
+                status_code=status.HTTP_425_TOO_EARLY,
+                detail="User setup in progress"
+            )
 
 
 async def init_db() -> None:

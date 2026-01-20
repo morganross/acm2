@@ -22,6 +22,7 @@ from app.infra.db.models.user_meta import UserMeta
 from app.infra.db.models.run import Run, RunStatus
 
 logger = logging.getLogger(__name__)
+_seed_locks: Dict[int, asyncio.Lock] = {}
 
 
 async def seed_user_data(user_id: int, source_session: AsyncSession, target_session: AsyncSession) -> Dict[str, str]:
@@ -97,30 +98,35 @@ async def seed_user_data(user_id: int, source_session: AsyncSession, target_sess
             if content_id:
                 content_ids.add(content_id)
 
-        for content_id in content_ids:
+        if content_ids:
             result = await source_session.execute(
-                select(Content).where(Content.id == content_id, Content.is_deleted == False)
+                select(Content).where(Content.id.in_(content_ids), Content.is_deleted == False)
             )
-            original = result.scalar_one_or_none()
+            originals = {content.id: content for content in result.scalars().all()}
+            missing = set(content_ids) - set(originals.keys())
+            if missing:
+                raise ValueError(f"Content not found in source DB: {sorted(missing)}")
 
-            if not original:
-                raise ValueError(f"Content {content_id} not found in source DB")
+            new_contents = []
+            for content_id, original in originals.items():
+                new_id = str(uuid.uuid4())
+                new_contents.append(
+                    Content(
+                        id=new_id,
+                        user_id=user_id,
+                        name=original.name,
+                        content_type=original.content_type,
+                        body=original.body,
+                        variables=dict(original.variables) if original.variables else {},
+                        description=original.description,
+                        tags=list(original.tags) if original.tags else [],
+                        is_deleted=False,
+                    )
+                )
+                id_mapping[content_id] = new_id
+                logger.info(f"Created content '{original.name}' for user {user_id}: {new_id}")
 
-            new_id = str(uuid.uuid4())
-            new_content = Content(
-                id=new_id,
-                user_id=user_id,
-                name=original.name,
-                content_type=original.content_type,
-                body=original.body,
-                variables=dict(original.variables) if original.variables else {},
-                description=original.description,
-                tags=list(original.tags) if original.tags else [],
-                is_deleted=False,
-            )
-            target_session.add(new_content)
-            id_mapping[content_id] = new_id
-            logger.info(f"Created content '{original.name}' for user {user_id}: {new_id}")
+            target_session.add_all(new_contents)
 
         await target_session.flush()
         
@@ -207,29 +213,31 @@ async def initialize_user(user_id: int) -> Dict[str, str]:
     Returns:
         Dict mapping original IDs to new user-specific IDs
     """
-    # 1. Get or create per-user SQLAlchemy engine (creates SQLite file and schema)
-    _, target_session_factory = await _get_or_create_user_engine(user_id)
-    logger.info(f"Initialized per-user SQLAlchemy database for user {user_id}")
-    
-    # 2. Use TWO sessions: source (shared DB) and target (per-user DB)
-    
-    async with async_session_factory() as source_session:
-        async with target_session_factory() as target_session:
-            try:
-                existing_meta = await target_session.execute(
-                    select(UserMeta).where(UserMeta.user_id == user_id)
-                )
-                meta = existing_meta.scalar_one_or_none()
-                if meta and meta.seed_status == "ready":
-                    logger.info(f"User {user_id} already seeded (version={meta.seed_version})")
-                    return {}
-                id_mapping = await seed_user_data(user_id, source_session, target_session)
-                # Commit is handled in seed_user_data
-            except Exception:
-                await target_session.rollback()
-                raise
-    
-    return id_mapping
+    lock = _seed_locks.setdefault(user_id, asyncio.Lock())
+    async with lock:
+        # 1. Get or create per-user SQLAlchemy engine (creates SQLite file and schema)
+        _, target_session_factory = await _get_or_create_user_engine(user_id)
+        logger.info(f"Initialized per-user SQLAlchemy database for user {user_id}")
+
+        # 2. Use TWO sessions: source (shared DB) and target (per-user DB)
+
+        async with async_session_factory() as source_session:
+            async with target_session_factory() as target_session:
+                try:
+                    existing_meta = await target_session.execute(
+                        select(UserMeta).where(UserMeta.user_id == user_id)
+                    )
+                    meta = existing_meta.scalar_one_or_none()
+                    if meta and meta.seed_status == "ready":
+                        logger.info(f"User {user_id} already seeded (version={meta.seed_version})")
+                        return {}
+                    id_mapping = await seed_user_data(user_id, source_session, target_session)
+                    # Commit is handled in seed_user_data
+                except Exception:
+                    await target_session.rollback()
+                    raise
+
+        return id_mapping
 
 
 async def main():
