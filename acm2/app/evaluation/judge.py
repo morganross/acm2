@@ -160,6 +160,7 @@ class Judge:
         fpf_adapter: Optional[FpfAdapter] = None,
         custom_prompt: Optional[str] = None,
         stats_tracker: Optional[FpfStatsTracker] = None,
+        user_id: Optional[int] = None,
     ):
         """
         Initialize the judge.
@@ -176,6 +177,7 @@ class Judge:
         self._fpf = fpf_adapter
         self.custom_prompt = custom_prompt
         self.stats = stats_tracker  # Use the tracker as-is, don't create fallback
+        self.user_id = user_id
         
         # DEBUG: Log stats tracker initialization
         logger.info(f"[STATS-DEBUG] Judge.__init__ for model={self.config.model}, stats_tracker={stats_tracker is not None}")
@@ -253,9 +255,10 @@ class Judge:
                 if ":" in self.config.model:
                     provider, base_model = self.config.model.split(":", 1)
                 else:
-                    # Default to openai if no prefix (legacy format)
-                    provider = "openai"
-                    base_model = self.config.model
+                    raise RuntimeError(f"Judge model must include provider prefix: {self.config.model}")
+
+                if self.user_id is None:
+                    raise RuntimeError("user_id is required for evaluation calls")
                 
                 # Build config for FPF adapter
                 eval_task_id = f"{doc_id}.single_eval.{trial}.{self.config.model}.{uuid4().hex[:6]}"
@@ -283,6 +286,7 @@ class Judge:
                             self.fpf.generate(
                                 query=prompt,
                                 config=gen_config,
+                                user_id=self.user_id,
                             ),
                             timeout=float(self.config.timeout_seconds + 30),  # Add buffer over FPF's internal timeout
                         )
@@ -430,9 +434,10 @@ class Judge:
                 if ":" in self.config.model:
                     provider, base_model = self.config.model.split(":", 1)
                 else:
-                    # Default to openai if no prefix (legacy format)
-                    provider = "openai"
-                    base_model = self.config.model
+                    raise RuntimeError(f"Judge model must include provider prefix: {self.config.model}")
+
+                if self.user_id is None:
+                    raise RuntimeError("user_id is required for evaluation calls")
                 
                 # Build config for FPF adapter
                 pairwise_task_id = f"{doc_id_1}.vs.{doc_id_2}.pairwise.{trial}.{self.config.model}.{uuid4().hex[:6]}"
@@ -460,6 +465,7 @@ class Judge:
                             self.fpf.generate(
                                 query=prompt,
                                 config=gen_config,
+                                user_id=self.user_id,
                             ),
                             timeout=float(self.config.timeout_seconds + 30),
                         )

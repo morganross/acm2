@@ -395,7 +395,11 @@ class SourceDocPipeline:
                 retries=self.config.eval_retries,
                 strict_json=self.config.eval_strict_json,
             )
-            single_evaluator = SingleDocEvaluator(eval_config, stats_tracker=self.stats)
+            single_evaluator = SingleDocEvaluator(
+                eval_config,
+                stats_tracker=self.stats,
+                user_id=self.config.user_id,
+            )
         
         async def process_task(task_info):
             nonlocal completed
@@ -554,7 +558,7 @@ class SourceDocPipeline:
                             )
                         except Exception as e:
                             self.logger.error(f"Pipeline [{self.source_doc_name}]: Single eval failed for {gen_result.doc_id}: {e}")
-                            result.errors.append(f"Single eval failed: {gen_result.doc_id}")
+                            result.errors.append(f"Single eval failed for {gen_result.doc_id}: {e}")
                     
                     # Update run_store: mark task completed
                     if self.run_store:
@@ -687,6 +691,7 @@ Optimize your response to score highly on each criterion:
                     gen_result = await adapter.generate(
                         query=instructions,
                         config=gen_config,
+                        user_id=self.config.user_id,
                         document_content=self.content,
                         progress_callback=progress_callback,
                         fpf_log_output=fpf_log_output,
@@ -777,7 +782,12 @@ Optimize your response to score highly on each criterion:
             except Exception as e:
                 self.logger.error(f"Pipeline [{self.source_doc_name}]: Failed to parse eval_criteria YAML: {e}")
         
-        evaluator = PairwiseEvaluator(pairwise_config, criteria_manager=criteria_manager, stats_tracker=self.stats)
+        evaluator = PairwiseEvaluator(
+            pairwise_config,
+            criteria_manager=criteria_manager,
+            stats_tracker=self.stats,
+            user_id=self.config.user_id,
+        )
         
         # Filter out empty content
         valid_docs = [
@@ -1004,7 +1014,12 @@ Optimize your response to score highly on each criterion:
                 except Exception as e:
                     self.logger.error(f"Pipeline [{self.source_doc_name}]: Failed to parse eval_criteria YAML for post-combine: {e}")
             
-            evaluator = PairwiseEvaluator(pairwise_config, criteria_manager=criteria_manager, stats_tracker=self.stats)
+            evaluator = PairwiseEvaluator(
+                pairwise_config,
+                criteria_manager=criteria_manager,
+                stats_tracker=self.stats,
+                user_id=self.config.user_id,
+            )
             
             # Collect documents for comparison
             all_doc_ids = []

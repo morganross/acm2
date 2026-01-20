@@ -80,7 +80,12 @@ async def seed_user_data(user_id: int, source_session: AsyncSession, target_sess
             meta.seeded_at = None
 
         # 2. Copy content items referenced by the preset
+        # NOTE: preset.documents contains Content IDs (content_type=input_document), 
+        # NOT entries from the legacy 'documents' table
         content_ids = set()
+        # Add input documents from preset.documents field
+        content_ids.update(original_preset.documents or [])
+        # Add input content IDs 
         content_ids.update(original_preset.input_content_ids or [])
         for content_id in [
             original_preset.generation_instructions_id,
@@ -126,12 +131,14 @@ async def seed_user_data(user_id: int, source_session: AsyncSession, target_sess
         config_overrides = _deep_replace_ids(config_overrides, id_mapping)
         
         # Create new preset for user in target DB
+        # Remap document IDs to the newly created copies
+        new_document_ids = [id_mapping.get(doc_id, doc_id) for doc_id in (original_preset.documents or [])]
         new_preset = Preset(
             id=new_preset_id,
             user_id=user_id,
             name=original_preset.name,
             description=original_preset.description,
-            documents=list(original_preset.documents) if original_preset.documents else [],
+            documents=new_document_ids,
             models=list(original_preset.models) if original_preset.models else [],
             generators=list(original_preset.generators) if original_preset.generators else [],
             iterations=original_preset.iterations,

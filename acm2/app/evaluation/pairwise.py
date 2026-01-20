@@ -186,6 +186,7 @@ class PairwiseEvaluator:
         config: Optional[PairwiseConfig] = None,
         criteria_manager: Optional[CriteriaManager] = None,
         stats_tracker: Optional[FpfStatsTracker] = None,
+        user_id: Optional[int] = None,
     ):
         """
         Initialize the evaluator.
@@ -198,6 +199,7 @@ class PairwiseEvaluator:
         self.config = config or PairwiseConfig()
         self.criteria = criteria_manager or CriteriaManager(self.config.criteria_path)
         self.stats = stats_tracker
+        self.user_id = user_id
         self._judges: Dict[str, Judge] = {}
         self._elo = EloCalculator(self.config.to_elo_config())
     
@@ -210,6 +212,7 @@ class PairwiseEvaluator:
                 criteria_manager=self.criteria,
                 custom_prompt=self.config.custom_instructions,
                 stats_tracker=self.stats,
+                user_id=self.user_id,
             )
         return self._judges[model]
     

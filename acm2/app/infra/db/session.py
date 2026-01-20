@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import AsyncGenerator, Dict, Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy import event, text
 
 from app.config import get_settings
 
@@ -19,12 +20,26 @@ print(f"SESSION DB URL: {settings.database_url}")
 _user_engines: Dict[int, Any] = {}
 _user_session_factories: Dict[int, async_sessionmaker] = {}
 
+
+def _set_sqlite_pragma(dbapi_conn, connection_record):
+    """Enable WAL mode and other performance settings for SQLite."""
+    cursor = dbapi_conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA synchronous=NORMAL")
+    cursor.execute("PRAGMA busy_timeout=5000")
+    cursor.close()
+
+
 # Create async engine
 engine = create_async_engine(
     settings.database_url,
     echo=settings.debug,
     future=True,
 )
+
+# Enable WAL mode for the shared database
+if "sqlite" in settings.database_url:
+    event.listen(engine.sync_engine, "connect", _set_sqlite_pragma)
 
 # Session factory
 async_session_factory = async_sessionmaker(
@@ -75,14 +90,17 @@ async def _get_or_create_user_engine(user_id: int):
     """Get or create SQLAlchemy engine for a user's database."""
     if user_id not in _user_engines:
         db_url = _get_user_db_url(user_id)
-        engine = create_async_engine(
+        user_engine = create_async_engine(
             db_url,
             echo=settings.debug,
             future=True,
         )
-        _user_engines[user_id] = engine
+        # Enable WAL mode for per-user SQLite databases
+        event.listen(user_engine.sync_engine, "connect", _set_sqlite_pragma)
+        
+        _user_engines[user_id] = user_engine
         _user_session_factories[user_id] = async_sessionmaker(
-            engine,
+            user_engine,
             class_=AsyncSession,
             expire_on_commit=False,
             autocommit=False,
@@ -93,7 +111,7 @@ async def _get_or_create_user_engine(user_id: int):
         from app.infra.db.base import Base
         from app.infra.db.models import preset, run, document, artifact, content, github_connection, user_meta, user_settings  # noqa: F401
         
-        async with engine.begin() as conn:
+        async with user_engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
     
     return _user_engines[user_id], _user_session_factories[user_id]

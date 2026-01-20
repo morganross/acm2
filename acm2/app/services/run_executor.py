@@ -42,6 +42,8 @@ from ..evaluation import (
 from ..evaluation.single_doc import EvalCompleteCallback
 from ..evaluation.models import SingleEvalResult, EvaluationCriterion
 from ..evaluation.criteria import CriteriaManager
+from ..infra.db.repositories import RunRepository
+from ..infra.db.session import get_user_session_by_id
 
 # Callback fired after each document generation completes
 # Args: (doc_id, model, generator, source_doc_id, iteration)
@@ -526,10 +528,28 @@ class RunExecutor:
                 self.logger.info(f"[STATS] Got running loop, creating task")
                 task = loop.create_task(self._run_ws_manager.broadcast(run_id, payload))
                 self.logger.info(f"[STATS] WebSocket broadcast task created for run {run_id}")
+                loop.create_task(self._persist_fpf_stats(run_id, stats_dict))
             except RuntimeError as e:
                 self.logger.warning(f"[STATS] No running event loop for run {run_id}: {e}")
         except Exception as e:
             self.logger.error(f"[STATS] Failed to broadcast stats for run {run_id}: {e}", exc_info=True)
+
+    async def _persist_fpf_stats(self, run_id: str, stats_dict: dict) -> None:
+        """Persist live FPF stats (including last_error) to the run results_summary."""
+        try:
+            if not getattr(self, "config", None) or not self.config.user_id:
+                return
+
+            async with get_user_session_by_id(self.config.user_id) as session:
+                repo = RunRepository(session, user_id=self.config.user_id)
+                run = await repo.get_by_id(run_id)
+                if not run:
+                    return
+                results_summary = dict(run.results_summary or {})
+                results_summary["fpf_stats"] = stats_dict
+                await repo.update(run_id, results_summary=results_summary)
+        except Exception as e:
+            self.logger.warning(f"[STATS] Failed to persist fpf_stats for run {run_id}: {e}")
     
     async def _emit_timeline_event(
         self,
@@ -1114,7 +1134,11 @@ class RunExecutor:
                 strict_json=config.eval_strict_json,
             )
             self.logger.info(f"[STATS-DEBUG] Creating SingleDocEvaluator with stats_tracker={self._fpf_stats is not None}")
-            single_evaluator = SingleDocEvaluator(eval_config, stats_tracker=self._fpf_stats)
+            single_evaluator = SingleDocEvaluator(
+                eval_config,
+                stats_tracker=self._fpf_stats,
+                user_id=config.user_id,
+            )
             result.single_eval_results = {}
         
         # Process tasks with limited concurrency (from settings)
@@ -1584,7 +1608,12 @@ Optimize your output to score highly on each criterion:
             except Exception as e:
                 self.logger.error(f"Failed to parse pairwise eval_criteria YAML: {e}")
         
-        evaluator = PairwiseEvaluator(pairwise_config, criteria_manager=criteria_manager, stats_tracker=self._fpf_stats)
+        evaluator = PairwiseEvaluator(
+            pairwise_config,
+            criteria_manager=criteria_manager,
+            stats_tracker=self._fpf_stats,
+            user_id=config.user_id,
+        )
         
         # Collect doc IDs and contents, filtering out empty content
         # Note: All docs in generated_docs are successful (failed generations return None and aren't added)
@@ -1858,7 +1887,11 @@ Optimize your output to score highly on each criterion:
                 custom_instructions=config.pairwise_eval_instructions,
                 concurrent_limit=config.eval_concurrency,
             )
-            evaluator = PairwiseEvaluator(pairwise_config, stats_tracker=self._fpf_stats)
+            evaluator = PairwiseEvaluator(
+                pairwise_config,
+                stats_tracker=self._fpf_stats,
+                user_id=config.user_id,
+            )
             
             # Collect documents for comparison
             all_doc_ids = []

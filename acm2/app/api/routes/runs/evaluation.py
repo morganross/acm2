@@ -113,7 +113,7 @@ async def reevaluate_run(
             eval_count = 0
             
             try:
-                evaluator = SingleDocEvaluator(single_config)
+                evaluator = SingleDocEvaluator(single_config, user_id=user["id"])
                 
                 # Build list of document inputs (parallel preparation)
                 doc_inputs = []

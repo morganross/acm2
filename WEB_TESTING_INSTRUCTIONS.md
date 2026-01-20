@@ -39,7 +39,7 @@ C:\xampp\htdocs\wordpress# Web Testing Instructions for LLM Agents
 ### Starting the Server
 ```
 cd C:\dev\godzilla\acm2\acm2
-python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
 ### Page Structure

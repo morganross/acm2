@@ -133,12 +133,21 @@ class FpfAdapter(BaseAdapter):
             # Prepare environment - inject encrypted provider API keys for this user
             env = os.environ.copy()
             
-            from app.security.key_injection import inject_provider_keys_for_user_auto
+            from app.security.key_injection import inject_provider_keys_for_user_auto, PROVIDER_TO_ENV_VAR
             try:
                 env = await inject_provider_keys_for_user_auto(user_id, env)
                 logger.debug(f"FPF: Injected encrypted API keys for user_id={user_id}")
             except Exception as e:
                 logger.warning(f"FPF: Failed to inject provider keys for user {user_id}: {e}")
+
+            env_var = PROVIDER_TO_ENV_VAR.get(config.provider)
+            if not env_var:
+                raise FpfExecutionError(f"Provider '{config.provider}' has no API key mapping")
+            if not env.get(env_var):
+                raise FpfExecutionError(
+                    f"Missing API key for provider '{config.provider}'. "
+                    "Set it in Settings > API Keys."
+                )
             
             # Set FPF log environment variables so FPF writes structured JSON logs
             run_id = extra.get("run_id")

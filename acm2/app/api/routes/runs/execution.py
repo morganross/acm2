@@ -19,7 +19,7 @@ from app.infra.db.repositories import RunRepository, ContentRepository
 from app.services.run_executor import RunConfig, RunExecutor
 from app.adapters.base import GeneratorType as AdapterGeneratorType
 from app.utils.logging_utils import get_run_logger
-from app.utils.paths import get_fpf_log_path
+from app.utils.paths import get_fpf_log_path, get_log_path
 from app.evaluation.models import SingleEvalResult
 
 from ...schemas.runs import RunStatus
@@ -37,9 +37,8 @@ async def execute_run_background(run_id: str, config: RunConfig):
     """
     Background task to execute a run and update DB.
     """
-    # Set up file logging for this run
-    log_dir = Path("logs") / run_id
-    run_log_file = log_dir / "run.log"
+    # Set up file logging for this run (per-user logs directory)
+    run_log_file = get_log_path(config.user_id, run_id, "run.log")
     
     # Create private run logger using the preset-provided log level only
     if not hasattr(config, "log_level") or config.log_level is None:

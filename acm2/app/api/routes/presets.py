@@ -20,6 +20,7 @@ from app.auth.middleware import get_current_user
 from app.infra.db.models.run import RunStatus
 from app.services.run_executor import get_executor, RunConfig, RunExecutor
 from app.utils.logging_utils import get_run_logger
+from app.utils.paths import get_log_path
 from app.adapters.base import GeneratorType as AdapterGeneratorType
 from ..schemas.presets import (
     PresetCreate,
@@ -50,10 +51,8 @@ async def execute_run_background(run_id: str, config: RunConfig):
     from pathlib import Path
     from app.evaluation.models import SingleEvalResult
     
-    # Set up file logging for this run
-    log_dir = Path("logs") / run_id
-    log_dir.mkdir(parents=True, exist_ok=True)
-    run_log_file = log_dir / "run.log"
+    # Set up file logging for this run (per-user logs directory)
+    run_log_file = get_log_path(config.user_id, run_id, "run.log")
     
     # Create a file handler for this run
     file_handler = logging.FileHandler(run_log_file, encoding="utf-8")
