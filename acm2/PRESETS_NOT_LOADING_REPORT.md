@@ -2,13 +2,15 @@
 
 **Date:** January 16, 2026  
 **Error Message:** "Failed to load presets: ApiError: Not Found"  
-**Status:** UNRESOLVED
+**Status:** RESOLVED (Jan 20, 2026) - Per-user DB schema drift fixed
 
 ---
 
 ## Summary
 
-When a user logs into WordPress and navigates to the ACM2 app page, the frontend fails to load presets with a "Not Found" error. This prevents users from using the application.
+When a user logs into WordPress and navigates to the ACM2 app page, the frontend failed to load presets due to API failures. This prevented users from using the application.
+
+**Update (Jan 20, 2026):** Root cause expanded to include per-user DB schema drift (legacy `runs` table missing `preset_id`), which caused `GET /api/v1/presets` to 500. Fixes now rebuild invalid per-user DBs, auto-seed when `user_meta` is missing, and batch content copy with a per-user seed lock.
 
 ---
 

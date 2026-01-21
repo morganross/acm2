@@ -554,9 +554,12 @@ async def execute_run_background(run_id: str, config: RunConfig):
                 )
                 logger.info(f"Run {run_id} completed successfully")
             else:
-                error_msg = "; ".join(result.errors) if result.errors else "Unknown error"
-                await run_repo.fail(run_id, error_message=error_msg)
-                logger.error(f"Run {run_id} failed: {error_msg}")
+                # FIXED: Include last_error from stats tracker if available (for UI display)
+                error_msg = "; ".join(result.errors) if result.errors else None
+                stats_last_error = result.fpf_stats.get("last_error") if result.fpf_stats else None
+                final_error = error_msg or stats_last_error or "Unknown error"
+                await run_repo.fail(run_id, error_message=final_error)
+                logger.error(f"Run {run_id} failed: {final_error}")
                 
     except Exception as e:
         logger.exception(f"Unexpected error executing run {run_id}")

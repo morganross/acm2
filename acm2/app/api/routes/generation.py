@@ -136,6 +136,7 @@ generation_tasks: dict[str, dict] = {}
 async def run_generation_task(
     task_id: str,
     request: GenerateRequest,
+    user_id: int,
 ) -> None:
     """Background task to run generation."""
     
@@ -193,6 +194,7 @@ async def run_generation_task(
         result = await adapter.generate(
             query=request.query,
             config=config,
+            user_id=user_id,
             document_content=request.document_content,
             progress_callback=progress_callback,
         )
@@ -293,7 +295,10 @@ async def generate(
     task_store.create(task_id, request.query, request.generator.value)
     
     # Start background task and track handle for cancellation
-    handle = asyncio.create_task(run_generation_task(task_id, request))
+    user_id = user.get("user_id") or user.get("id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found")
+    handle = asyncio.create_task(run_generation_task(task_id, request, user_id))
     generation_tasks[task_id] = {"task": handle, "adapter": None}
     
     return GenerateResponse(

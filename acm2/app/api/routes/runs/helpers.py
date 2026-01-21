@@ -113,6 +113,7 @@ def to_summary(run) -> RunSummary:
         name=run.title or "Untitled",
         description=run.description,
         status=run.status,
+        error_message=run.error_message,  # Include error message from DB
         generators=[GeneratorType(g) for g in (config.get("generators") or [])],
         document_count=len(config.get("document_ids") or []),
         model_count=len(config.get("models") or []),
@@ -251,7 +252,15 @@ def to_detail(run) -> RunDetail:
         for doc_id, detail in (results_summary.get("pre_combine_evals_detailed") or {}).items():
             evaluations = []
             for eval_data in (detail.get("evaluations") or []):
-                scores = [CriterionScoreInfo(**s) for s in (eval_data.get("scores") or [])]
+                # Handle both 'reason' and 'reasoning' field names (backend uses 'reasoning', schema expects 'reason')
+                scores = []
+                for s in (eval_data.get("scores") or []):
+                    score_reason = s.get("reason") or s.get("reasoning", "")
+                    scores.append(CriterionScoreInfo(
+                        criterion=s.get("criterion", ""),
+                        score=int(s.get("score", 0)),
+                        reason=score_reason,
+                    ))
                 evaluations.append(JudgeEvaluation(
                     judge_model=eval_data.get("judge_model", ""),
                     trial=eval_data.get("trial", 0),
@@ -271,7 +280,15 @@ def to_detail(run) -> RunDetail:
         for doc_id, detail in (results_summary.get("post_combine_evals_detailed") or {}).items():
             evaluations = []
             for eval_data in (detail.get("evaluations") or []):
-                scores = [CriterionScoreInfo(**s) for s in (eval_data.get("scores") or [])]
+                # Handle both 'reason' and 'reasoning' field names
+                scores = []
+                for s in (eval_data.get("scores") or []):
+                    score_reason = s.get("reason") or s.get("reasoning", "")
+                    scores.append(CriterionScoreInfo(
+                        criterion=s.get("criterion", ""),
+                        score=int(s.get("score", 0)),
+                        reason=score_reason,
+                    ))
                 evaluations.append(JudgeEvaluation(
                     judge_model=eval_data.get("judge_model", ""),
                     trial=eval_data.get("trial", 0),
@@ -555,6 +572,7 @@ def to_detail(run) -> RunDetail:
         name=run.title or "Untitled",
         description=run.description,
         status=run.status,
+        error_message=run.error_message,  # Include error message from DB
         generators=[GeneratorType(g) for g in (config.get("generators") or [])],
         models=models,
         document_ids=config.get("document_ids") or [],

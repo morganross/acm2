@@ -371,6 +371,7 @@ class RunSummary(BaseModel):
     name: str
     description: Optional[str] = None
     status: RunStatus
+    error_message: Optional[str] = None  # Error message if run failed
     generators: list[GeneratorType]
     document_count: int
     model_count: int
@@ -583,6 +584,7 @@ class RunDetail(BaseModel):
     name: str
     description: Optional[str] = None
     status: RunStatus
+    error_message: Optional[str] = None  # Error message if run failed
     
     # Configuration
     generators: list[GeneratorType]

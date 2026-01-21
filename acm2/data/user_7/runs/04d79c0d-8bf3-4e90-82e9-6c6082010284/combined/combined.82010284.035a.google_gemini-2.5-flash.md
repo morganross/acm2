@@ -1,0 +1,3 @@
+.org/newsroom/nul_us_20250219_civil-human-rights-orgs-sue-trump-admin-over-eos-banning-dei/
+    11. Key Parts of Anti-DEI Executive Orders Blocked by Federal Judge. Wiley Law. https://www.wiley.law/alert-Key-Parts-of-Anti-DEI-Executive-Orders-Blocked-by-Federal-Judge
+    12. Trump Administration Sues CDE and CIF for Title IX Violations. ACSA. https://content.acsa.org/trump-administration-sues-cde-and-cif-for-title-ix-violations/

@@ -710,6 +710,7 @@ Optimize your response to score highly on each criterion:
                     gen_result = await adapter.generate(
                         query=full_query,
                         config=gen_config,
+                        user_id=self.config.user_id,
                         progress_callback=progress_callback,
                     )
             
@@ -911,6 +912,7 @@ Optimize your response to score highly on each criterion:
                         reports=top_docs,
                         instructions=combine_instructions,
                         config=combine_gen_config,
+                        user_id=self.config.user_id,
                         original_instructions=original_instructions,
                     )
                     combine_completed_at = datetime.utcnow()
