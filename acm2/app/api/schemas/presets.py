@@ -4,6 +4,7 @@ API Schemas for Presets.
 Presets are saved configurations for runs that can be reused.
 """
 from datetime import datetime
+from enum import Enum
 from typing import Any, Optional
 from pydantic import BaseModel, Field
 
@@ -15,6 +16,13 @@ from .runs import (
     EvalConfigComplete, PairwiseConfigComplete, CombineConfigComplete,
     GeneralConfigComplete, ConcurrencyConfigComplete,
 )
+
+
+class OutputDestination(str, Enum):
+    """Where winning documents are written."""
+    NONE = "none"           # Don't save outputs
+    LIBRARY = "library"     # Save to Content Library as OUTPUT_DOCUMENT (default)
+    GITHUB = "github"       # Also push to GitHub repository
 
 
 # ============================================================================
@@ -60,6 +68,20 @@ class PresetCreate(BaseModel):
     github_connection_id: Optional[str] = Field(None, description="GitHub connection ID for input")
     github_input_paths: Optional[list[str]] = Field(default=None, description="Paths in GitHub repo to use as input")
     github_output_path: Optional[str] = Field(None, description="Path in GitHub repo for output")
+    
+    # Output configuration
+    output_destination: Optional[OutputDestination] = Field(
+        default=OutputDestination.LIBRARY, 
+        description="Where to save winning documents: 'none', 'library', or 'github'"
+    )
+    output_filename_template: Optional[str] = Field(
+        default="{source_doc_name}_{winner_model}_{timestamp}",
+        description="Template for output filenames"
+    )
+    github_commit_message: Optional[str] = Field(
+        default="ACM2: Add winning document",
+        description="Commit message when pushing to GitHub"
+    )
     
     # Legacy fields (backward compatibility)
     generators: Optional[list[GeneratorType]] = Field(
@@ -111,6 +133,20 @@ class PresetUpdate(BaseModel):
     github_input_paths: Optional[list[str]] = Field(default=None, description="Paths in GitHub repo to use as input")
     github_output_path: Optional[str] = Field(None, description="Path in GitHub repo for output")
     
+    # Output configuration
+    output_destination: Optional[OutputDestination] = Field(
+        None, 
+        description="Where to save winning documents: 'none', 'library', or 'github'"
+    )
+    output_filename_template: Optional[str] = Field(
+        None,
+        description="Template for output filenames"
+    )
+    github_commit_message: Optional[str] = Field(
+        None,
+        description="Commit message when pushing to GitHub"
+    )
+    
     # Legacy fields (backward compatibility)
     generators: Optional[list[GeneratorType]] = None
     models: Optional[list[ModelConfig]] = None
@@ -160,6 +196,11 @@ class PresetResponse(BaseModel):
     github_connection_id: Optional[str] = None
     github_input_paths: Optional[list[str]] = None
     github_output_path: Optional[str] = None
+    
+    # Output configuration
+    output_destination: OutputDestination = OutputDestination.LIBRARY
+    output_filename_template: Optional[str] = "{source_doc_name}_{winner_model}_{timestamp}"
+    github_commit_message: Optional[str] = "ACM2: Add winning document"
     
     # Legacy fields (backward compatibility)
     generators: list[GeneratorType] = Field(default_factory=list)

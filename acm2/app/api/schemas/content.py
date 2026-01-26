@@ -17,6 +17,9 @@ class ContentType(str, Enum):
     EVAL_CRITERIA = "eval_criteria"
     COMBINE_INSTRUCTIONS = "combine_instructions"
     TEMPLATE_FRAGMENT = "template_fragment"
+    
+    # Output phase - winning documents from completed runs
+    OUTPUT_DOCUMENT = "output_document"
 
 
 # ============================================================================

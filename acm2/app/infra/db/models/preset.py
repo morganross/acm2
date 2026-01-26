@@ -29,6 +29,13 @@ class InputSourceType(str, Enum):
     GITHUB = "github"
 
 
+class OutputDestination(str, Enum):
+    """Where winning documents are written."""
+    NONE = "none"           # Only save to database as OUTPUT_DOCUMENT content
+    LIBRARY = "library"     # Save to Content Library only (default)
+    GITHUB = "github"       # Also push to GitHub repository
+
+
 class Preset(Base):
     """
     A saved configuration/preset for running evaluations.
@@ -122,6 +129,23 @@ class Preset(Base):
     )
     github_input_paths: Mapped[list] = mapped_column(JSON, default=list)  # ["/inputs/doc1.md", ...]
     github_output_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)  # "/outputs/"
+    
+    # =========================================================================
+    # Output Configuration
+    # =========================================================================
+    
+    # Where do winning documents get written?
+    output_destination: Mapped[str] = mapped_column(
+        String(20), default=OutputDestination.LIBRARY.value
+    )
+    # Filename template for outputs (supports {source_doc_name}, {winner_model}, {timestamp}, {run_id})
+    output_filename_template: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True, default="{source_doc_name}_{winner_model}_{timestamp}"
+    )
+    # Commit message for GitHub output
+    github_commit_message: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True, default="ACM2: Add winning document"
+    )
     
     # =========================================================================
     # NEW: Content References (all stored in DB)

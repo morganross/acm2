@@ -234,6 +234,20 @@ class SourceDocPipeline:
                 self.logger.info(f"Pipeline [{self.source_doc_name}]: Starting post-combine eval")
                 await self._run_post_combine_eval(result)
             
+            # === Cascading Winner Determination ===
+            # Promote post-combine winner if available (highest priority)
+            if result.post_combine_eval_results and result.post_combine_eval_results.winner_doc_id:
+                result.winner_doc_id = result.post_combine_eval_results.winner_doc_id
+                self.logger.info(
+                    f"Pipeline [{self.source_doc_name}]: Winner from post-combine: {result.winner_doc_id}"
+                )
+            # Fall back to pairwise winner (already set during pairwise phase if available)
+            elif not result.winner_doc_id and result.pairwise_results and result.pairwise_results.winner_doc_id:
+                result.winner_doc_id = result.pairwise_results.winner_doc_id
+                self.logger.info(
+                    f"Pipeline [{self.source_doc_name}]: Winner from pairwise: {result.winner_doc_id}"
+                )
+            
             # Mark as complete
             result.status = RunPhase.COMPLETED
             result.completed_at = datetime.utcnow()
@@ -719,7 +733,7 @@ Optimize your response to score highly on each criterion:
             # Create unique doc ID
             short_doc_id = self.source_doc_id[-8:] if len(self.source_doc_id) >= 8 else self.source_doc_id
             file_uuid = str(uuid4())[:4]
-            gen_doc_id = f"{short_doc_id}.{file_uuid}.{generator.value}.{iteration}.{model.replace(':', '_')}"
+            gen_doc_id = f"{short_doc_id}.{file_uuid}.{generator.value}.{iteration}.{model.replace(':', '_').replace('/', '_')}"
             
             # Track generation success
             if self.stats:
@@ -892,7 +906,7 @@ Optimize your response to score highly on each criterion:
                 
                 provider, model_name = combine_model.split(":", 1)
                 
-                safe_model_name = combine_model.replace(":", "_")
+                safe_model_name = combine_model.replace(":", "_").replace("/", "_")
                 combine_task_id = f"{self.source_doc_id[-8:]}.combine.{model_idx}.{safe_model_name}"
                 
                 combine_gen_config = GenerationConfig(

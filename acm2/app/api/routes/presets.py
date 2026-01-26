@@ -19,6 +19,7 @@ from app.infra.db.repositories import PresetRepository, RunRepository, DocumentR
 from app.auth.middleware import get_current_user
 from app.infra.db.models.run import RunStatus
 from app.services.run_executor import get_executor, RunConfig, RunExecutor
+from app.services.output_writer import OutputWriter
 from app.utils.logging_utils import get_run_logger
 from app.utils.paths import get_log_path
 from app.adapters.base import GeneratorType as AdapterGeneratorType
@@ -423,6 +424,59 @@ async def execute_run_background(run_id: str, config: RunConfig):
                     total_cost_usd=result.total_cost_usd
                 )
                 logger.info(f"Run {run_id} completed and saved to DB successfully")
+                
+                # === Output Writer: Save winning document ===
+                if result.winner_doc_id and config.output_destination != "none":
+                    try:
+                        # Find the winner content
+                        winner_content = None
+                        winner_model = None
+                        source_doc_name = "unknown"
+                        
+                        # Check generated_docs first
+                        for doc in result.generated_docs:
+                            if doc.doc_id == result.winner_doc_id:
+                                winner_content = doc.content
+                                winner_model = doc.model
+                                source_doc_name = config.document_names.get(doc.source_doc_id, doc.source_doc_id)
+                                break
+                        
+                        # Check combined_docs if not found
+                        if not winner_content:
+                            for doc in (result.combined_docs or []):
+                                if doc.doc_id == result.winner_doc_id:
+                                    winner_content = doc.content
+                                    winner_model = doc.model
+                                    source_doc_name = config.document_names.get(doc.source_doc_id, doc.source_doc_id) if doc.source_doc_id else "combined"
+                                    break
+                        
+                        if winner_content:
+                            output_writer = OutputWriter(session, config.user_id)
+                            output_result = await output_writer.write_winner(
+                                content=winner_content,
+                                output_destination=config.output_destination,
+                                filename_template=config.output_filename_template,
+                                run_id=run_id,
+                                winner_doc_id=result.winner_doc_id,
+                                source_doc_name=source_doc_name,
+                                winner_model=winner_model or "unknown",
+                                github_connection_id=None,  # TODO: Add to config
+                                github_output_path=None,  # TODO: Add to config
+                                github_commit_message=config.github_commit_message,
+                            )
+                            
+                            if output_result.success:
+                                logger.info(f"Run {run_id}: Saved winning document - content_id={output_result.content_id}")
+                                # Update results_summary with output info
+                                results_summary["output"] = output_result.to_dict()
+                                await run_repo.update(run_id, results_summary=results_summary)
+                            else:
+                                logger.warning(f"Run {run_id}: Failed to save winning document - {output_result.error}")
+                        else:
+                            logger.warning(f"Run {run_id}: Winner doc_id={result.winner_doc_id} not found in generated or combined docs")
+                    except Exception as output_err:
+                        logger.exception(f"Run {run_id}: Error writing output: {output_err}")
+                        # Don't fail the run just because output writing failed
             except Exception as save_err:
                 logger.exception(f"Run {run_id}: Failed to save results to DB: {save_err}")
                 await run_repo.fail(run_id, error_message=f"Failed to save results: {save_err}")
@@ -1257,6 +1311,13 @@ async def execute_preset(
         pairwise_eval_instructions=pairwise_eval_instructions,
         eval_criteria=eval_criteria,
         combine_instructions=combine_instructions,
+        # Output settings
+        output_destination=preset.output_destination or "library",
+        output_filename_template=preset.output_filename_template or "{source_doc_name}_{winner_model}_{timestamp}",
+        github_repo_url=preset.github_repo_url,
+        github_commit_message=preset.github_commit_message or "ACM2: Add winning document",
+        preset_id=str(preset.id),
+        preset_name=preset.name,
     )
     
     # Launch background task

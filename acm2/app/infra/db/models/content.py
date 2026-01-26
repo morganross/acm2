@@ -42,6 +42,9 @@ class ContentType(str, Enum):
     
     # Reusable fragments for variable interpolation
     TEMPLATE_FRAGMENT = "template_fragment"
+    
+    # Output phase - winning documents from completed runs
+    OUTPUT_DOCUMENT = "output_document"
 
 
 class Content(Base):

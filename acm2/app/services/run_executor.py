@@ -154,6 +154,14 @@ class RunConfig:
     # Post-Combine Configuration - Optional
     post_combine_top_n: Optional[int] = None  # Optional limit for post-combine eval
     
+    # Output Configuration - Where to write the winning document
+    output_destination: str = "none"  # "none", "library", or "github"
+    output_filename_template: str = "{preset_name}_{timestamp}_winner"
+    github_repo_url: Optional[str] = None  # GitHub repo for pushing output
+    github_commit_message: str = "ACM2 output: {filename}"
+    preset_id: Optional[str] = None  # For output filename template
+    preset_name: Optional[str] = None  # For output filename template
+    
     # Document names for UI display (doc_id -> human-readable name)
     document_names: Dict[str, str] = field(default_factory=dict)
     
@@ -1015,6 +1023,27 @@ class RunExecutor:
                 except Exception:
                     pass
             await self._run_post_combine_eval(config, result)
+            
+            # Promote post-combine winner to top-level
+            if result.post_combine_eval_results and result.post_combine_eval_results.winner_doc_id:
+                result.winner_doc_id = result.post_combine_eval_results.winner_doc_id
+                self.logger.info(f"Run {run_id}: Promoted post-combine winner to top-level: {result.winner_doc_id}")
+                if getattr(self, '_run_store', None):
+                    try:
+                        self._run_store.update(run_id, winner_doc_id=result.winner_doc_id)
+                    except Exception:
+                        pass
+
+        # === Cascading Winner Determination ===
+        # If no winner set yet, fall back to pre-combine pairwise winner
+        if not result.winner_doc_id and result.pairwise_results and result.pairwise_results.winner_doc_id:
+            result.winner_doc_id = result.pairwise_results.winner_doc_id
+            self.logger.info(f"Run {run_id}: Using pre-combine pairwise winner: {result.winner_doc_id}")
+            if getattr(self, '_run_store', None):
+                try:
+                    self._run_store.update(run_id, winner_doc_id=result.winner_doc_id)
+                except Exception:
+                    pass
 
         # Done
         result.status = RunPhase.COMPLETED
@@ -1524,7 +1553,7 @@ Optimize your output to score highly on each criterion:
             # Use last 8 chars of source doc UUID + 4-char random ID for shorter filenames
             short_doc_id = doc_id[-8:] if len(doc_id) >= 8 else doc_id
             file_uuid = str(uuid4())[:4]
-            gen_doc_id = f"{short_doc_id}.{file_uuid}.{generator.value}.{iteration}.{model.replace(':', '_')}"
+            gen_doc_id = f"{short_doc_id}.{file_uuid}.{generator.value}.{iteration}.{model.replace(':', '_').replace('/', '_')}"
             
             # Track generation success
             if self._fpf_stats:
@@ -1795,7 +1824,7 @@ Optimize your output to score highly on each criterion:
                     result.total_cost_usd += combine_result.cost_usd
                     
                     # Create unique doc_id with model info
-                    safe_model_name = combine_model.replace(":", "_")
+                    safe_model_name = combine_model.replace(":", "_").replace("/", "_")
                     short_run_id = result.run_id[-8:] if len(result.run_id) >= 8 else result.run_id
                     file_uuid = str(uuid4())[:4]
                     combined_doc_id = f"combined.{short_run_id}.{file_uuid}.{safe_model_name}"
