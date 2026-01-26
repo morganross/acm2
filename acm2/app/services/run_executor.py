@@ -465,7 +465,7 @@ class RunExecutor:
     ```
     """
     
-    def __init__(self, ws_manager=None, run_logger: Optional[logging.Logger] = None):
+    def __init__(self, run_logger: Optional[logging.Logger] = None, ws_manager=None):
         self._fpf_adapter = FpfAdapter()
         self._gptr_adapter = GptrAdapter()
         self._dr_adapter = DrAdapter()
@@ -476,72 +476,27 @@ class RunExecutor:
         # Use injected logger or fallback to module logger (legacy/test support)
         self.logger = run_logger or logging.getLogger(__name__)
         
-        # Use injected WebSocket manager or try to import if not provided (legacy fallback)
+        # WebSocket manager for real-time updates
         if ws_manager:
             self._run_ws_manager = ws_manager
         else:
             try:
                 from ..api.websockets import run_ws_manager
                 self._run_ws_manager = run_ws_manager
-            except Exception:
+            except ImportError:
                 self._run_ws_manager = None
             
         # Debug: surface executor creation info
         try:
             self.logger.debug(
-                "RunExecutor.__init__ created fpf_adapter=%r gptr_adapter=%r cancelled=%s ws_manager=%s",
+                "RunExecutor.__init__ created fpf_adapter=%r gptr_adapter=%r cancelled=%s",
                 type(self._fpf_adapter).__name__,
                 type(self._gptr_adapter).__name__,
                 self._cancelled,
-                "INJECTED" if ws_manager else ("IMPORTED" if self._run_ws_manager else "NONE")
             )
         except Exception:
             self.logger.debug("RunExecutor.__init__ debug log failed", exc_info=True)
             
-    def _broadcast_stats(self, stats: FpfStatsTracker, run_id: str):
-        """Broadcast updated FPF stats via WebSocket.
-        
-        Args:
-            stats: The stats tracker with current counts
-            run_id: The run ID to broadcast to (captured in closure at execute() start)
-        """
-        # CRITICAL DEBUG: This should appear in logs!
-        self.logger.info(f"[STATS] _broadcast_stats ENTERED! run_id={run_id}")
-        
-        # Fix #8: Validate run_id matches current active run
-        current_run = getattr(self, '_current_run_id', None)
-        if current_run and current_run != run_id:
-            self.logger.warning(f"[STATS] RUN ID MISMATCH! Broadcast target={run_id}, but current executor run={current_run}. Skipping stale broadcast.")
-            return
-            
-        self.logger.info(f"[STATS] Checking ws_manager: {self._run_ws_manager is not None}")
-        if not self._run_ws_manager:
-            self.logger.warning(f"[STATS] Cannot broadcast for run {run_id}: WebSocket manager not initialized")
-            return
-        
-        try:
-            # Serialize stats with validation
-            stats_dict = stats.to_dict()
-            self.logger.info(f"[STATS] Broadcasting stats for run {run_id}: {stats_dict}")
-            
-            # Create stats payload
-            payload = {
-                "event": "fpf_stats_update",
-                "stats": stats_dict
-            }
-            
-            # Try to broadcast via event loop
-            try:
-                loop = asyncio.get_running_loop()
-                self.logger.info(f"[STATS] Got running loop, creating task")
-                task = loop.create_task(self._run_ws_manager.broadcast(run_id, payload))
-                self.logger.info(f"[STATS] WebSocket broadcast task created for run {run_id}")
-                loop.create_task(self._persist_fpf_stats(run_id, stats_dict))
-            except RuntimeError as e:
-                self.logger.warning(f"[STATS] No running event loop for run {run_id}: {e}")
-        except Exception as e:
-            self.logger.error(f"[STATS] Failed to broadcast stats for run {run_id}: {e}", exc_info=True)
-
     async def _persist_fpf_stats(self, run_id: str, stats_dict: dict) -> None:
         """Persist live FPF stats (including last_error) to the run results_summary."""
         try:
@@ -594,7 +549,7 @@ class RunExecutor:
         
         try:
             async with async_session_factory() as session:
-                run_repo = RunRepository(session)
+                run_repo = RunRepository(session, user_id=self.config.user_id)
                 await run_repo.append_timeline_event(run_id, event)
                 self.logger.debug(f"Emitted timeline event: {phase}/{event_type} for run {run_id}")
         except Exception as e:
@@ -676,11 +631,8 @@ class RunExecutor:
         self.logger.info(f"[STATS] Initializing executor for run {run_id}")
         
         # Fix #5: Reset stats for new run
-        # Fix #3: Create closure that captures run_id to prevent stale ID issues
         self._fpf_stats = FpfStatsTracker()
-        captured_run_id = run_id  # Capture in local variable for closure
-        self._fpf_stats._on_update = lambda stats: self._broadcast_stats(stats, captured_run_id)
-        self.logger.info(f"[STATS] FpfStatsTracker initialized with broadcast callback bound to run_id={captured_run_id}")
+        self.logger.info(f"[STATS] FpfStatsTracker initialized for run_id={run_id}")
         
         started_at = datetime.utcnow()
         result = RunResult(
@@ -792,7 +744,6 @@ class RunExecutor:
                 gptr_adapter=self._gptr_adapter,
                 dr_adapter=self._dr_adapter,
                 logger=self.logger,
-                ws_manager=self._run_ws_manager,
                 run_store=getattr(self, '_run_store', None),
                 on_timeline_event=self._on_pipeline_timeline_event,
             )
@@ -892,7 +843,7 @@ class RunExecutor:
                 from ..infra.db.repositories import RunRepository
 
                 async with async_session_factory() as session:
-                    run_repo = RunRepository(session)
+                    run_repo = RunRepository(session, user_id=self.config.user_id)
                     await run_repo.append_source_doc_timeline_event(run_id, source_doc_id, event)
         except Exception as e:
             self.logger.warning(f"Failed to append source-doc timeline event for run {run_id}: {e}")
@@ -955,11 +906,6 @@ class RunExecutor:
             if getattr(self, '_run_store', None):
                 try:
                     self._run_store.update(run_id, current_phase=result.status.value)
-                    if getattr(self, '_run_ws_manager', None):
-                        try:
-                            await self._run_ws_manager.broadcast(run_id, {"event": "phase", "phase": result.status.value, "run": self._run_store.get(run_id)})
-                        except Exception:
-                            pass
                 except Exception:
                     pass
             await self._run_pairwise(config, result)
@@ -998,11 +944,6 @@ class RunExecutor:
             if getattr(self, '_run_store', None):
                 try:
                     self._run_store.update(run_id, current_phase=result.status.value)
-                    if getattr(self, '_run_ws_manager', None):
-                        try:
-                            await self._run_ws_manager.broadcast(run_id, {"event": "phase", "phase": result.status.value, "run": self._run_store.get(run_id)})
-                        except Exception:
-                            pass
                 except Exception:
                     pass
             await self._run_combine(config, result)
@@ -1015,11 +956,6 @@ class RunExecutor:
             if getattr(self, '_run_store', None):
                 try:
                     self._run_store.update(run_id, current_phase=result.status.value)
-                    if getattr(self, '_run_ws_manager', None):
-                        try:
-                            await self._run_ws_manager.broadcast(run_id, {"event": "phase", "phase": result.status.value, "run": self._run_store.get(run_id)})
-                        except Exception:
-                            pass
                 except Exception:
                     pass
             await self._run_post_combine_eval(config, result)
@@ -1123,11 +1059,6 @@ class RunExecutor:
                         "error_message": None,
                     })
                 self._run_store.update(run_id, tasks=initial_tasks)
-                if getattr(self, '_run_ws_manager', None):
-                    try:
-                        await self._run_ws_manager.broadcast(run_id, {"event": "init", "tasks": initial_tasks})
-                    except Exception:
-                        pass
             except Exception:
                 pass
         
@@ -1200,11 +1131,6 @@ class RunExecutor:
                                 t['started_at'] = datetime.utcnow()
                                 break
                         self._run_store.update(run_id, tasks=tasks_list)
-                        if getattr(self, '_run_ws_manager', None):
-                            try:
-                                await self._run_ws_manager.broadcast(run_id, {"event": "task_update", "task": t})
-                            except Exception:
-                                pass
 
                 # Progress callback for this specific task
                 async def _progress_callback(stage: str, progress: float, message: Optional[str]):
@@ -1222,18 +1148,6 @@ class RunExecutor:
                                     tt['message'] = message
                                     break
                             self._run_store.update(run_id, tasks=tasks_list)
-                            # Broadcast to run-level WS
-                            if getattr(self, '_run_ws_manager', None):
-                                try:
-                                    await self._run_ws_manager.broadcast(run_id, {"event": "task_update", "task": tt})
-                                except Exception:
-                                    pass
-                    # Also broadcast to task-level WS manager if available
-                    try:
-                        from ..api.routes.generation import ws_manager as gen_ws_manager
-                        await gen_ws_manager.broadcast(task_id, {"event": "progress", "task_id": task_id, "stage": stage, "progress": progress, "message": message})
-                    except Exception:
-                        pass
 
                 # 1. Generate
                 gen_result = await self._generate_single(
@@ -1257,21 +1171,6 @@ class RunExecutor:
                     
                     # Save generated content to file for later retrieval
                     await self._save_generated_content(run_id, gen_result)
-                    
-                    # Broadcast gen_complete via WebSocket for live UI updates
-                    if getattr(self, '_run_ws_manager', None):
-                        try:
-                            await self._run_ws_manager.broadcast(run_id, {
-                                "event": "gen_complete",
-                                "doc_id": gen_result.doc_id,
-                                "model": model,
-                                "generator": generator.value,
-                                "source_doc_id": doc_id,
-                                "iteration": iteration,
-                                "duration_seconds": gen_result.duration_seconds,
-                            })
-                        except Exception:
-                            pass
                     
                     # Emit generation timeline event
                     gen_completed_at = gen_result.completed_at if hasattr(gen_result, 'completed_at') and gen_result.completed_at else datetime.utcnow()
@@ -1363,11 +1262,6 @@ class RunExecutor:
                                     t['completed_at'] = datetime.utcnow()
                                     break
                             self._run_store.update(run_id, tasks=tasks_list, total_cost_usd=result.total_cost_usd)
-                            if getattr(self, '_run_ws_manager', None):
-                                try:
-                                    await self._run_ws_manager.broadcast(run_id, {"event": "task_update", "task": t})
-                                except Exception:
-                                    pass
                 
                 completed += 1
                 if config.on_progress:
@@ -1402,11 +1296,6 @@ class RunExecutor:
                                 t['completed_at'] = datetime.utcnow()
                                 break
                         self._run_store.update(run_id, tasks=tasks_list)
-                        if getattr(self, '_run_ws_manager', None):
-                            try:
-                                await self._run_ws_manager.broadcast(run_id, {"event": "task_update", "task": t})
-                            except Exception:
-                                pass
 
     async def _generate_single(
         self,
@@ -1711,11 +1600,6 @@ Optimize your output to score highly on each criterion:
         if getattr(self, '_run_store', None):
             try:
                 self._run_store.update(result.run_id, total_cost_usd=result.total_cost_usd, winner_doc_id=result.winner_doc_id)
-                if getattr(self, '_run_ws_manager', None):
-                    try:
-                        await self._run_ws_manager.broadcast(result.run_id, {"event": "pairwise", "winner": result.winner_doc_id, "run": self._run_store.get(result.run_id)})
-                    except Exception:
-                        pass
             except Exception:
                 pass
     
@@ -2003,18 +1887,6 @@ Optimize your output to score highly on each criterion:
                     "documents_compared": len(all_doc_ids),
                 },
             )
-            
-            # Broadcast results via WebSocket
-            if getattr(self, '_run_store', None):
-                try:
-                    if getattr(self, '_run_ws_manager', None):
-                        await self._run_ws_manager.broadcast(result.run_id, {
-                            "event": "post_combine_eval_complete", 
-                            "winner": summary.winner_doc_id,
-                            "total_comparisons": summary.total_comparisons,
-                        })
-                except Exception as e:
-                    self.logger.warning(f"Failed to broadcast post-combine eval results: {e}")
 
         except Exception as e:
             self.logger.error(f"Post-combine eval failed: {e}", exc_info=True)

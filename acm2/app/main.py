@@ -4,6 +4,7 @@ ACM2 - API Cost Multiplier 2.0
 FastAPI application for research evaluation and cost tracking.
 """
 import logging
+import os
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -74,8 +75,10 @@ async def lifespan(app: FastAPI):
     logger.info("Database tables initialized")
     
     # ORPHAN RECOVERY: Mark any 'running' runs as failed (they were orphaned by server restart)
+    # NOTE: This intentionally uses unscoped session to query ALL users' runs at startup.
+    # This is an admin-level operation that runs once at server start, not per-user.
     async with async_session_factory() as session:
-        run_repo = RunRepository(session)
+        run_repo = RunRepository(session)  # Intentionally unscoped for cross-user orphan recovery
         orphaned_runs = await run_repo.get_active_runs()
         for run in orphaned_runs:
             if run.status == "running":
@@ -121,19 +124,26 @@ def create_app() -> FastAPI:
     )
     
     # CORS middleware for frontend
+    # Additional origins can be added via ACM2_CORS_ORIGINS env var (comma-separated)
+    cors_origins = [
+        "http://localhost:5173",  # Vite default
+        "http://localhost:5174",  # Vite alternate
+        "http://localhost:3000",  # Common React port
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
+        "http://localhost",        # WordPress on port 80
+        "http://127.0.0.1",        # WordPress on port 80
+        "http://localhost:80",
+        "http://127.0.0.1:80",
+    ]
+    # Add any custom origins from environment (for production deployment)
+    extra_origins = os.environ.get("ACM2_CORS_ORIGINS", "")
+    if extra_origins:
+        cors_origins.extend([o.strip() for o in extra_origins.split(",") if o.strip()])
+    
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[
-            "http://localhost:5173",  # Vite default
-            "http://localhost:5174",  # Vite alternate
-            "http://localhost:3000",  # Common React port
-            "http://127.0.0.1:5173",
-            "http://127.0.0.1:5174",
-            "http://localhost",        # WordPress on port 80
-            "http://127.0.0.1",        # WordPress on port 80
-            "http://localhost:80",
-            "http://127.0.0.1:80",
-        ],
+        allow_origins=cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

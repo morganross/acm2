@@ -76,7 +76,6 @@ class SourceDocPipeline:
         gptr_adapter: Optional[GptrAdapter] = None,
         dr_adapter: Optional[DrAdapter] = None,
         logger: Optional[logging.Logger] = None,
-        ws_manager: Optional[Any] = None,
         run_store: Optional[Any] = None,
         on_timeline_event: Optional[Callable] = None,
     ):
@@ -95,7 +94,6 @@ class SourceDocPipeline:
             gptr_adapter: Shared GPTR adapter instance
             dr_adapter: Shared DR adapter instance
             logger: Logger instance (uses module logger if not provided)
-            ws_manager: WebSocket manager for live updates
             run_store: Run store for persisting progress
             on_timeline_event: Callback for timeline events
         """
@@ -107,7 +105,6 @@ class SourceDocPipeline:
         self.semaphore = shared_semaphore
         self.stats = stats_tracker
         self.logger = logger or logging.getLogger(__name__)
-        self.ws_manager = ws_manager
         self.run_store = run_store
         self.on_timeline_event = on_timeline_event
         
@@ -386,11 +383,6 @@ class SourceDocPipeline:
                 else:
                     all_tasks = initial_tasks
                 self.run_store.update(self.run_id, tasks=all_tasks)
-                if self.ws_manager:
-                    try:
-                        await self.ws_manager.broadcast(self.run_id, {"event": "init", "tasks": all_tasks})
-                    except Exception:
-                        pass
             except Exception as e:
                 self.logger.warning(f"Pipeline [{self.source_doc_name}]: Failed to initialize run_store tasks: {e}")
         
@@ -440,11 +432,6 @@ class SourceDocPipeline:
                                     t['started_at'] = datetime.utcnow()
                                     break
                             self.run_store.update(self.run_id, tasks=tasks_list)
-                            if self.ws_manager:
-                                try:
-                                    await self.ws_manager.broadcast(self.run_id, {"event": "task_update", "task": t})
-                                except Exception:
-                                    pass
                     except Exception as e:
                         self.logger.warning(f"Failed to update run_store task status: {e}")
                 
@@ -462,19 +449,8 @@ class SourceDocPipeline:
                                         tt['message'] = message
                                         break
                                 self.run_store.update(self.run_id, tasks=tasks_list)
-                                if self.ws_manager:
-                                    try:
-                                        await self.ws_manager.broadcast(self.run_id, {"event": "task_update", "task": tt})
-                                    except Exception:
-                                        pass
                         except Exception:
                             pass
-                    # Also broadcast to task-level WS manager if available
-                    try:
-                        from ..api.routes.generation import ws_manager as gen_ws_manager
-                        await gen_ws_manager.broadcast(task_id, {"event": "progress", "task_id": task_id, "stage": stage, "progress": progress, "message": message})
-                    except Exception:
-                        pass
                 
                 # 1. Generate
                 gen_result = await self._generate_single(
@@ -491,21 +467,6 @@ class SourceDocPipeline:
                     
                     # Save generated content to file for later retrieval
                     await self._save_generated_content(gen_result)
-                    
-                    # Broadcast gen_complete via WebSocket for live UI updates
-                    if self.ws_manager:
-                        try:
-                            await self.ws_manager.broadcast(self.run_id, {
-                                "event": "gen_complete",
-                                "doc_id": gen_result.doc_id,
-                                "model": model,
-                                "generator": generator.value,
-                                "source_doc_id": self.source_doc_id,
-                                "iteration": iteration,
-                                "duration_seconds": gen_result.duration_seconds,
-                            })
-                        except Exception:
-                            pass
                     
                     # Fire on_gen_complete callback to save generated_docs incrementally to DB
                     if self.config.on_gen_complete:
@@ -590,11 +551,6 @@ class SourceDocPipeline:
                                         t['completed_at'] = datetime.utcnow()
                                         break
                                 self.run_store.update(self.run_id, tasks=tasks_list, total_cost_usd=result.cost_usd)
-                                if self.ws_manager:
-                                    try:
-                                        await self.ws_manager.broadcast(self.run_id, {"event": "task_update", "task": t})
-                                    except Exception:
-                                        pass
                         except Exception as e:
                             self.logger.warning(f"Failed to update run_store task completion: {e}")
                 

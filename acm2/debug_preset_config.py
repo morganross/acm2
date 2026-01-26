@@ -7,9 +7,12 @@ from app.infra.db.session import async_session_factory
 from app.infra.db.repositories.preset import PresetRepository
 from app.infra.db.repositories.content import ContentRepository
 
+# Debug script uses a fixed test user ID
+DEBUG_USER_ID = 1
+
 async def main():
     async with async_session_factory() as session:
-        preset_repo = PresetRepository(session)
+        preset_repo = PresetRepository(session, user_id=DEBUG_USER_ID)
         preset = await preset_repo.get_by_id('86f721fc-742c-4489-9626-f148cb3d6209')
         
         if not preset:
@@ -42,7 +45,7 @@ async def main():
         print(f"\ncombine_instructions_id: {preset.combine_instructions_id}")
         
         if preset.combine_instructions_id:
-            content_repo = ContentRepository(session)
+            content_repo = ContentRepository(session, user_id=DEBUG_USER_ID)
             content = await content_repo.get_by_id(preset.combine_instructions_id)
             if content:
                 print(f"Combine instructions loaded: {content.name} ({len(content.body or '')} chars)")

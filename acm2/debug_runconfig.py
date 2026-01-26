@@ -11,11 +11,14 @@ from app.infra.db.repositories.run import RunRepository
 from app.services.run_executor import RunConfig
 from app.adapters.base import GeneratorType as AdapterGeneratorType
 
+# Debug script uses a fixed test user ID
+DEBUG_USER_ID = 1
+
 async def main():
     async with async_session_factory() as session:
-        preset_repo = PresetRepository(session)
-        content_repo = ContentRepository(session)
-        doc_repo = DocumentRepository(session)
+        preset_repo = PresetRepository(session, user_id=DEBUG_USER_ID)
+        content_repo = ContentRepository(session, user_id=DEBUG_USER_ID)
+        doc_repo = DocumentRepository(session, user_id=DEBUG_USER_ID)
         
         preset = await preset_repo.get_by_id('86f721fc-742c-4489-9626-f148cb3d6209')
         
@@ -54,6 +57,7 @@ async def main():
         # Minimal config for testing
         try:
             config = RunConfig(
+                user_id=DEBUG_USER_ID,
                 document_ids=["test"],
                 document_contents={"test": "test content"},
                 instructions="test",

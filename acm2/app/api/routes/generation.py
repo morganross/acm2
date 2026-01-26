@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, WebSocket, WebSocketDisconnect, Depends
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Depends
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
 
@@ -149,10 +149,6 @@ async def run_generation_task(
             progress=progress,
             message=message,
         )
-        try:
-            await ws_manager.broadcast(task_id, task_store.get(task_id))
-        except Exception:
-            pass
     
     try:
         # Get appropriate adapter
@@ -226,7 +222,6 @@ async def run_generation_task(
                 status="cancelled",
                 completed_at=datetime.utcnow(),
             )
-            await ws_manager.broadcast(task_id, task_store.get(task_id))
         except Exception:
             pass
         raise
@@ -395,105 +390,3 @@ async def list_tasks(
         "items": tasks[:limit],
         "total": len(tasks),
     }
-
-
-# ============================================================================
-# WebSocket for Real-Time Updates
-# ============================================================================
-
-class ConnectionManager:
-    """Manage WebSocket connections for task updates."""
-    
-    def __init__(self):
-        self.connections: dict[str, list[WebSocket]] = {}  # task_id -> connections
-    
-    async def connect(self, websocket: WebSocket, task_id: str) -> None:
-        await websocket.accept()
-        if task_id not in self.connections:
-            self.connections[task_id] = []
-        self.connections[task_id].append(websocket)
-    
-    def disconnect(self, websocket: WebSocket, task_id: str) -> None:
-        if task_id in self.connections:
-            self.connections[task_id] = [
-                ws for ws in self.connections[task_id] if ws != websocket
-            ]
-    
-    async def broadcast(self, task_id: str, message: dict) -> None:
-        if task_id in self.connections:
-            for ws in self.connections[task_id]:
-                try:
-                    await ws.send_json(message)
-                except Exception:
-                    pass
-
-
-ws_manager = ConnectionManager()
-
-
-async def _authenticate_ws(websocket: WebSocket, api_key: Optional[str]) -> bool:
-    """Authenticate WebSocket connection via API key query parameter."""
-    if not api_key:
-        await websocket.close(code=4001, reason="Missing API key")
-        return False
-    
-    try:
-        user = await get_current_user(api_key)
-        if not user:
-            await websocket.close(code=4001, reason="Invalid API key")
-            return False
-        return True
-    except Exception as e:
-        logger.warning(f"WebSocket auth failed: {e}")
-        await websocket.close(code=4001, reason="Authentication failed")
-        return False
-
-
-@router.websocket("/ws/{task_id}")
-async def websocket_task_updates(
-    websocket: WebSocket,
-    task_id: str,
-    api_key: Optional[str] = Query(None, description="API key for authentication"),
-):
-    """
-    WebSocket endpoint for real-time task updates.
-    
-    Connect to receive progress updates for a specific task.
-    Authentication is required via 'api_key' query parameter.
-    Example: ws://host/generation/ws/{task_id}?api_key=<your_api_key>
-    """
-    # Authenticate before accepting the connection
-    if not await _authenticate_ws(websocket, api_key):
-        return
-    
-    await ws_manager.connect(websocket, task_id)
-    
-    try:
-        # Send initial status
-        task = task_store.get(task_id)
-        if task:
-            await websocket.send_json(task)
-        
-        # Keep connection open and poll for updates
-        last_status = task.copy() if task else {}
-        while True:
-            await asyncio.sleep(0.5)  # Poll interval
-            
-            task = task_store.get(task_id)
-            if not task:
-                await websocket.send_json({"error": "Task not found"})
-                break
-            
-            # Send update if changed
-            if task != last_status:
-                await websocket.send_json(task)
-                last_status = task.copy()
-            
-            # Close if task is done
-            if task["status"] in ("completed", "failed", "cancelled"):
-                break
-                
-    except WebSocketDisconnect:
-        pass
-    finally:
-        ws_manager.disconnect(websocket, task_id)

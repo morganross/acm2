@@ -55,6 +55,9 @@ async def execute_run_background(run_id: str, config: RunConfig):
     # Set up file logging for this run (per-user logs directory)
     run_log_file = get_log_path(config.user_id, run_id, "run.log")
     
+    # Ensure the logs directory exists
+    run_log_file.parent.mkdir(parents=True, exist_ok=True)
+    
     # Create a file handler for this run
     file_handler = logging.FileHandler(run_log_file, encoding="utf-8")
     file_handler.setLevel(logging.DEBUG)
@@ -1274,6 +1277,7 @@ async def execute_preset(
         raise ValueError(f"Preset {preset.name} has no eval timeout configured")
 
     config = RunConfig(
+        user_id=user['id'],
         document_ids=list(document_contents.keys()),
         document_contents=document_contents,
         instructions=instructions,
@@ -1314,7 +1318,7 @@ async def execute_preset(
         # Output settings
         output_destination=preset.output_destination or "library",
         output_filename_template=preset.output_filename_template or "{source_doc_name}_{winner_model}_{timestamp}",
-        github_repo_url=preset.github_repo_url,
+        github_repo_url=preset.github_connection.repo if preset.github_connection else None,
         github_commit_message=preset.github_commit_message or "ACM2: Add winning document",
         preset_id=str(preset.id),
         preset_name=preset.name,

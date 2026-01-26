@@ -10,7 +10,6 @@ from .crud import router as crud_router
 from .execution import router as execution_router
 from .evaluation import router as evaluation_router
 from .artifacts import router as artifacts_router
-from .websocket import router as websocket_router
 
 # Create the main router with tags (prefix is added by api_router)
 router = APIRouter(tags=["runs"])
@@ -20,7 +19,6 @@ router.include_router(crud_router)
 router.include_router(execution_router)
 router.include_router(evaluation_router)
 router.include_router(artifacts_router)
-router.include_router(websocket_router)
 
 # Re-export helpers for backwards compatibility
 from .helpers import (

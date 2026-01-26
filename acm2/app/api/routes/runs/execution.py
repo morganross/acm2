@@ -23,7 +23,6 @@ from app.utils.paths import get_fpf_log_path, get_log_path
 from app.evaluation.models import SingleEvalResult
 
 from ...schemas.runs import RunStatus
-from ...websockets import run_ws_manager
 from .helpers import serialize_dataclass
 
 logger = logging.getLogger(__name__)
@@ -50,7 +49,7 @@ async def execute_run_background(run_id: str, config: RunConfig):
     
     try:
         # Create a fresh executor instance for this run
-        executor = RunExecutor(ws_manager=run_ws_manager, run_logger=run_logger)
+        executor = RunExecutor(run_logger=run_logger)
         prev_executor = _active_executors.get(run_id)
         _active_executors[run_id] = executor
         logger.debug(f"Registered executor for run {run_id}; previous_executor_exists={bool(prev_executor)}")
