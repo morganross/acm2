@@ -455,3 +455,113 @@ Without aggressive cache clearing:
 - "Works once, never again"
 
 **The script prevents this by nuking ALL caches on every run.**
+
+---
+
+## 16) New Architecture: Frontend in Plugin Repo (January 2026)
+
+### 16.1 Problem with Old Setup
+
+- Frontend source lived in backend repo (`C:\dev\godzilla\ui`)
+- After `npm run build`, built files had to be copied to WordPress plugin
+- With 2 cloud nodes (backend + WordPress), this meant transferring files across network after every build
+
+### 16.2 New Setup: Build in Place
+
+Frontend source now lives in the plugin repo itself. Build outputs directly into the plugin's assets folder.
+
+**Plugin repo structure:**
+```
+acm2-wordpress-plugin/
+  plugin/                       ← WordPress uses this folder
+    acm2-integration.php
+    includes/
+      class-api-proxy.php
+      class-user-sync.php
+      class-react-app.php
+    admin/
+    assets/
+      react-build/              ← Build output goes here
+        index.js
+        index.css
+  
+  ui-src/                       ← React source (for rebuilding)
+    src/
+    package.json
+    package-lock.json
+    vite.config.ts              ← outDir: '../plugin/assets/react-build'
+    tsconfig.json
+    tailwind.config.js
+    postcss.config.js
+    components.json
+    index.html
+    node_modules/               ← .gitignored, NOT committed
+```
+
+### 16.3 What's in Git vs What's Local-Only
+
+| In Git (committed) | Local only (.gitignored) |
+|--------------------|--------------------------|
+| `ui-src/src/` | `ui-src/node_modules/` |
+| `ui-src/package.json` | |
+| `ui-src/package-lock.json` | |
+| `ui-src/vite.config.ts` | |
+| `ui-src/*.json`, `*.js` configs | |
+| `plugin/assets/react-build/*` | |
+
+### 16.4 Development Workflow (WordPress Node)
+
+```bash
+cd /path/to/wp-content/plugins/acm2-wordpress-plugin/ui-src
+npm install          # Downloads node_modules (one-time, or after package.json changes)
+npm run build        # Outputs to ../plugin/assets/react-build/
+```
+
+### 16.5 Production Deployment
+
+Option A: Clone and use pre-built assets
+```bash
+git clone https://github.com/you/acm2-wordpress-plugin.git
+# Built assets already in plugin/assets/react-build/ — ready to use
+```
+
+Option B: Clone and rebuild
+```bash
+git clone https://github.com/you/acm2-wordpress-plugin.git
+cd acm2-wordpress-plugin/ui-src
+npm install
+npm run build
+```
+
+### 16.6 Backend Repo Changes
+
+The `ui/` folder is removed from the backend repo (`acm2`). Backend repo now contains only:
+- Python FastAPI app
+- FPF / GPTR adapters
+- SQLite databases
+- CLI tools
+
+### 16.7 Vite Config Change
+
+Update `ui-src/vite.config.ts` to output to plugin folder:
+
+```typescript
+export default defineConfig({
+  build: {
+    outDir: '../plugin/assets/react-build',
+    emptyDirBeforeWrite: true,
+  },
+  // ... rest of config
+})
+```
+
+### 16.8 Summary
+
+| Component | Repo | Node |
+|-----------|------|------|
+| Python backend, API, FPF, GPTR | `acm2` | Backend server |
+| WordPress plugin PHP | `acm2-wordpress-plugin` | WordPress server |
+| React source | `acm2-wordpress-plugin/ui-src` | WordPress server |
+| Built React assets | `acm2-wordpress-plugin/plugin/assets/react-build` | WordPress server |
+
+No file transfer between nodes. Build in place.
