@@ -10,12 +10,12 @@ from rich.table import Table
 app = typer.Typer()
 console = Console()
 
-API_URL = os.getenv("ACM_API_URL", "http://127.0.0.1:8000/api/v1")
+API_URL = os.getenv("ACM_API_URL", "http://127.0.0.1:80/api/v1")
 
 @app.command()
 def serve(
-    host: str = "127.0.0.1",
-    port: int = 8000,
+    host: str = "0.0.0.0",
+    port: int = 80,
     reload: bool = False
 ):
     """Start the ACM2 API server."""
