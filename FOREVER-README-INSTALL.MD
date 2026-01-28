@@ -565,3 +565,224 @@ export default defineConfig({
 | Built React assets | `acm2-wordpress-plugin/plugin/assets/react-build` | WordPress server |
 
 No file transfer between nodes. Build in place.
+
+---
+
+## 17) Fresh Windows Installation — Step by Step
+
+**Tested January 28, 2026** - A complete guide to install ACM2 on a fresh Windows machine.
+
+### Prerequisites
+- Windows 10/11 with PowerShell
+- Internet connection
+- Administrator privileges
+
+---
+
+### Step 1: Install Git
+
+**Option A: Manual Download**
+1. Go to https://git-scm.com/download/win
+2. Download the 64-bit installer
+3. Run installer with default options
+4. **Important**: Select "Git from the command line and also from 3rd-party software"
+
+**Option B: PowerShell (if winget available)**
+```powershell
+winget install Git.Git --accept-package-agreements --accept-source-agreements
+```
+
+**Verify** (open NEW terminal after install):
+```powershell
+git --version
+```
+
+**Note**: If git is not recognized, you may need to refresh PATH:
+```powershell
+$env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+```
+
+---
+
+### Step 2: Install Python 3.11
+
+```powershell
+# Download Python installer
+$pythonUrl = "https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe"
+$installer = "$env:TEMP\python-3.11.9-amd64.exe"
+Invoke-WebRequest -Uri $pythonUrl -OutFile $installer
+
+# Install silently with PATH (requires admin)
+Start-Process -FilePath $installer -ArgumentList "/quiet", "InstallAllUsers=1", "PrependPath=1" -Wait
+
+# CRITICAL: Refresh PATH in current session
+$env:Path = "C:\Program Files\Python311;C:\Program Files\Python311\Scripts;" + $env:Path
+```
+
+**Verify**:
+```powershell
+python --version   # Expected: Python 3.11.9
+pip --version      # Expected: pip 24.x
+```
+
+**Troubleshooting**: If python/pip not found, the PATH wasn't updated. Run the PATH refresh line above again.
+
+---
+
+### Step 3: Clone the Repository
+
+```powershell
+cd c:\devlop
+git clone https://github.com/morganross/acm2
+```
+
+---
+
+### Step 4: Install Python Dependencies
+
+```powershell
+cd c:\devlop\acm2\acm2
+pip install -e .
+```
+
+This installs (~200+ packages):
+- FastAPI + Uvicorn (API server)
+- SQLAlchemy + aiosqlite + aiomysql (databases)
+- gpt-researcher (research engine)
+- OpenAI, Anthropic, Google SDKs
+- bcrypt, jinja2, email-validator (auth & templating)
+- All other dependencies from pyproject.toml
+
+**Note**: This takes several minutes due to gpt-researcher's large dependency tree.
+
+---
+
+### Step 5: Generate Encryption Key
+
+```powershell
+python -c "from cryptography.fernet import Fernet; print('ENCRYPTION_KEY=' + Fernet.generate_key().decode())"
+```
+
+**Copy the entire output line** (e.g., `ENCRYPTION_KEY=abc123...`) for the next step.
+
+---
+
+### Step 6: Create Environment File
+
+Create file `c:\devlop\acm2\acm2\.env`:
+
+```env
+# Required - paste your generated key here
+ENCRYPTION_KEY=your_generated_key_here
+SEED_PRESET_ID=default
+SEED_VERSION=1.0.0
+
+# Optional - LLM provider API keys (can also be set per-user in UI)
+# OPENAI_API_KEY=sk-...
+# ANTHROPIC_API_KEY=sk-ant-...
+# GOOGLE_API_KEY=AIza...
+# TAVILY_API_KEY=tvly-...
+```
+
+---
+
+### Step 7: Create FilePromptForge Environment
+
+Create file `c:\devlop\acm2\FilePromptForge\.env`:
+
+```env
+# At least one provider key required for FilePromptForge
+# OPENAI_API_KEY=sk-...
+# ANTHROPIC_API_KEY=sk-ant-...
+# GOOGLE_API_KEY=AIza...
+```
+
+---
+
+### Step 8: Start the Server
+
+**For foreground mode** (blocks terminal, stops when terminal closes):
+```powershell
+cd c:\devlop\acm2\acm2
+python cli.py serve
+```
+
+**For background mode** (survives terminal commands, recommended):
+```powershell
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "`$env:Path = 'C:\Program Files\Python311;C:\Program Files\Python311\Scripts;' + `$env:Path; cd c:\devlop\acm2\acm2; python cli.py serve 2>&1 | Tee-Object -FilePath c:\devlop\server.log"
+```
+
+Server runs at: **http://127.0.0.1:8000**
+
+---
+
+### Step 9: Verify Installation
+
+**Check server is running:**
+```powershell
+Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | Select-Object LocalPort, State
+```
+Expected: `LocalPort: 8000, State: Listen`
+
+**Open in browser:**
+- http://127.0.0.1:8000/docs — API documentation (Swagger UI)
+- http://127.0.0.1:8000/redoc — API documentation (ReDoc)
+
+---
+
+### Quick Reference — Single Script Install
+
+```powershell
+# Run these commands in order (after Git is installed)
+
+# 1. Install Python
+$pythonUrl = "https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe"
+Invoke-WebRequest -Uri $pythonUrl -OutFile "$env:TEMP\python-installer.exe"
+Start-Process -FilePath "$env:TEMP\python-installer.exe" -ArgumentList "/quiet", "InstallAllUsers=1", "PrependPath=1" -Wait
+$env:Path = "C:\Program Files\Python311;C:\Program Files\Python311\Scripts;" + $env:Path
+
+# 2. Clone and install
+cd c:\devlop
+git clone https://github.com/morganross/acm2
+cd acm2\acm2
+pip install -e .
+
+# 3. Generate encryption key (save output!)
+python -c "from cryptography.fernet import Fernet; print('ENCRYPTION_KEY=' + Fernet.generate_key().decode())"
+
+# 4. Create .env files manually (see Steps 6 & 7)
+
+# 5. Start server (background mode)
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd c:\devlop\acm2\acm2; python cli.py serve"
+```
+
+---
+
+### Troubleshooting
+
+| Problem | Solution |
+|---------|----------|
+| `python` not recognized | Run PATH refresh: `$env:Path = "C:\Program Files\Python311;C:\Program Files\Python311\Scripts;" + $env:Path` |
+| `git` not recognized | Open NEW terminal after Git install, or refresh PATH |
+| Server exits immediately | Check `.env` file exists and has valid ENCRYPTION_KEY |
+| Port 8000 already in use | Kill existing process: `Get-Process python \| Stop-Process -Force` |
+| Missing module errors | Run `pip install -e .` again from acm2\acm2 folder |
+
+---
+
+### Server Management Commands
+
+```powershell
+# Check if server is running
+Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue
+
+# View server logs (if started with Tee-Object)
+Get-Content c:\devlop\server.log -Tail 50
+
+# Kill server
+Get-Process python -ErrorAction SilentlyContinue | Stop-Process -Force
+
+# Restart server (background)
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd c:\devlop\acm2\acm2; python cli.py serve"
+```
+
