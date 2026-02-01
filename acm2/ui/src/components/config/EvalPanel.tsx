@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from 'react'
+import { Link } from 'react-router-dom'
 import { Section } from '../ui/section'
 import { Slider } from '../ui/slider'
 import { Checkbox, CheckboxGroup } from '../ui/checkbox'
@@ -252,14 +253,13 @@ export function EvalPanel() {
             <h4 className="text-sm font-semibold text-gray-300 flex items-center gap-2">
               <FileText className="w-4 h-4" /> Single Eval Instructions <span className="text-red-400">*</span>
             </h4>
-            <a 
-              href="/content" 
-              target="_blank"
+            <Link 
+              to="/content" 
               className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 rounded transition-colors"
             >
               <ExternalLink className="w-3 h-3" />
               Library
-            </a>
+            </Link>
           </div>
           {singleEvalContents.length === 0 ? (
             <p className="text-xs text-red-400">No single eval instructions in library - required</p>
@@ -285,14 +285,13 @@ export function EvalPanel() {
             <h4 className="text-sm font-semibold text-gray-300 flex items-center gap-2">
               <FileText className="w-4 h-4" /> Pairwise Eval Instructions <span className="text-red-400">*</span>
             </h4>
-            <a 
-              href="/content" 
-              target="_blank"
+            <Link 
+              to="/content" 
               className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 rounded transition-colors"
             >
               <ExternalLink className="w-3 h-3" />
               Library
-            </a>
+            </Link>
           </div>
           {pairwiseEvalContents.length === 0 ? (
             <p className="text-xs text-red-400">No pairwise eval instructions in library - required for pairwise</p>
@@ -318,24 +317,23 @@ export function EvalPanel() {
             <h4 className="text-sm font-semibold text-gray-300 flex items-center gap-2">
               <Library className="w-4 h-4" /> Evaluation Criteria <span className="text-red-400">*</span>
             </h4>
-            <a 
-              href="/content" 
-              target="_blank"
+            <Link 
+              to="/content" 
               className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 rounded transition-colors"
             >
               <ExternalLink className="w-3 h-3" />
               Library
-            </a>
+            </Link>
           </div>
           {evalCriteriaContents.length === 0 ? (
             <div className="space-y-2">
               <p className="text-xs text-red-400">No eval criteria in library - required for evaluation</p>
-              <a 
-                href="/content" 
+              <Link 
+                to="/content" 
                 className="inline-flex items-center gap-1 px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-500 rounded transition-colors"
               >
                 Create Criteria in Library →
-              </a>
+              </Link>
             </div>
           ) : (
             <select

@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from 'react'
+import { Link } from 'react-router-dom'
 import { Section } from '../ui/section'
 import { Checkbox, CheckboxGroup } from '../ui/checkbox'
 import { Combine as CombineIcon, Cpu, FileText, ExternalLink, Scale, Sliders, Gift, ChevronDown, ChevronRight } from 'lucide-react'
@@ -163,20 +164,19 @@ export function CombinePanel() {
             <h4 className="text-sm font-semibold text-gray-300 flex items-center gap-2">
               <FileText className="w-4 h-4" /> Combine Instructions
             </h4>
-            <a 
-              href="/content" 
-              target="_blank"
+            <Link 
+              to="/content" 
               className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 rounded transition-colors"
             >
               <ExternalLink className="w-3 h-3" />
               Library
-            </a>
+            </Link>
           </div>
           <p className="text-xs text-gray-500 mb-2">
             Custom instructions for combining top reports into a Gold Standard document.
           </p>
           {combineInstructionContents.length === 0 ? (
-            <p className="text-xs text-gray-500">No combine instructions in library. <a href="/content" className="text-purple-400 hover:text-purple-300">Create one →</a></p>
+            <p className="text-xs text-gray-500">No combine instructions in library. <Link to="/content" className="text-purple-400 hover:text-purple-300">Create one →</Link></p>
           ) : (
             <select
               value={config.combine.combineInstructionsId || ''}

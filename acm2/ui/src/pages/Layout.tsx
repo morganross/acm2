@@ -10,6 +10,7 @@ import {
   Scale,
   Library,
   DollarSign,
+  Github,
 } from 'lucide-react'
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
@@ -19,6 +20,7 @@ const navigation = [
   { name: 'Execute', href: '/execute', icon: Play },
   { name: 'Build Preset', href: '/configure', icon: Sliders },
   { name: 'Content Library', href: '/content', icon: Library },
+  { name: 'GitHub', href: '/github', icon: Github },
   { name: 'Evaluation', href: '/evaluation', icon: Scale },
   { name: 'History', href: '/history', icon: FileText },
   { name: 'Ratings', href: '/ratings', icon: DollarSign },

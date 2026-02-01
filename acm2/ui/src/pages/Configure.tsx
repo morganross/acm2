@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { Save, RotateCcw, Sliders, Play, FileText, Library, ExternalLink, Github, Folder, ChevronRight, RefreshCw, X, ArrowDownAZ, DollarSign } from 'lucide-react'
 import { Button } from '../components/ui/button'
 import { useConfigStore } from '../stores/config'
@@ -958,14 +958,13 @@ export default function Configure() {
                       <p className="text-sm text-gray-400">Prepended before input document in prompt</p>
                     </div>
                   </div>
-                  <a 
-                    href="/content" 
-                    target="_blank"
+                  <Link 
+                    to="/content" 
                     className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 rounded transition-colors"
                   >
                     <ExternalLink className="w-3 h-3" />
                     Library
-                  </a>
+                  </Link>
                 </div>
 
                 <div className="p-4">
@@ -1033,22 +1032,21 @@ export default function Configure() {
                     <>
                       <div className="flex items-center justify-between mb-3">
                         <span className="text-sm text-gray-400">Select documents to process</span>
-                        <a 
-                          href="/content" 
-                          target="_blank"
+                        <Link 
+                          to="/content" 
                           className="inline-flex items-center gap-2 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-sm transition-colors"
                         >
                           <ExternalLink className="w-4 h-4" />
                           Add Documents
-                        </a>
+                        </Link>
                       </div>
                       {inputDocuments.length === 0 ? (
                         <div className="text-center py-6 text-gray-400">
                           <FileText className="w-8 h-8 mx-auto mb-2 opacity-50" />
                           <p className="text-sm">No input documents in library</p>
-                          <a href="/content" className="text-blue-400 hover:text-blue-300 text-sm mt-1 inline-block">
+                          <Link to="/content" className="text-blue-400 hover:text-blue-300 text-sm mt-1 inline-block">
                             Create one in Content Library →
-                          </a>
+                          </Link>
                         </div>
                       ) : (
                         <div className="grid gap-2 max-h-48 overflow-y-auto">
