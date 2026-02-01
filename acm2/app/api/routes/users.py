@@ -2,18 +2,37 @@
 User Management Endpoints
 
 Handles user creation and API key generation for WordPress integration.
+
+NO MASTER DATABASE - Uses:
+- user_registry for in-memory user tracking
+- Individual user_{id}.db files for each user's data
+- API keys with embedded user_id for O(1) lookup
+
+AUTHENTICATION LOGIC:
+- User creation: ONLY via plugin secret (X-ACM2-Plugin-Secret header)
+  This is WordPress-only - the plugin secret is permanent and reusable.
+  API keys CANNOT create users.
+- All other operations: Via API key (X-ACM2-API-Key header)
 """
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, HTTPException, status, Depends, Request
 from pydantic import BaseModel, EmailStr
 from typing import Optional
+import logging
+import os
+import aiosqlite
 
-from app.db.master import get_master_db
-from app.auth.api_keys import generate_api_key
+from app.auth.api_keys import generate_api_key, verify_api_key, extract_user_id
+from app.auth.user_registry import (
+    get_user_count, register_user, construct_db_path, user_exists, get_data_dir
+)
 from app.db.seed_user import initialize_user
 from app.auth.middleware import get_current_user
 from app.infra.db.session import get_user_session_by_id
 from app.infra.db.models.user_meta import UserMeta
+from app.config import get_settings, Settings
 from sqlalchemy import select
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Users"])
 
@@ -34,61 +53,317 @@ class CreateUserResponse(BaseModel):
     message: str
 
 
+# NOTE: Plugin secret is NOT one-time use anymore.
+# It is a permanent WordPress-only key for creating users.
+# Only WordPress (with the plugin secret) can create users - not API keys.
+
+
+async def _resync_existing_user(user_id: int, user_data: CreateUserRequest) -> CreateUserResponse:
+    """
+    Resync an existing user by generating a new API key.
+    
+    This is called when WordPress tries to create a user that already exists.
+    Instead of failing, we generate a fresh API key and return it.
+    This allows the "Sync All Users" button to fix broken/old keys.
+    """
+    logger.info(f"[RESYNC] Starting resync for user {user_id}")
+    
+    db_path = construct_db_path(user_id)
+    
+    # Generate new API key with embedded user_id
+    plaintext_key, key_hash, key_prefix = generate_api_key(user_id)
+    logger.info(f"[RESYNC] New API key generated with prefix: {key_prefix}")
+    
+    # Deactivate old keys and insert new one
+    async with aiosqlite.connect(db_path) as conn:
+        # Deactivate all existing keys for this user
+        await conn.execute("UPDATE api_keys SET is_active = 0")
+        logger.info("[RESYNC] Deactivated old API keys")
+        
+        # Insert new key
+        await conn.execute(
+            """
+            INSERT INTO api_keys (key_hash, key_prefix, name, is_active)
+            VALUES (?, ?, ?, 1)
+            """,
+            (key_hash, key_prefix, f"WordPress API Key for {user_data.username} (resynced)")
+        )
+        
+        # Update user_meta with latest username/email
+        import uuid
+        from datetime import datetime
+        now = datetime.utcnow().isoformat()
+        await conn.execute(
+            """
+            UPDATE user_meta SET 
+                username = ?,
+                email = ?,
+                updated_at = ?
+            WHERE user_id = ?
+            """,
+            (user_data.username, user_data.email, now, user_id)
+        )
+        
+        await conn.commit()
+        logger.info("[RESYNC] New API key saved, user_meta updated")
+    
+    logger.info(f"[RESYNC] Resync complete for user {user_id}")
+    
+    return CreateUserResponse(
+        user_id=user_id,
+        username=user_data.username,
+        email=user_data.email,
+        api_key=plaintext_key,
+        message="User resynced - new API key generated"
+    )
+
+
+async def _authorize_user_creation(request: Request) -> Optional[dict]:
+    """
+    Authorize user creation request. Returns the authenticated user if applicable.
+    
+    Authorization logic:
+    1. If no users exist: require valid plugin secret
+    2. If users exist: require valid API key (any authenticated user)
+    
+    Returns:
+        None - always returns None since only plugin secret can authorize.
+        
+    Raises:
+        HTTPException if not authorized
+    """
+    logger.info("[USER_CREATE] ========================================")
+    logger.info("[USER_CREATE] AUTHORIZATION CHECK STARTING")
+    logger.info("[USER_CREATE] ========================================")
+    
+    settings = get_settings()
+    # User creation is ONLY allowed via plugin secret (WordPress)
+    # API keys cannot create users - this is a WordPress-only operation
+    
+    logger.info("[USER_CREATE] ----------------------------------------")
+    logger.info("[USER_CREATE] AUTH MODE: PLUGIN SECRET REQUIRED (WordPress only)")
+    logger.info("[USER_CREATE] ----------------------------------------")
+    
+    # Validate plugin secret is configured
+    logger.info("[USER_CREATE] Checking if ACM2_PLUGIN_SECRET is configured in settings...")
+    if not settings.acm2_plugin_secret:
+        logger.error("[USER_CREATE] DENIED: ACM2_PLUGIN_SECRET is not configured in .env!")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="ACM2_PLUGIN_SECRET not configured on backend. Add it to .env file."
+        )
+    logger.info(f"[USER_CREATE] ACM2_PLUGIN_SECRET is configured (prefix: {settings.acm2_plugin_secret[:15]}...)")
+    
+    # Validate plugin secret from request header
+    logger.info("[USER_CREATE] Checking X-ACM2-Plugin-Secret header from request...")
+    plugin_secret = request.headers.get("X-ACM2-Plugin-Secret")
+    
+    if not plugin_secret:
+        logger.error("[USER_CREATE] DENIED: X-ACM2-Plugin-Secret header is missing!")
+        logger.error("[USER_CREATE] Only WordPress can create users via plugin secret")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User creation requires X-ACM2-Plugin-Secret header (WordPress only)"
+        )
+    logger.info(f"[USER_CREATE] X-ACM2-Plugin-Secret header received (prefix: {plugin_secret[:15]}...)")
+    
+    # Compare secrets
+    logger.info("[USER_CREATE] Comparing plugin secret from header with configured secret...")
+    if plugin_secret != settings.acm2_plugin_secret:
+        logger.error("[USER_CREATE] DENIED: Plugin secret does not match!")
+        logger.error(f"[USER_CREATE] Expected prefix: {settings.acm2_plugin_secret[:15]}...")
+        logger.error(f"[USER_CREATE] Received prefix: {plugin_secret[:15]}...")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid plugin secret"
+        )
+    
+    logger.info("[USER_CREATE] ========================================")
+    logger.info("[USER_CREATE] AUTHORIZATION SUCCESS: Plugin secret valid")
+    logger.info("[USER_CREATE] WordPress authorized to create user")
+    logger.info("[USER_CREATE] ========================================")
+    return None  # Authorized via plugin secret
+
+
 @router.post("/users", response_model=CreateUserResponse, status_code=status.HTTP_201_CREATED)
-async def create_user(request: CreateUserRequest):
+async def create_user(request: Request, user_data: CreateUserRequest):
     """
     Create a new ACM2 user and generate an API key.
     
+    AUTHORIZATION:
+    - Requires X-ACM2-Plugin-Secret header (WordPress only)
+    - Only WordPress can create users - API keys cannot create users
+    
     This endpoint is called by WordPress when a new user is created.
-    It creates the user in the master database, generates an API key,
+    It creates the user database, generates an API key,
     and initializes their user database.
     """
-    master_db = await get_master_db()
+    import traceback as tb
+    
+    logger.info("[USER_CREATE] ################################################################")
+    logger.info("[USER_CREATE] ################################################################")
+    logger.info("[USER_CREATE] POST /api/v1/users - CREATE USER REQUEST RECEIVED")
+    logger.info("[USER_CREATE] ################################################################")
+    logger.info("[USER_CREATE] ################################################################")
+    
+    # Log ALL request details
+    logger.info("[USER_CREATE] === REQUEST DETAILS ===")
+    logger.info(f"[USER_CREATE] Request method: {request.method}")
+    logger.info(f"[USER_CREATE] Request URL: {request.url}")
+    logger.info(f"[USER_CREATE] Request path: {request.url.path}")
+    logger.info(f"[USER_CREATE] Client host: {request.client.host if request.client else 'Unknown'}")
+    logger.info(f"[USER_CREATE] Client port: {request.client.port if request.client else 'Unknown'}")
+    
+    # Log ALL headers
+    logger.info("[USER_CREATE] === REQUEST HEADERS ===")
+    for header_name, header_value in request.headers.items():
+        # Mask sensitive headers
+        if 'secret' in header_name.lower() or 'key' in header_name.lower():
+            masked_value = header_value[:20] + '...' if len(header_value) > 20 else header_value
+            logger.info(f"[USER_CREATE] Header: {header_name} = {masked_value}")
+        else:
+            logger.info(f"[USER_CREATE] Header: {header_name} = {header_value}")
+    
+    # Log request body (parsed)
+    logger.info("[USER_CREATE] === REQUEST BODY (parsed) ===")
+    logger.info(f"[USER_CREATE] user_data type: {type(user_data)}")
+    logger.info(f"[USER_CREATE] user_data.username = {repr(user_data.username)}")
+    logger.info(f"[USER_CREATE] user_data.email = {repr(user_data.email)}")
+    logger.info(f"[USER_CREATE] user_data.wordpress_user_id = {repr(user_data.wordpress_user_id)}")
+    
+    # Log environment check
+    logger.info("[USER_CREATE] === ENVIRONMENT CHECK ===")
+    try:
+        settings = get_settings()
+        logger.info(f"[USER_CREATE] Settings loaded successfully: {settings}")
+        logger.info(f"[USER_CREATE] settings.acm2_plugin_secret is set: {settings.acm2_plugin_secret is not None}")
+        if settings.acm2_plugin_secret:
+            logger.info(f"[USER_CREATE] settings.acm2_plugin_secret prefix: {settings.acm2_plugin_secret[:20]}...")
+        else:
+            logger.warning("[USER_CREATE] settings.acm2_plugin_secret is None/empty!")
+        logger.info(f"[USER_CREATE] settings.encryption_key is set: {settings.encryption_key is not None}")
+        logger.info(f"[USER_CREATE] settings.seed_preset_id = {settings.seed_preset_id}")
+        logger.info(f"[USER_CREATE] settings.seed_version = {settings.seed_version}")
+    except Exception as e:
+        logger.error(f"[USER_CREATE] ERROR loading settings: {e}")
+        logger.error(f"[USER_CREATE] Settings traceback:\n{tb.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Failed to load settings: {e}")
+    
+    # Authorize the request (plugin secret only - WordPress only)
+    # API keys cannot create users
+    logger.info("[USER_CREATE] === STARTING AUTHORIZATION ===")
+    logger.info("[USER_CREATE] Calling _authorize_user_creation()...")
     
     try:
-        # Check if user already exists
-        if request.wordpress_user_id:
-            existing_user = await master_db.get_user_by_wordpress_id(request.wordpress_user_id)
-            if existing_user:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=f"User with WordPress ID {request.wordpress_user_id} already exists"
-                )
+        authenticated_user = await _authorize_user_creation(request)
+        logger.info(f"[USER_CREATE] _authorize_user_creation() returned: {authenticated_user}")
+    except HTTPException as he:
+        logger.error(f"[USER_CREATE] Authorization failed with HTTPException: {he.status_code} - {he.detail}")
+        raise
+    except Exception as e:
+        logger.error(f"[USER_CREATE] Authorization failed with unexpected error: {e}")
+        logger.error(f"[USER_CREATE] Authorization traceback:\n{tb.format_exc()}")
+        raise
+    
+    if authenticated_user:
+        logger.info(f"[USER_CREATE] Authorized by user: {authenticated_user['username']} (ID: {authenticated_user['id']})")
+    else:
+        logger.info("[USER_CREATE] Authorized by plugin secret (first user creation)")
+    
+    is_first_user = authenticated_user is None  # If no authenticated user, this is first user via plugin secret
+    logger.info(f"[USER_CREATE] is_first_user = {is_first_user}")
+    
+    try:
+        # Determine user_id - use wordpress_user_id if provided, otherwise generate next ID
+        logger.info("[USER_CREATE] === DETERMINING USER ID ===")
+        if user_data.wordpress_user_id:
+            user_id = user_data.wordpress_user_id
+            logger.info(f"[USER_CREATE] Using wordpress_user_id as user_id: {user_id}")
+            
+            # Check if this user already exists - if so, resync (generate new key)
+            if user_exists(user_id):
+                logger.info(f"[USER_CREATE] User {user_id} exists - RESYNC MODE (generating new API key)")
+                return await _resync_existing_user(user_id, user_data)
+        else:
+            # Generate next available user_id
+            from app.auth.user_registry import get_all_user_ids
+            existing_ids = get_all_user_ids()
+            user_id = max(existing_ids, default=0) + 1
+            logger.info(f"[USER_CREATE] Generated new user_id: {user_id}")
         
-        # Check if email already exists
-        existing_email = await master_db.get_user_by_email(request.email)
-        if existing_email:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"User with email {request.email} already exists"
-            )
+        # Register user in memory registry
+        logger.info("[USER_CREATE] ----------------------------------------")
+        logger.info("[USER_CREATE] REGISTERING USER IN MEMORY REGISTRY")
+        logger.info("[USER_CREATE] ----------------------------------------")
+        db_path = register_user(user_id)
+        logger.info(f"[USER_CREATE] User {user_id} registered, db_path: {db_path}")
         
-        # Create user in master database
-        user_id = await master_db.create_user(
-            username=request.username,
-            email=request.email,
-            wordpress_user_id=request.wordpress_user_id
-        )
+        # Generate API key with embedded user_id
+        logger.info("[USER_CREATE] ----------------------------------------")
+        logger.info("[USER_CREATE] GENERATING API KEY")
+        logger.info("[USER_CREATE] ----------------------------------------")
+        logger.info(f"[USER_CREATE] Calling generate_api_key(user_id={user_id})...")
+        plaintext_key, key_hash, key_prefix = generate_api_key(user_id)
+        logger.info(f"[USER_CREATE] API key generated with prefix: {key_prefix}")
         
-        # Generate API key
-        plaintext_key, key_hash, key_prefix = generate_api_key()
-        
-        # Save API key to master database
-        await master_db.create_api_key(
-            user_id=user_id,
-            key_hash=key_hash,
-            key_prefix=key_prefix,
-            name=f"WordPress API Key for {request.username}"
-        )
-        
-        # Initialize user's personal database and seed with default preset/run
-        # initialize_user handles both per-user SQLite and shared DB seeding
+        # Initialize user's personal database (this creates the file and tables)
+        logger.info("[USER_CREATE] ----------------------------------------")
+        logger.info("[USER_CREATE] INITIALIZING USER DATABASE")
+        logger.info("[USER_CREATE] ----------------------------------------")
+        logger.info(f"[USER_CREATE] Calling initialize_user({user_id})...")
         await initialize_user(user_id)
+        logger.info("[USER_CREATE] User database initialized and seeded")
+        
+        # Save API key to user's database
+        logger.info("[USER_CREATE] ----------------------------------------")
+        logger.info("[USER_CREATE] SAVING API KEY TO USER DATABASE")
+        logger.info("[USER_CREATE] ----------------------------------------")
+        async with aiosqlite.connect(db_path) as conn:
+            await conn.execute(
+                """
+                INSERT INTO api_keys (key_hash, key_prefix, name, is_active)
+                VALUES (?, ?, ?, 1)
+                """,
+                (key_hash, key_prefix, f"WordPress API Key for {user_data.username}")
+            )
+            await conn.commit()
+            logger.info("[USER_CREATE] API key saved to user's database")
+            
+            # Create or update user_meta with username, email, and ready status
+            logger.info("[USER_CREATE] Creating/updating user_meta with username, email, and ready status...")
+            import uuid
+            from datetime import datetime
+            meta_id = str(uuid.uuid4())
+            now = datetime.utcnow().isoformat()
+            await conn.execute(
+                """
+                INSERT INTO user_meta (id, user_id, username, email, seed_status, seed_version, seeded_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, 'ready', '1.0.0', ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET 
+                    username = excluded.username,
+                    email = excluded.email,
+                    seed_status = 'ready',
+                    seeded_at = excluded.seeded_at,
+                    updated_at = excluded.updated_at
+                """,
+                (meta_id, user_id, user_data.username, user_data.email, now, now, now)
+            )
+            await conn.commit()
+            logger.info("[USER_CREATE] user_meta created/updated with ready status")
+        
+        logger.info("[USER_CREATE] ========================================")
+        logger.info("[USER_CREATE] USER CREATION COMPLETE")
+        logger.info(f"[USER_CREATE] user_id={user_id}")
+        logger.info(f"[USER_CREATE] username={user_data.username}")
+        logger.info(f"[USER_CREATE] email={user_data.email}")
+        logger.info(f"[USER_CREATE] api_key_prefix={key_prefix}")
+        logger.info(f"[USER_CREATE] is_first_user={is_first_user}")
+        logger.info("[USER_CREATE] ========================================")
         
         return CreateUserResponse(
             user_id=user_id,
-            username=request.username,
-            email=request.email,
+            username=user_data.username,
+            email=user_data.email,
             api_key=plaintext_key,
             message="User created successfully"
         )
@@ -96,6 +371,8 @@ async def create_user(request: CreateUserRequest):
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"[USER_CREATE] FATAL ERROR: {str(e)}")
+        logger.exception("[USER_CREATE] Full traceback:")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create user: {str(e)}"
@@ -109,26 +386,36 @@ async def get_current_user_info(user: dict = Depends(get_current_user)):
     
     Requires authentication via X-ACM2-API-Key header.
     """
+    logger.info("[USER_ME] ========================================")
+    logger.info("[USER_ME] GET /api/v1/users/me - GET CURRENT USER")
+    logger.info("[USER_ME] ========================================")
+    logger.info(f"[USER_ME] Authenticated user: {user.get('username')} (ID: {user['id']})")
+    
+    logger.info("[USER_ME] Opening user session to check user meta...")
     async with get_user_session_by_id(user["id"]) as session:
         result = await session.execute(
             select(UserMeta).where(UserMeta.user_id == user["id"])
         )
         meta = result.scalar_one_or_none()
+        logger.info(f"[USER_ME] User meta found: {meta is not None}")
 
         if not meta or meta.seed_status != "ready":
+            logger.info("[USER_ME] User not seeded or not ready, calling initialize_user()...")
             await initialize_user(user["id"])
             result = await session.execute(
                 select(UserMeta).where(UserMeta.user_id == user["id"])
             )
             meta = result.scalar_one_or_none()
+            logger.info(f"[USER_ME] After initialization, meta found: {meta is not None}")
 
     if not meta or meta.seed_status != "ready":
+        logger.warning("[USER_ME] User setup still in progress")
         raise HTTPException(
             status_code=status.HTTP_425_TOO_EARLY,
             detail="User setup in progress"
         )
 
-    return {
+    response_data = {
         "user_id": user["id"],
         "username": user.get("username"),
         "email": user.get("email"),
@@ -136,3 +423,7 @@ async def get_current_user_info(user: dict = Depends(get_current_user)):
         "seed_version": meta.seed_version,
         "seeded_at": meta.seeded_at.isoformat() if meta.seeded_at else None,
     }
+    logger.info(f"[USER_ME] Returning user info: {response_data}")
+    logger.info("[USER_ME] ========================================")
+    
+    return response_data

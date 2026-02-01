@@ -134,7 +134,7 @@ async def _get_or_create_user_engine(user_id: int):
 
         # Initialize tables for this user's database
         from app.infra.db.base import Base
-        from app.infra.db.models import preset, run, document, artifact, content, github_connection, user_meta, user_settings  # noqa: F401
+        from app.infra.db.models import preset, run, document, artifact, content, github_connection, user_meta, user_settings, api_key  # noqa: F401
 
         async with user_engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)

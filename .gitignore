@@ -13,7 +13,12 @@ build/
 ui/dist/
 app/static/assets/
 logs/
+# Ignore all .db files except seed.db
 *.db
+!**/seed.db
+# SQLite WAL files for user databases
+data/user_*.db-wal
+data/user_*.db-shm
 server.log
 server.err
 screenshots/

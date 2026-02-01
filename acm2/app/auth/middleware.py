@@ -3,14 +3,19 @@ Authentication Middleware
 
 FastAPI dependency for authenticating requests via API key.
 Uses in-memory caching to avoid repeated bcrypt checks.
+
+NEW: Uses embedded user_id in API key format for O(1) database lookup.
+No master database required - user_id is parsed from key.
 """
 from fastapi import Header, HTTPException, status
 from typing import Optional, Dict, Any
 import logging
 import time
+import aiosqlite
+from pathlib import Path
 
-from app.db.master import get_master_db
-from app.auth.api_keys import is_valid_key_format, validate_api_key
+from app.auth.api_keys import is_valid_key_format, validate_api_key, extract_user_id
+from app.auth.user_registry import get_user_db_path, user_exists, construct_db_path
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +63,12 @@ async def get_current_user(
     
     Uses in-memory caching to avoid repeated DB lookups and bcrypt checks.
     
+    NEW FLOW (no master database):
+    1. Parse user_id from API key (format: acm2_u{user_id}_{random})
+    2. Open user_{user_id}.db directly
+    3. Look up key hash in user's api_keys table
+    4. Validate with bcrypt
+    
     Usage:
         @app.get("/api/v1/runs")
         async def list_runs(user: dict = Depends(get_current_user)):
@@ -68,63 +79,118 @@ async def get_current_user(
         x_acm2_api_key: API key from X-ACM2-API-Key header
         
     Returns:
-        User dict from master database
+        User dict with id, username, email
         
     Raises:
         AuthenticationError: If authentication fails
     """
+    logger.info("[AUTH] ========================================")
+    logger.info("[AUTH] get_current_user() called")
+    logger.info("[AUTH] ========================================")
+    
     # Check if key provided
     if not x_acm2_api_key:
-        logger.warning("Request missing API key")
+        logger.warning("[AUTH] Request missing API key")
         raise AuthenticationError("API key required")
+    
+    logger.info(f"[AUTH] API key prefix: {x_acm2_api_key[:20] if len(x_acm2_api_key) >= 20 else x_acm2_api_key}...")
     
     # Check cache first (instant return if cached)
     cached_user = _get_cached_user(x_acm2_api_key)
     if cached_user:
+        logger.info(f"[AUTH] Cache HIT for user {cached_user.get('id')}")
         return cached_user
+    
+    logger.info("[AUTH] Cache MISS, validating key...")
     
     # Validate format
     if not is_valid_key_format(x_acm2_api_key):
-        logger.warning(f"Invalid API key format: {x_acm2_api_key[:12]}...")
+        logger.warning(f"[AUTH] Invalid API key format: {x_acm2_api_key[:20]}...")
         raise AuthenticationError("Invalid API key format")
     
-    # Extract key prefix for efficient lookup (first 12 chars)
-    key_prefix = x_acm2_api_key[:12]
+    # Extract user_id from key (O(1) - just regex parse)
+    user_id = extract_user_id(x_acm2_api_key)
+    if user_id is None:
+        logger.warning("[AUTH] Could not extract user_id from key")
+        raise AuthenticationError("Invalid API key format")
     
-    # Get master database
-    master_db = await get_master_db()
+    logger.info(f"[AUTH] Extracted user_id={user_id} from key")
     
-    # Look up the specific key by prefix (single row, single bcrypt check)
-    async with master_db.get_connection() as conn:
-        async with conn.cursor() as cursor:
-            await cursor.execute(
-                "SELECT key_hash, user_id FROM api_keys WHERE key_prefix = %s AND revoked_at IS NULL",
-                (key_prefix,)
+    # Construct database path directly (O(1) - string concatenation)
+    db_path = construct_db_path(user_id)
+    logger.info(f"[AUTH] User database path: {db_path}")
+    
+    if not db_path.exists():
+        logger.warning(f"[AUTH] User database does not exist: {db_path}")
+        raise AuthenticationError("Invalid API key")
+    
+    # Look up key hash in user's database
+    logger.info("[AUTH] Looking up key hash in user's database...")
+    try:
+        async with aiosqlite.connect(db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            
+            # Get all active API keys for this user (should be small number)
+            cursor = await conn.execute(
+                "SELECT key_hash FROM api_keys WHERE is_active = 1 AND revoked_at IS NULL"
             )
-            row = await cursor.fetchone()
+            rows = await cursor.fetchall()
+            logger.info(f"[AUTH] Found {len(rows)} active API keys for user {user_id}")
+            
+            # Check each key hash (usually just 1-2 keys per user)
+            valid_key_found = False
+            for row in rows:
+                stored_hash = row['key_hash']
+                if validate_api_key(x_acm2_api_key, stored_hash):
+                    valid_key_found = True
+                    logger.info("[AUTH] Key hash MATCHED")
+                    
+                    # Update last_used_at
+                    await conn.execute(
+                        "UPDATE api_keys SET last_used_at = CURRENT_TIMESTAMP WHERE key_hash = ?",
+                        (stored_hash,)
+                    )
+                    await conn.commit()
+                    break
+            
+            if not valid_key_found:
+                logger.warning(f"[AUTH] No matching key hash for user {user_id}")
+                raise AuthenticationError("Invalid API key")
+            
+            # Get user info from user_meta table
+            cursor = await conn.execute(
+                "SELECT username, email FROM user_meta LIMIT 1"
+            )
+            user_meta = await cursor.fetchone()
+            
+            if user_meta:
+                user = {
+                    'id': user_id,
+                    'username': user_meta['username'],
+                    'email': user_meta['email']
+                }
+            else:
+                # Fallback if no user_meta
+                user = {
+                    'id': user_id,
+                    'username': f'user_{user_id}',
+                    'email': None
+                }
+            
+            logger.info(f"[AUTH] User authenticated: {user}")
     
-    if not row:
-        logger.warning(f"No API key found with prefix: {key_prefix}...")
-        raise AuthenticationError("Invalid API key")
-    
-    stored_hash, user_id = row
-    
-    # Single bcrypt check against the matching key
-    if not validate_api_key(x_acm2_api_key, stored_hash):
-        logger.warning(f"Invalid API key (hash mismatch): {key_prefix}...")
-        raise AuthenticationError("Invalid API key")
-    
-    # Get user from master database and update last_used_at
-    user = await master_db.get_user_by_api_key_hash(stored_hash)
-    
-    if not user:
-        logger.error(f"User not found for valid API key (user_id: {user_id})")
-        raise AuthenticationError("User not found")
+    except aiosqlite.Error as e:
+        logger.error(f"[AUTH] Database error: {e}")
+        raise AuthenticationError("Authentication failed")
     
     # Cache the authenticated user for future requests
     _cache_user(x_acm2_api_key, user)
+    logger.info(f"[AUTH] Cached user {user_id}")
     
-    logger.info(f"Authenticated user {user_id} ({user.get('username', 'unknown')})")
+    logger.info("[AUTH] ========================================")
+    logger.info(f"[AUTH] SUCCESS: Authenticated user {user_id}")
+    logger.info("[AUTH] ========================================")
+    
     return user
 
 

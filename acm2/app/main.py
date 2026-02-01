@@ -22,11 +22,11 @@ from fastapi.exceptions import RequestValidationError
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from .api.router import api_router
-from .infra.db.session import engine, async_session_factory
+from .infra.db.session import engine, get_user_session_by_id
 from .infra.db.models import Base
 from .infra.db.repositories import PresetRepository, DocumentRepository, RunRepository
 from .config import get_settings
-from .db.master import get_master_db
+from .auth.user_registry import load_registry, get_all_user_ids
 # Per-user auth is now handled per-route via Depends(get_current_user)
 # from .middleware.auth import ApiKeyMiddleware, RateLimitMiddleware
 
@@ -69,42 +69,45 @@ async def lifespan(app: FastAPI):
     if not settings.seed_preset_id or not settings.seed_version:
         raise RuntimeError("Seed package settings missing: SEED_PRESET_ID and SEED_VERSION are required")
     
-    # Initialize database tables
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    logger.info("Database tables initialized")
+    # Load user registry from filesystem (scan for user_*.db files)
+    logger.info("Loading user registry from filesystem...")
+    user_count = load_registry()
+    logger.info(f"User registry loaded: {user_count} users found")
+    
+    # Verify seed database exists
+    if not settings.seed_database_path.exists():
+        logger.warning(f"Seed database not found at {settings.seed_database_path} - new users will not be seeded!")
+    else:
+        logger.info(f"Seed database found at {settings.seed_database_path}")
     
     # ORPHAN RECOVERY: Mark any 'running' runs as failed (they were orphaned by server restart)
-    # NOTE: This intentionally uses unscoped session to query ALL users' runs at startup.
-    # This is an admin-level operation that runs once at server start, not per-user.
-    async with async_session_factory() as session:
-        run_repo = RunRepository(session)  # Intentionally unscoped for cross-user orphan recovery
-        orphaned_runs = await run_repo.get_active_runs()
-        for run in orphaned_runs:
-            if run.status == "running":
-                logger.warning(f"Marking orphaned run {run.id} as failed (was still 'running' when server started)")
-                await run_repo.fail(run.id, error_message="Run orphaned by server restart. The server was restarted while this run was in progress.")
-        if orphaned_runs:
-            logger.info(f"Orphan recovery complete: marked {len([r for r in orphaned_runs if r.status == 'running'])} orphaned runs as failed")
+    # Iterate over all per-user databases since runs are stored per-user.
+    all_user_ids = get_all_user_ids()
+    total_orphaned = 0
+    for uid in all_user_ids:
+        try:
+            async with get_user_session_by_id(uid) as session:
+                run_repo = RunRepository(session, user_id=uid)
+                orphaned_runs = await run_repo.get_active_runs()
+                for run in orphaned_runs:
+                    if run.status == "running":
+                        logger.warning(f"Marking orphaned run {run.id} (user {uid}) as failed")
+                        await run_repo.fail(run.id, error_message="Run orphaned by server restart. The server was restarted while this run was in progress.")
+                        total_orphaned += 1
+        except Exception as e:
+            logger.warning(f"Failed to check orphaned runs for user {uid}: {e}")
     
-    # NO DEFAULT PRESET SEEDING
-    # All presets must be created through the GUI. 
-    # The GUI is the ONLY source of truth for presets.
-    # No hardcoded defaults, samples, or placeholders are permitted.
+    if total_orphaned > 0:
+        logger.info(f"Orphan recovery complete: marked {total_orphaned} orphaned runs as failed")
+    
+    # Seeding is now handled per-user via seed.db when users access the API
+    # See app/db/seed_user.py for the seeding logic
     
     # Startup complete
     yield
     
     # Shutdown
     await engine.dispose()
-    
-    # Close master MySQL pool
-    try:
-        master_db = await get_master_db()
-        await master_db.close()
-        logger.info("Master database pool closed")
-    except Exception as e:
-        logger.warning(f"Error closing master DB pool: {e}")
     
     logger.info("Shutting down ACM2 API server...")
 
@@ -135,6 +138,9 @@ def create_app() -> FastAPI:
         "http://127.0.0.1",        # WordPress on port 80
         "http://localhost:80",
         "http://127.0.0.1:80",
+        # Production WordPress frontend
+        "http://16.145.206.59",
+        "https://16.145.206.59",
     ]
     # Add any custom origins from environment (for production deployment)
     extra_origins = os.environ.get("ACM2_CORS_ORIGINS", "")
@@ -168,6 +174,20 @@ def create_app() -> FastAPI:
         return JSONResponse(
             status_code=422,
             content={"detail": exc.errors()},
+        )
+    
+    # Generic exception handler - log full traceback for debugging
+    @app.exception_handler(Exception)
+    async def generic_exception_handler(request: Request, exc: Exception):
+        import traceback
+        tb = traceback.format_exc()
+        logger.error(f"[UNHANDLED EXCEPTION] {request.method} {request.url.path}")
+        logger.error(f"[UNHANDLED EXCEPTION] Exception type: {type(exc).__name__}")
+        logger.error(f"[UNHANDLED EXCEPTION] Exception message: {str(exc)}")
+        logger.error(f"[UNHANDLED EXCEPTION] Full traceback:\n{tb}")
+        return JSONResponse(
+            status_code=500,
+            content={"detail": f"Internal server error: {type(exc).__name__}: {str(exc)}"},
         )
     
     # ---------------------------------------------------------------------

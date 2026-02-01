@@ -786,3 +786,470 @@ Get-Process python -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd c:\devlop\acm2\acm2; python cli.py serve"
 ```
 
+
+
+---
+
+## 14) Frontend Development Environment Setup
+
+This section covers setting up a development environment on an EC2 Windows instance using VS Code Remote Tunnels.
+
+### 14.1 SSH into EC2 via AWS Web Console
+
+1. Go to **AWS Console** → **EC2** → **Instances**
+2. Select your Windows instance
+3. Click **Connect** → **RDP client** tab (or use **Session Manager** if configured)
+4. For web-based access: Use **EC2 Instance Connect** or **Fleet Manager Remote Desktop**
+
+### 14.2 Install VS Code CLI (Headless Remote Tunnel Host)
+
+Run these commands in PowerShell on the EC2 instance:
+
+```powershell
+# 1. Download VS Code CLI
+Invoke-WebRequest -Uri "https://code.visualstudio.com/sha/download?build=stable&os=cli-win32-x64" -OutFile "$env:TEMP\vscode-cli.zip"
+
+# 2. Extract to a permanent location
+Expand-Archive -Path "$env:TEMP\vscode-cli.zip" -DestinationPath "C:\vscode-cli" -Force
+
+# 3. Add to PATH (current session)
+$env:Path += ";C:\vscode-cli"
+
+# 4. Add to PATH (permanent - requires admin)
+[Environment]::SetEnvironmentVariable("Path", $env:Path + ";C:\vscode-cli", [EnvironmentVariableTarget]::Machine)
+```
+
+### 14.3 Start the Remote Tunnel and Login via GitHub
+
+```powershell
+# Start the tunnel service (will prompt for GitHub login)
+code tunnel
+
+# First run will display:
+# "To grant access to the server, please log into https://github.com/login/device
+#  and use code: XXXX-XXXX"
+```
+
+**Steps:**
+1. Copy the device code shown in the terminal
+2. Open https://github.com/login/device in your browser
+3. Paste the code and authorize "Visual Studio Code"
+4. The tunnel will connect and show: `Connected to tunnel: <machine-name>`
+
+### 14.4 Connect from Local VS Code
+
+1. Open VS Code on your local machine
+2. Install the **Remote - Tunnels** extension (if not already installed)
+3. Press `F1` → **Remote-Tunnels: Connect to Tunnel...**
+4. Sign in with the same GitHub account
+5. Select your EC2 machine from the list
+6. VS Code opens a remote session to the EC2 instance
+
+### 14.5 Run Tunnel as Background Service (Optional)
+
+To keep the tunnel running after you disconnect:
+
+```powershell
+# Install as a Windows service (run as Administrator)
+code tunnel service install
+
+# Start the service
+code tunnel service start
+
+# Check service status
+Get-Service -Name "code-tunnel" -ErrorAction SilentlyContinue
+
+# Uninstall service if needed
+code tunnel service uninstall
+```
+
+### 14.6 Verification
+
+Once connected via VS Code Remote Tunnel:
+- Open terminal in VS Code: `Ctrl+` `
+- Navigate to project: `cd c:\devlop\acm2`
+- Verify server is running: `netstat -ano | findstr :80`
+
+---
+
+## 15) Frontend Development Setup (Linux/Bitnami Lightsail)
+
+This is the recommended approach for setting up VS Code Remote Tunnel on a Linux Lightsail instance.
+
+### 15.1 Overview
+
+**Problem:** Copy-pasting multiple commands into a web SSH terminal is error-prone and tedious.
+
+**Solution:** Use VS Code's Remote-SSH extension to connect first, then let Copilot Chat run the tunnel installation commands. After the tunnel is installed, switch to using the tunnel for future connections.
+
+### 15.2 Prerequisites
+
+On your **local machine**:
+1. Install VS Code
+2. Install the **Remote - SSH** extension
+3. Install the **Remote - Tunnels** extension
+
+On **Lightsail**:
+1. Download your instance's SSH key from Lightsail console
+2. Note your instance's public IP address
+
+### 15.3 Connect via SSH (Bootstrap)
+
+1. Open VS Code locally
+2. Press `F1` → **Remote-SSH: Connect to Host...**
+3. Enter: `bitnami@YOUR_INSTANCE_IP`
+4. When prompted, select your downloaded `.pem` key file
+5. VS Code opens a remote session via SSH
+
+### 15.4 Install Tunnel via Copilot Chat
+
+Once connected via SSH, open Copilot Chat and say:
+
+> "Install VS Code tunnel on this Linux machine and start it"
+
+Copilot will run these commands:
+
+```bash
+cd /tmp
+curl -Lk "https://code.visualstudio.com/sha/download?build=stable&os=cli-linux-x64" -o code.tar.gz
+tar -xzf code.tar.gz
+sudo mv code /usr/local/bin/
+code tunnel
+```
+
+### 15.5 Authenticate the Tunnel
+
+When `code tunnel` runs, it will display:
+
+```
+To grant access to the server, please log into https://github.com/login/device
+and use code: XXXX-XXXX
+```
+
+1. Open https://github.com/login/device in your browser
+2. Enter the code shown in the terminal
+3. Authorize "Visual Studio Code"
+4. Terminal will show: `Connected to tunnel: <machine-name>`
+
+### 15.6 Switch from SSH to Tunnel
+
+1. Close the SSH connection (Close Remote Connection)
+2. Press `F1` → **Remote-Tunnels: Connect to Tunnel...**
+3. Sign in with the same GitHub account
+4. Select your machine from the list
+5. Done! You're now connected via tunnel
+
+### 15.7 Keep Tunnel Running (Optional)
+
+To run the tunnel as a background service so it persists after logout:
+
+```bash
+# Install as systemd service
+code tunnel service install
+
+# Start the service
+sudo systemctl start code-tunnel
+
+# Enable on boot
+sudo systemctl enable code-tunnel
+```
+
+### 15.8 Why Tunnel over SSH?
+
+| Feature | SSH | Tunnel |
+|---------|-----|--------|
+| Requires open port | Yes (22) | No |
+| Requires SSH key | Yes | No |
+| Works through firewalls | Sometimes | Always |
+| GitHub authentication | No | Yes |
+| Persistent connection | Manual | Automatic |
+
+---
+
+## 16) Clone Frontend Plugin Repo
+
+the repo is cloned in place in the wordpress plugin folder.
+the plugin folder has a sibling folder that is not a wordpressplugin.
+
+---
+
+## 18) VS Code Headless Tunnel — MVP Quick Install (Linux/Bitnami)
+
+Minimal steps to get VS Code remote tunnel running on a fresh Bitnami Lightsail instance.
+
+### Step 1: SSH into your instance via AWS web console
+
+### Step 2: Run these commands one at a time
+
+```bash
+cd ~
+
+curl -L "https://code.visualstudio.com/sha/download?build=stable&os=cli-alpine-x64" -o vscode_cli.tar.gz
+
+tar -xzf vscode_cli.tar.gz
+
+sudo mv code /usr/local/bin/
+
+rm vscode_cli.tar.gz
+
+code tunnel user login --provider github
+```
+
+**WAIT** — it will show a code. Go to https://github.com/login/device and enter it. Wait for "Successfully logged in".
+
+```bash
+code tunnel rename YOUR-TUNNEL-NAME
+```
+
+### Step 3: Start the tunnel
+
+```bash
+code tunnel
+```
+
+Leave this running. Connect from VS Code: Remote Explorer → Tunnels → YOUR-TUNNEL-NAME
+
+### Step 4: Ask Copilot to finish the install
+
+Once connected via VS Code tunnel, open Copilot Chat and say:
+
+> "Finish the VS Code tunnel install — set it up to run automatically as a service"
+
+Copilot will run the systemd commands to make the tunnel start on boot and run 24/7.
+
+### Step 4 (Manual Alternative): Run as background service
+
+To run 24/7 without keeping SSH open:
+
+```bash
+sudo bash -c 'cat > /etc/systemd/system/code-tunnel.service << EOF
+[Unit]
+Description=VS Code Remote Tunnel
+After=network.target
+
+[Service]
+Type=simple
+User=bitnami
+ExecStart=/usr/local/bin/code tunnel --accept-server-license-terms
+Restart=always
+RestartSec=10
+Environment=HOME=/home/bitnami
+
+[Install]
+WantedBy=multi-user.target
+EOF'
+
+sudo systemctl daemon-reload
+
+sudo systemctl enable code-tunnel
+
+sudo systemctl start code-tunnel
+
+sudo systemctl status code-tunnel
+```
+
+Should show "active (running)".
+
+---
+
+## 19) Connecting Backend to Frontend — Master Database Setup
+
+The ACM2 backend (Windows) must connect to the MySQL master database on the frontend (Bitnami WordPress) for user authentication and API key management.
+
+**IMPORTANT: Both instances are Lightsail — use PRIVATE IPs for MySQL connection!**
+- Private IPs stay within AWS network (more secure, faster, free)
+- No need to open port 3306 to public internet
+- Find private IPs: Lightsail Console → Instance → Networking tab
+
+**NOTE: Plugin auto-setup is NOT implemented yet.** The WordPress plugin does NOT automatically create the `acm2_master` database on activation. This is a future enhancement. For now, manual setup is required.
+
+### 19.1 Architecture Overview
+
+```
++-------------------------------------+     +-------------------------------------+
+|  FRONTEND (Bitnami WordPress)       |     |  BACKEND (Windows Lightsail)        |
+|  Public:  16.145.206.59             |     |  Public:  54.202.39.49              |
+|  Private: 172.26.x.x                |     |  Private: 172.26.y.y                |
+|                                     |     |                                     |
+|  +-----------------------------+    |     |  +-----------------------------+    |
+|  | WordPress + ACM2 Plugin     |    |     |  | ACM2 FastAPI Server         |    |
+|  | - Serves React frontend     |<---+-----+--| - API endpoints             |    |
+|  | - Proxies API requests      |    |     |  | - Run execution             |    |
+|  +-----------------------------+    |     |  +--------------+--------------+    |
+|                                     |     |                 |                   |
+|  +-----------------------------+    |     |                 |                   |
+|  | MySQL (Bitnami)             |<---+-----+-----------------+                   |
+|  | - acm2_master database      |    |     |  Backend connects via PRIVATE IP   |
+|  | - users table               |    |     |  (e.g., 172.26.x.x:3306)           |
+|  | - api_keys table            |    |     |                                     |
+|  +-----------------------------+    |     |  +-----------------------------+    |
+|                                     |     |  | SQLite (per-user)            |    |
++-------------------------------------+     |  | - user_6.db, user_7.db, etc |    |
+                                            |  | - presets, runs, documents  |    |
+                                            |  +-----------------------------+    |
+                                            +-------------------------------------+
+```
+
+### 19.2 Step 0: Get Private IPs
+
+On each Lightsail instance, find the private IP:
+
+```bash
+# On any Lightsail instance
+hostname -I
+# or check Lightsail Console -> Instance -> Networking
+```
+
+Example:
+- Frontend private IP: `172.26.10.50`
+- Backend private IP: `172.26.10.100`
+
+### 19.3 Step 1: Create ACM2 Master Database on Bitnami
+
+SSH into the Bitnami frontend server:
+
+```bash
+# Get MySQL root password
+cat /home/bitnami/bitnami_credentials
+
+# Connect to MySQL
+mysql -u root -p
+
+# Create database and tables
+CREATE DATABASE acm2_master CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+USE acm2_master;
+
+CREATE TABLE users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(255) NOT NULL UNIQUE,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    wordpress_user_id INT UNIQUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE api_keys (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    key_hash VARCHAR(255) NOT NULL UNIQUE,
+    key_prefix VARCHAR(20) NOT NULL,
+    name VARCHAR(255),
+    last_used_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    revoked_at TIMESTAMP NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_api_keys_hash ON api_keys(key_hash);
+CREATE INDEX idx_api_keys_user ON api_keys(user_id);
+CREATE INDEX idx_users_wordpress ON users(wordpress_user_id);
+```
+
+### 19.4 Step 2: Create MySQL User for Remote Access (Private IP)
+
+Still in MySQL on the Bitnami server:
+
+```sql
+-- Create user that can connect from the backend's PRIVATE IP
+-- Replace 172.26.10.100 with your backend's actual private IP
+CREATE USER 'acm2_backend'@'172.26.10.100' IDENTIFIED BY 'YOUR_STRONG_PASSWORD_HERE';
+
+-- Grant permissions on the acm2_master database
+GRANT SELECT, INSERT, UPDATE, DELETE ON acm2_master.* TO 'acm2_backend'@'172.26.10.100';
+
+FLUSH PRIVILEGES;
+
+-- Verify the user was created
+SELECT User, Host FROM mysql.user WHERE User = 'acm2_backend';
+
+EXIT;
+```
+
+### 19.5 Step 3: Configure MySQL to Listen on Private IP
+
+```bash
+# Check current MySQL bind address
+sudo netstat -tlnp | grep 3306
+
+# Edit MySQL config
+sudo nano /opt/bitnami/mysql/conf/my.cnf
+
+# Find bind-address and change to the frontend's PRIVATE IP:
+# bind-address = 172.26.10.50
+#
+# Or to listen on all interfaces:
+# bind-address = 0.0.0.0
+
+# Restart MySQL
+sudo /opt/bitnami/ctlscript.sh restart mysql
+
+# Verify MySQL is now listening on the private IP
+sudo netstat -tlnp | grep 3306
+```
+
+### 19.6 Step 4: Lightsail Firewall (Private Network)
+
+**Good news:** Lightsail instances in the same region can communicate on private IPs without firewall changes. The default Lightsail firewall only affects PUBLIC traffic.
+
+**No firewall changes needed** if using private IPs.
+
+(If you must use public IPs, add port 3306 in Lightsail Networking, restricted to backend public IP only.)
+
+### 19.7 Step 5: Configure Backend Environment Variables
+
+On the Windows backend, add to `c:\devlop\acm2\acm2\.env`:
+
+```env
+# Master Database (MySQL on Bitnami frontend via PRIVATE IP)
+MASTER_DB_HOST=172.26.10.50
+MASTER_DB_USER=acm2_backend
+MASTER_DB_PASSWORD=YOUR_STRONG_PASSWORD_HERE
+MASTER_DB_NAME=acm2_master
+```
+
+**Replace `172.26.10.50` with your frontend's actual private IP.**
+
+### 19.7 Step 6: Update Backend Code to Read Env Vars
+
+The `master.py` file needs to read credentials from environment variables instead of using hardcoded defaults. This is a code change in `acm2/app/db/master.py`.
+
+### 19.8 Step 7: Test the Connection
+
+From the Windows backend, create a test script or run:
+
+```powershell
+python -c "import asyncio; import aiomysql; import os; asyncio.run((lambda: print('Test requires manual verification'))())"
+```
+
+### 19.9 Verification Checklist
+
+- [ ] `acm2_master` database exists on Bitnami MySQL
+- [ ] `users` and `api_keys` tables created
+- [ ] MySQL user created with remote access from backend IP
+- [ ] MySQL listening on 0.0.0.0:3306 (not just localhost)
+- [ ] Bitnami firewall allows port 3306 from backend IP
+- [ ] AWS Security Group allows port 3306 from backend IP
+- [ ] Backend `.env` has correct `MASTER_DB_*` variables
+- [ ] Backend code reads env vars for MySQL connection
+- [ ] Test connection succeeds from backend
+- [ ] WordPress user creation triggers ACM2 user creation
+
+### 19.10 Troubleshooting
+
+**"Can't connect to MySQL server"**
+- Check MySQL is running: `sudo /opt/bitnami/ctlscript.sh status mysql`
+- Check MySQL is listening on 0.0.0.0: `sudo netstat -tlnp | grep 3306`
+- Check firewall rules on both Bitnami and AWS
+
+**"Access denied for user"**
+- Verify username and password
+- Check the user host matches backend IP exactly
+- Run `SELECT User, Host FROM mysql.user;` to verify
+
+**"Unknown database 'acm2_master'"**
+- Database wasn't created; run the CREATE DATABASE command
+
+**Connection times out**
+- AWS Security Group not open for port 3306
+- Backend IP changed (check with `curl ifconfig.me` on backend)

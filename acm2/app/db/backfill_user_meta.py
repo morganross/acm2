@@ -3,6 +3,8 @@ Backfill per-user seed status for existing users.
 
 - If user_meta is missing and per-user DB has data, mark seed_status=ready.
 - If per-user DB is empty, run initialize_user to seed.
+
+Updated to use user_registry instead of master.db.
 """
 import asyncio
 import logging
@@ -11,7 +13,7 @@ from typing import Optional
 
 from sqlalchemy import select, func
 
-from app.db.master import get_master_db
+from app.auth.user_registry import load_registry, get_all_user_ids
 from app.db.seed_user import initialize_user
 from app.infra.db.session import get_user_session_by_id
 from app.infra.db.models.user_meta import UserMeta
@@ -65,26 +67,23 @@ async def _ensure_user_meta(user_id: int) -> str:
 async def main(user_id: Optional[int] = None) -> None:
     logging.basicConfig(level=logging.INFO)
 
-    master_db = await get_master_db()
-    try:
-        users = await master_db.list_users()
+    # Load user registry from filesystem
+    load_registry()
+    user_ids = get_all_user_ids()
+    
+    if user_id is not None:
+        user_ids = {user_id} if user_id in user_ids else set()
 
-        if user_id is not None:
-            users = [u for u in users if u["id"] == user_id]
+    if not user_ids:
+        logger.info("No users to process")
+        return
 
-        if not users:
-            logger.info("No users to process")
-            return
-
-        for user in users:
-            uid = user["id"]
-            try:
-                status = await _ensure_user_meta(uid)
-                logger.info(f"User {uid}: {status} ({_now_iso()})")
-            except Exception as e:
-                logger.error(f"User {uid}: failed ({e})")
-    finally:
-        await master_db.close()
+    for uid in sorted(user_ids):
+        try:
+            status = await _ensure_user_meta(uid)
+            logger.info(f"User {uid}: {status} ({_now_iso()})")
+        except Exception as e:
+            logger.error(f"User {uid}: failed ({e})")
 
 
 if __name__ == "__main__":

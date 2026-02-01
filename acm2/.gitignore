@@ -21,7 +21,12 @@ ui/dist/
 app/static/assets/
 
 # Data & logs
-*.db
+# Ignore user databases but keep seed.db
+data/user_*.db
+data/user_*.db-wal
+data/user_*.db-shm
+# Keep seed.db for new user initialization
+!data/seed.db
 logs/
 server.log
 server.err

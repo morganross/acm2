@@ -532,9 +532,6 @@ class RunExecutor:
         This appends an event to results_summary.timeline_events so the frontend
         can show timeline progress during execution, not just at completion.
         """
-        from ..infra.db.session import async_session_factory
-        from ..infra.db.repositories import RunRepository
-        
         event = {
             "phase": phase,
             "event_type": event_type,
@@ -548,7 +545,7 @@ class RunExecutor:
         }
         
         try:
-            async with async_session_factory() as session:
+            async with get_user_session_by_id(self.config.user_id) as session:
                 run_repo = RunRepository(session, user_id=self.config.user_id)
                 await run_repo.append_timeline_event(run_id, event)
                 self.logger.debug(f"Emitted timeline event: {phase}/{event_type} for run {run_id}")
@@ -839,10 +836,7 @@ class RunExecutor:
         try:
             source_doc_id = event.get("source_doc_id")
             if source_doc_id:
-                from ..infra.db.session import async_session_factory
-                from ..infra.db.repositories import RunRepository
-
-                async with async_session_factory() as session:
+                async with get_user_session_by_id(self.config.user_id) as session:
                     run_repo = RunRepository(session, user_id=self.config.user_id)
                     await run_repo.append_source_doc_timeline_event(run_id, source_doc_id, event)
         except Exception as e:

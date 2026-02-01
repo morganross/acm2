@@ -1,7 +1,9 @@
 """
-Seed a new user's data with a preset from the shared database.
+Seed a new user's data with a preset from the seed database.
 
 This script copies a single preset and its associated contents to a new user.
+The seed database (data/seed.db) is a read-only source containing the Default
+Preset and content library items.
 """
 import asyncio
 import uuid
@@ -10,11 +12,11 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict
 
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy import select, event
 
 from app.config import get_settings
-from app.infra.db.session import async_session_factory, engine, _get_or_create_user_engine
+from app.infra.db.session import _get_or_create_user_engine, _set_sqlite_pragma
 from app.infra.db.models import Base
 from app.infra.db.models.preset import Preset
 from app.infra.db.models.content import Content
@@ -23,6 +25,39 @@ from app.infra.db.models.run import Run, RunStatus
 
 logger = logging.getLogger(__name__)
 _seed_locks: Dict[int, asyncio.Lock] = {}
+
+# Cached seed database engine (created on first use)
+_seed_engine = None
+_seed_session_factory = None
+
+
+def _get_seed_session_factory():
+    """Get or create the seed database session factory."""
+    global _seed_engine, _seed_session_factory
+    
+    if _seed_session_factory is None:
+        settings = get_settings()
+        seed_url = settings.seed_database_url
+        
+        _seed_engine = create_async_engine(
+            seed_url,
+            echo=settings.debug,
+            future=True,
+        )
+        
+        # Enable WAL mode for seed database
+        event.listen(_seed_engine.sync_engine, "connect", _set_sqlite_pragma)
+        
+        _seed_session_factory = async_sessionmaker(
+            _seed_engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+            autocommit=False,
+            autoflush=False,
+        )
+        logger.info(f"Initialized seed database engine: {seed_url}")
+    
+    return _seed_session_factory
 
 
 async def seed_user_data(user_id: int, source_session: AsyncSession, target_session: AsyncSession) -> Dict[str, str]:
@@ -205,7 +240,7 @@ async def initialize_user(user_id: int) -> Dict[str, str]:
     """
     Full initialization for a new user:
     1. Create per-user SQLite database schema using SQLAlchemy
-    2. Seed per-user database with copies of a preset + contents from shared DB
+    2. Seed per-user database with copies of a preset + contents from seed.db
     
     Args:
         user_id: The user's ID from the master database
@@ -219,9 +254,10 @@ async def initialize_user(user_id: int) -> Dict[str, str]:
         _, target_session_factory = await _get_or_create_user_engine(user_id)
         logger.info(f"Initialized per-user SQLAlchemy database for user {user_id}")
 
-        # 2. Use TWO sessions: source (shared DB) and target (per-user DB)
+        # 2. Use TWO sessions: source (seed.db) and target (per-user DB)
+        seed_session_factory = _get_seed_session_factory()
 
-        async with async_session_factory() as source_session:
+        async with seed_session_factory() as source_session:
             async with target_session_factory() as target_session:
                 try:
                     existing_meta = await target_session.execute(

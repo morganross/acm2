@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     rate_limit_max_requests: int = 120
     rate_limit_window_seconds: int = 60
     
+    # Plugin secret for WordPress user creation (shared secret)
+    acm2_plugin_secret: Optional[str] = None
+    
     # Paths
     data_dir: Path = Path("./data")
     documents_dir: Path = Path("./data/documents")
@@ -57,6 +60,16 @@ class Settings(BaseSettings):
     # Seed package (required for deterministic per-user initialization)
     seed_preset_id: Optional[str] = None
     seed_version: Optional[str] = None
+    
+    @property
+    def seed_database_path(self) -> Path:
+        """Path to the seed database containing Default Preset + Contents."""
+        return self.data_dir / "seed.db"
+    
+    @property
+    def seed_database_url(self) -> str:
+        """SQLAlchemy URL for the seed database."""
+        return f"sqlite+aiosqlite:///{self.seed_database_path.as_posix()}"
     
     # Execution
     max_concurrent_tasks: int = 3

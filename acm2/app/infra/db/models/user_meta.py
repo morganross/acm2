@@ -1,7 +1,7 @@
 """
 User metadata model.
 
-Stores per-user seed status and version inside the user's SQLite DB.
+Stores per-user seed status, version, and profile info inside the user's SQLite DB.
 """
 from datetime import datetime
 from typing import Optional
@@ -20,6 +20,11 @@ class UserMeta(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True, unique=True)
 
+    # User profile info
+    username: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    
+    # Seed status
     seed_status: Mapped[str] = mapped_column(String(32), nullable=False)
     seed_version: Mapped[str] = mapped_column(String(64), nullable=False)
 

@@ -1,9 +1,26 @@
 // Backend API URL
-// If running on dev port (5173), point to localhost:8002
-// Otherwise (production/served by backend), use relative path
+// In WordPress: use acm2Config.apiUrl from PHP
+// In dev mode: use localhost
+// Otherwise: use relative path
+declare global {
+  interface Window {
+    acm2Config?: {
+      apiUrl: string
+      apiKey: string
+      currentUser: string
+      nonce: string
+    }
+  }
+}
+
 const isDev = window.location.port === '5173' || window.location.port === '5174'
-export const API_BASE_URL = isDev ? 'http://127.0.0.1:8002/api/v1' : '/api/v1'
+export const API_BASE_URL = window.acm2Config?.apiUrl || (isDev ? 'http://127.0.0.1:8002/api/v1' : '/api/v1')
 const API_BASE = API_BASE_URL
+
+// Get API key from WordPress config or localStorage (for dev)
+function getApiKey(): string | null {
+  return window.acm2Config?.apiKey || localStorage.getItem('acm_api_key')
+}
 
 export class ApiError extends Error {
   constructor(
@@ -45,8 +62,8 @@ const attachParams = (endpoint: string, params?: Record<string, string | number 
 export const apiClient = {
   async get<T>(endpoint: string, params?: Record<string, string | number | boolean>): Promise<T> {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-    const apiKey = localStorage.getItem('acm_api_key')
-    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
+    const apiKey = getApiKey()
+    if (apiKey) headers['X-ACM2-API-Key'] = apiKey
     const response = await fetch(attachParams(endpoint, params), {
       method: 'GET',
       headers,
@@ -56,8 +73,8 @@ export const apiClient = {
 
   async post<T>(endpoint: string, data?: unknown, params?: Record<string, string | number | boolean>): Promise<T> {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-    const apiKey = localStorage.getItem('acm_api_key')
-    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
+    const apiKey = getApiKey()
+    if (apiKey) headers['X-ACM2-API-Key'] = apiKey
     const response = await fetch(attachParams(endpoint, params), {
       method: 'POST',
       headers,
@@ -68,8 +85,8 @@ export const apiClient = {
 
   async put<T>(endpoint: string, data?: unknown): Promise<T> {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-    const apiKey = localStorage.getItem('acm_api_key')
-    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
+    const apiKey = getApiKey()
+    if (apiKey) headers['X-ACM2-API-Key'] = apiKey
     const response = await fetch(`${API_BASE}${endpoint}`, {
       method: 'PUT',
       headers,
@@ -80,8 +97,8 @@ export const apiClient = {
 
   async delete<T>(endpoint: string, params?: Record<string, string | number | boolean>): Promise<T> {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-    const apiKey = localStorage.getItem('acm_api_key')
-    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
+    const apiKey = getApiKey()
+    if (apiKey) headers['X-ACM2-API-Key'] = apiKey
     const response = await fetch(attachParams(endpoint, params), {
       method: 'DELETE',
       headers,
