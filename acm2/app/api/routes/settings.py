@@ -24,14 +24,14 @@ class SettingsPayload(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
-@router.get("/")
+@router.get("")
 async def get_settings(
     user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_user_db),
 ) -> Dict[str, Any]:
     """Get stored settings for the current user."""
     result = await db.execute(
-        select(UserSettings).where(UserSettings.user_id == user["id"])
+        select(UserSettings).where(UserSettings.user_id == user["uuid"])
     )
     settings_row = result.scalar_one_or_none()
     if not settings_row:
@@ -39,7 +39,7 @@ async def get_settings(
     return settings_row.settings
 
 
-@router.put("/")
+@router.put("")
 async def update_settings(
     payload: SettingsPayload,
     user: dict = Depends(get_current_user),
@@ -49,7 +49,7 @@ async def update_settings(
     settings_data = payload.model_dump()
 
     result = await db.execute(
-        select(UserSettings).where(UserSettings.user_id == user["id"])
+        select(UserSettings).where(UserSettings.user_id == user["uuid"])
     )
     settings_row = result.scalar_one_or_none()
 
@@ -58,7 +58,7 @@ async def update_settings(
         settings_row.updated_at = datetime.utcnow()
     else:
         settings_row = UserSettings(
-            user_id=user["id"],
+            user_id=user["uuid"],
             settings=settings_data,
             updated_at=datetime.utcnow(),
         )

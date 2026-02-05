@@ -22,10 +22,9 @@ class GitHubConnectionRepository(BaseRepository[GitHubConnection]):
         limit: int = 100, 
         offset: int = 0
     ) -> Sequence[GitHubConnection]:
-        """Get non-deleted connections (scoped to user if user_id is set)."""
+        """Get all connections (scoped to user if user_id is set)."""
         stmt = (
             select(GitHubConnection)
-            .where(GitHubConnection.is_deleted == False)
             .offset(offset)
             .limit(limit)
             .order_by(GitHubConnection.name)
@@ -39,7 +38,6 @@ class GitHubConnectionRepository(BaseRepository[GitHubConnection]):
         stmt = (
             select(GitHubConnection)
             .where(GitHubConnection.repo == repo)
-            .where(GitHubConnection.is_deleted == False)
         )
         stmt = self._apply_user_filter(stmt)
         result = await self.session.execute(stmt)
@@ -50,7 +48,6 @@ class GitHubConnectionRepository(BaseRepository[GitHubConnection]):
         stmt = (
             select(GitHubConnection)
             .where(GitHubConnection.name == name)
-            .where(GitHubConnection.is_deleted == False)
         )
         stmt = self._apply_user_filter(stmt)
         result = await self.session.execute(stmt)
@@ -61,7 +58,6 @@ class GitHubConnectionRepository(BaseRepository[GitHubConnection]):
         stmt = (
             select(GitHubConnection)
             .where(GitHubConnection.is_valid == True)
-            .where(GitHubConnection.is_deleted == False)
             .order_by(GitHubConnection.name)
         )
         stmt = self._apply_user_filter(stmt)
@@ -85,11 +81,11 @@ class GitHubConnectionRepository(BaseRepository[GitHubConnection]):
             return connection
         return None
     
-    async def soft_delete(self, id: str) -> bool:
-        """Soft delete a connection."""
+    async def delete(self, id: str) -> bool:
+        """Permanently delete a connection from the database."""
         connection = await self.get_by_id(id)
         if connection:
-            connection.is_deleted = True
+            await self.session.delete(connection)
             await self.session.commit()
             return True
         return False

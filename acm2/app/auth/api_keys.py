@@ -3,11 +3,13 @@ API Key Management
 
 Generates and validates ACM2 API keys for user authentication.
 
-KEY FORMAT: acm2_u{user_id}_{random}
-Example: acm2_u42_kKDHtSEDaGBC6MUbJSoEn
+KEY FORMAT: acm2_{uuid}_{random}
+Example: acm2_550e8400-e29b-41d4-a716-446655440000_kKDHtSEDaGB
 
-The user_id is embedded in the key for O(1) database file lookup.
+The UUID is embedded in the key for O(1) database file lookup.
 No master database needed - parse key, construct path, validate hash.
+
+UUID ONLY - No bland usernames, no integer user IDs.
 
 EXTREME LOGGING ENABLED.
 """
@@ -20,28 +22,29 @@ import traceback
 
 logger = logging.getLogger(__name__)
 
-# API key format: acm2_u{user_id}_{random}
-API_KEY_PREFIX = "acm2_u"
-API_KEY_RANDOM_LENGTH = 24  # Characters in random part
+# API key format: acm2_{uuid}_{random}
+API_KEY_PREFIX = "acm2_"
+API_KEY_RANDOM_LENGTH = 16  # Shorter random part since UUID is long
 
-# Regex to parse key format: acm2_u{user_id}_{random}
-API_KEY_PATTERN = re.compile(r'^acm2_u(\d+)_([A-Za-z0-9_-]+)$')
+# Regex to parse key format: acm2_{uuid}_{random}
+# UUID format: 8-4-4-4-12 hex digits
+API_KEY_PATTERN = re.compile(r'^acm2_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})_([A-Za-z0-9_-]+)$', re.IGNORECASE)
 
 
-def generate_api_key(user_id: int) -> Tuple[str, str, str]:
+def generate_api_key(user_uuid: str) -> Tuple[str, str, str]:
     """Generate a new API key for a specific user.
     
     Args:
-        user_id: The user's ID to embed in the key
+        user_uuid: The user's UUID to embed in the key (e.g., "550e8400-e29b-41d4-a716-446655440000")
     
     Returns:
         Tuple of (full_key, key_hash, key_prefix)
         - full_key: The actual key to give to user (only shown once)
         - key_hash: bcrypt hash to store in user's database
-        - key_prefix: Display prefix (e.g., "acm2_u42_kKDH...")
+        - key_prefix: Display prefix (e.g., "acm2_550e8400-...")
     """
     logger.info("[API_KEYS] ========================================")
-    logger.info(f"[API_KEYS] generate_api_key() called for user_id={user_id}")
+    logger.info(f"[API_KEYS] generate_api_key() called for uuid={user_uuid}")
     logger.info("[API_KEYS] ========================================")
     
     try:
@@ -51,9 +54,9 @@ def generate_api_key(user_id: int) -> Tuple[str, str, str]:
         random_part = secrets.token_urlsafe(API_KEY_RANDOM_LENGTH)[:API_KEY_RANDOM_LENGTH]
         logger.info(f"[API_KEYS] Random part generated: {random_part[:8]}... (length: {len(random_part)})")
         
-        # Format: acm2_u{user_id}_{random}
-        full_key = f"{API_KEY_PREFIX}{user_id}_{random_part}"
-        logger.info(f"[API_KEYS] Full key created: {full_key[:20]}... (length: {len(full_key)})")
+        # Format: acm2_{uuid}_{random}
+        full_key = f"{API_KEY_PREFIX}{user_uuid}_{random_part}"
+        logger.info(f"[API_KEYS] Full key created: {full_key[:30]}... (length: {len(full_key)})")
         
         # Create bcrypt hash
         logger.info("[API_KEYS] Step 2: Creating bcrypt hash...")
@@ -72,8 +75,8 @@ def generate_api_key(user_id: int) -> Tuple[str, str, str]:
         
         logger.info("[API_KEYS] ========================================")
         logger.info("[API_KEYS] generate_api_key() SUCCESS")
-        logger.info(f"[API_KEYS] Key format: acm2_u{user_id}_<random>")
-        logger.info(f"[API_KEYS] Returning: (full_key={full_key[:20]}..., key_hash={key_hash[:20]}..., key_prefix={key_prefix})")
+        logger.info(f"[API_KEYS] Key format: acm2_{user_uuid}_<random>")
+        logger.info(f"[API_KEYS] Returning: (full_key={full_key[:30]}..., key_hash={key_hash[:20]}..., key_prefix={key_prefix})")
         logger.info("[API_KEYS] ========================================")
         
         return full_key, key_hash, key_prefix
@@ -88,41 +91,47 @@ def generate_api_key(user_id: int) -> Tuple[str, str, str]:
         raise
 
 
-def parse_api_key(key: str) -> Optional[Tuple[int, str]]:
-    """Parse an API key to extract user_id and random part.
+def parse_api_key(key: str) -> Optional[Tuple[str, str]]:
+    """Parse an API key to extract UUID and random part.
     
     Args:
-        key: The full API key (e.g., "acm2_u42_kKDHtSEDaGBC6MUbJSoEn")
+        key: The full API key (e.g., "acm2_550e8400-e29b-41d4-a716-446655440000_kKDHtSE")
         
     Returns:
-        Tuple of (user_id, random_part) or None if invalid format
+        Tuple of (uuid, random_part) or None if invalid format
     """
-    logger.debug(f"[API_KEYS] parse_api_key() called with key prefix: {key[:20] if len(key) >= 20 else key}")
+    logger.debug(f"[API_KEYS] parse_api_key() called with key prefix: {key[:30] if len(key) >= 30 else key}")
     
     match = API_KEY_PATTERN.match(key)
     if match:
-        user_id = int(match.group(1))
+        user_uuid = match.group(1).lower()  # Normalize UUID to lowercase
         random_part = match.group(2)
-        logger.debug(f"[API_KEYS] Parsed: user_id={user_id}, random_part={random_part[:8]}...")
-        return user_id, random_part
+        logger.debug(f"[API_KEYS] Parsed: uuid={user_uuid}, random_part={random_part[:8]}...")
+        return user_uuid, random_part
     else:
-        logger.warning(f"[API_KEYS] Failed to parse key: {key[:20] if len(key) >= 20 else key}...")
+        logger.warning(f"[API_KEYS] Failed to parse key: {key[:30] if len(key) >= 30 else key}...")
         return None
 
 
-def extract_user_id(key: str) -> Optional[int]:
-    """Extract just the user_id from an API key.
+def extract_uuid(key: str) -> Optional[str]:
+    """Extract just the UUID from an API key.
     
     Args:
         key: The full API key
         
     Returns:
-        The user_id or None if invalid format
+        The UUID string (lowercase) or None if invalid format
     """
     result = parse_api_key(key)
     if result:
         return result[0]
     return None
+
+
+# Backwards compatibility alias (will be removed after full migration)
+def extract_user_id(key: str) -> Optional[str]:
+    """DEPRECATED: Use extract_uuid instead. Returns UUID as string."""
+    return extract_uuid(key)
 
 
 def verify_api_key(provided_key: str, stored_hash: str) -> bool:
@@ -173,19 +182,19 @@ validate_api_key = verify_api_key
 
 
 def is_valid_key_format(key: str) -> bool:
-    """Check if key has valid format (new format with embedded user_id).
+    """Check if key has valid format (UUID-based format).
     
     Args:
         key: API key to check
         
     Returns:
-        True if format is correct
+        True if format is correct (acm2_{uuid}_{random})
     """
-    logger.info(f"[API_KEYS] is_valid_key_format() called with key prefix: {key[:20] if len(key) >= 20 else key}")
+    logger.info(f"[API_KEYS] is_valid_key_format() called with key prefix: {key[:30] if len(key) >= 30 else key}")
     
-    # Check new format: acm2_u{user_id}_{random}
+    # Check UUID format: acm2_{uuid}_{random}
     if API_KEY_PATTERN.match(key):
-        logger.info("[API_KEYS] is_valid_key_format() - format is VALID (new format)")
+        logger.info("[API_KEYS] is_valid_key_format() - format is VALID (UUID format)")
         return True
     
     logger.warning("[API_KEYS] is_valid_key_format() - format is INVALID")

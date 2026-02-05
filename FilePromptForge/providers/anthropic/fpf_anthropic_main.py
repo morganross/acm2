@@ -97,7 +97,7 @@ def build_payload(prompt: str, cfg: Dict) -> Tuple[Dict, Optional[Dict]]:
         final_prompt = prompt
 
     sampling = _translate_sampling(cfg)
-    thinking = _build_thinking(cfg, sampling.get("max_tokens", 0))
+    thinking = _build_thinking(cfg, sampling["max_tokens"])
 
     messages = [
         {
@@ -111,7 +111,7 @@ def build_payload(prompt: str, cfg: Dict) -> Tuple[Dict, Optional[Dict]]:
     payload: Dict[str, Any] = {
         "model": model_to_use,
         "messages": messages,
-        "max_tokens": sampling.get("max_tokens", 4096),
+        "max_tokens": sampling["max_tokens"],
         "tools": [
             {
                 # Anthropic server-side web search tool requires name="web_search"

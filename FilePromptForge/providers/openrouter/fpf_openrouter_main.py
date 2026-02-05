@@ -55,7 +55,7 @@ def _translate_sampling(cfg: Dict) -> Dict[str, Any]:
     elif cfg.get("max_tokens") is not None:
         out["max_tokens"] = int(cfg["max_tokens"])
     else:
-        out["max_tokens"] = 4096  # Reasonable default
+        raise RuntimeError("OpenRouter requires 'max_tokens' or 'max_completion_tokens' in config - no fallback defaults allowed")
 
     if cfg.get("temperature") is not None:
         out["temperature"] = float(cfg["temperature"])
@@ -114,21 +114,21 @@ def build_payload(prompt: str, cfg: Dict) -> Tuple[Dict, Optional[Dict]]:
 
     # Perplexity-specific parameters for Sonar models
     if "perplexity/" in model_to_use:
-        # search_mode: 'web' (default), 'academic', or 'sec'
-        payload["search_mode"] = cfg.get("search_mode", "web")
+        # search_mode is REQUIRED
+        if "search_mode" not in cfg:
+            raise RuntimeError("Perplexity models require 'search_mode' in config - no fallback defaults allowed")
+        payload["search_mode"] = cfg["search_mode"]
         
         # web_search_options for search context size
-        web_search_opts = cfg.get("web_search_options") or {}
+        web_search_opts = cfg.get("web_search_options")
         if web_search_opts:
             payload["web_search_options"] = web_search_opts
-        elif "sonar-deep-research" in model_to_use:
-            # Default to high search context for deep research
-            payload["web_search_options"] = {"search_context_size": "high"}
         
         # reasoning_effort specifically for sonar-deep-research
-        if "sonar-deep-research" in model_to_use and not payload.get("reasoning_effort"):
-            # Default to medium if not specified
-            payload["reasoning_effort"] = cfg.get("reasoning_effort", "medium")
+        if "sonar-deep-research" in model_to_use:
+            if "reasoning_effort" not in cfg:
+                raise RuntimeError("sonar-deep-research requires 'reasoning_effort' in config - no fallback defaults allowed")
+            payload["reasoning_effort"] = cfg["reasoning_effort"]
         
         # Search domain filtering
         if cfg.get("search_domain_filter"):

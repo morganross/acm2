@@ -26,7 +26,6 @@ class ContentRepository(BaseRepository[Content]):
         stmt = (
             select(Content)
             .where(Content.content_type == content_type.value)
-            .where(Content.is_deleted == False)
             .offset(offset)
             .limit(limit)
             .order_by(Content.name)
@@ -40,10 +39,9 @@ class ContentRepository(BaseRepository[Content]):
         limit: int = 100, 
         offset: int = 0
     ) -> Sequence[Content]:
-        """Get non-deleted contents (scoped to user if user_id is set)."""
+        """Get all contents (scoped to user if user_id is set)."""
         stmt = (
             select(Content)
-            .where(Content.is_deleted == False)
             .offset(offset)
             .limit(limit)
             .order_by(Content.created_at.desc())
@@ -57,7 +55,6 @@ class ContentRepository(BaseRepository[Content]):
         stmt = (
             select(Content)
             .where(Content.name == name)
-            .where(Content.is_deleted == False)
         )
         stmt = self._apply_user_filter(stmt)
         result = await self.session.execute(stmt)
@@ -73,7 +70,6 @@ class ContentRepository(BaseRepository[Content]):
         stmt = (
             select(Content)
             .where(Content.name.ilike(f"%{query}%"))
-            .where(Content.is_deleted == False)
         )
         stmt = self._apply_user_filter(stmt)
         if content_type:
@@ -91,10 +87,7 @@ class ContentRepository(BaseRepository[Content]):
         """Search contents by tag (scoped to user if user_id is set)."""
         # Note: This is a simple approach; for complex JSON queries,
         # consider using JSON operators specific to your database
-        stmt = (
-            select(Content)
-            .where(Content.is_deleted == False)
-        )
+        stmt = select(Content)
         stmt = self._apply_user_filter(stmt)
         if content_type:
             stmt = stmt.where(Content.content_type == content_type.value)
@@ -104,11 +97,11 @@ class ContentRepository(BaseRepository[Content]):
         all_results = result.scalars().all()
         return [c for c in all_results if tag in (c.tags or [])]
     
-    async def soft_delete(self, id: str) -> bool:
-        """Soft delete a content."""
+    async def delete(self, id: str) -> bool:
+        """Permanently delete a content from the database."""
         content = await self.get_by_id(id)
         if content:
-            content.is_deleted = True
+            await self.session.delete(content)
             await self.session.commit()
             return True
         return False
@@ -120,7 +113,6 @@ class ContentRepository(BaseRepository[Content]):
         stmt = (
             select(Content)
             .where(Content.id.in_(ids))
-            .where(Content.is_deleted == False)
         )
         stmt = self._apply_user_filter(stmt)
         result = await self.session.execute(stmt)
@@ -148,7 +140,6 @@ class ContentRepository(BaseRepository[Content]):
         stmt = (
             select(Content)
             .where(Content.content_type == content_type.value)
-            .where(Content.is_deleted == False)
         )
         stmt = self._apply_user_filter(stmt)
         result = await self.session.execute(stmt)

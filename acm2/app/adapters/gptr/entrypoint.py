@@ -12,13 +12,15 @@ async def main():
         # 1. Parse arguments (passed via env vars or simple args for simplicity)
         # We'll use env vars for config to avoid complex CLI parsing in this internal script
         prompt = os.environ.get("GPTR_PROMPT")
-        report_type = os.environ.get("GPTR_REPORT_TYPE", "research_report")
+        report_type = os.environ.get("GPTR_REPORT_TYPE")
         tone = os.environ.get("GPTR_TONE")
         source_urls_json = os.environ.get("GPTR_SOURCE_URLS")
         # Note: RETRIEVER env var is read directly by GPT-Researcher, not passed to constructor
         
         if not prompt:
             raise ValueError("GPTR_PROMPT environment variable is required")
+        if not report_type:
+            raise ValueError("GPTR_REPORT_TYPE environment variable is required - no fallback defaults allowed")
 
         # 2. Import GPT Researcher (lazy import to speed up failure if env is wrong)
         try:

@@ -136,7 +136,7 @@ generation_tasks: dict[str, dict] = {}
 async def run_generation_task(
     task_id: str,
     request: GenerateRequest,
-    user_id: int,
+    user_id: str,
 ) -> None:
     """Background task to run generation."""
     

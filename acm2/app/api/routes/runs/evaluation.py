@@ -38,7 +38,7 @@ async def reevaluate_run(
     """
     from app.evaluation.single_doc import SingleDocEvaluator, SingleEvalConfig, DocumentInput
     
-    repo = RunRepository(db, user_id=user['id'])
+    repo = RunRepository(db, user_id=user['uuid'])
     run = await repo.get_by_id(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -50,18 +50,20 @@ async def reevaluate_run(
     
     # Get preset to load eval config
     from app.infra.db.repositories import PresetRepository
-    preset_repo = PresetRepository(db, user_id=user['id'])
+    preset_repo = PresetRepository(db, user_id=user['uuid'])
     preset = await preset_repo.get_by_id(run.preset_id) if run.preset_id else None
     if not preset:
         raise HTTPException(status_code=400, detail="Run has no associated preset")
     
-    # Get eval config from run.config (snapshot at run time) or preset
+    # Get eval config from run.config (snapshot at run time) or preset - NO FALLBACKS
     run_config = run.config or {}
     config_overrides = preset.config_overrides or {}
-    eval_config = run_config.get("eval", config_overrides.get("eval", {}))
+    eval_config = run_config.get("eval") or config_overrides.get("eval")
+    if not eval_config:
+        raise HTTPException(status_code=400, detail="No eval config found in run or preset config_overrides")
     
     # Get criteria from Content Library
-    content_repo = ContentRepository(db, user_id=user['id'])
+    content_repo = ContentRepository(db, user_id=user['uuid'])
     eval_criteria_id = preset.eval_criteria_id or config_overrides.get("eval_criteria_id") or results_summary.get("eval_criteria_id")
     custom_criteria = None
     if eval_criteria_id:
@@ -81,18 +83,32 @@ async def reevaluate_run(
             single_eval_instructions = content.body
     
     # Build evaluator config
-    judge_models = eval_config.get("judge_models", ["openai:gpt-5-mini"])
+    judge_models = eval_config.get("judge_models")
+    if not judge_models:
+        raise HTTPException(status_code=400, detail="judge_models not configured in eval settings")
     max_tokens = eval_config.get("max_tokens")
     if not max_tokens:
         raise HTTPException(status_code=400, detail="max_tokens not configured in eval settings")
+    iterations = eval_config.get("iterations")
+    if iterations is None:
+        raise HTTPException(status_code=400, detail="iterations not configured in eval settings")
+    temperature = eval_config.get("temperature")
+    if temperature is None:
+        raise HTTPException(status_code=400, detail="temperature not configured in eval settings")
+    timeout_seconds = eval_config.get("timeout_seconds")
+    if timeout_seconds is None:
+        raise HTTPException(status_code=400, detail="timeout_seconds not configured in eval settings")
+    retries = eval_config.get("retries")
+    if retries is None:
+        raise HTTPException(status_code=400, detail="retries not configured in eval settings")
     
     single_config = SingleEvalConfig(
-        iterations=eval_config.get("iterations", 1),
+        iterations=iterations,
         judge_models=judge_models,
-        temperature=eval_config.get("temperature", 0.0),
+        temperature=temperature,
         max_tokens=max_tokens,
-        timeout_seconds=eval_config.get("timeout_seconds", 600),
-        retries=eval_config.get("retries", 0),
+        timeout_seconds=timeout_seconds,
+        retries=retries,
         custom_instructions=single_eval_instructions,
         custom_criteria=custom_criteria,
     )
@@ -102,8 +118,8 @@ async def reevaluate_run(
         import asyncio
         from app.evaluation.models import SingleEvalResult
         
-        async with get_user_session_by_id(user['id']) as session:
-            repo_inner = RunRepository(session, user_id=user['id'])
+        async with get_user_session_by_id(user['uuid']) as session:
+            repo_inner = RunRepository(session, user_id=user['uuid'])
             
             # Lock for serializing DB writes
             db_lock = asyncio.Lock()
@@ -113,12 +129,12 @@ async def reevaluate_run(
             eval_count = 0
             
             try:
-                evaluator = SingleDocEvaluator(single_config, user_id=user["id"])
+                evaluator = SingleDocEvaluator(single_config, user_id=user["uuid"])
                 
                 # Build list of document inputs (parallel preparation)
                 doc_inputs = []
                 doc_metadata = {}  # Map doc_id -> (source_doc_id, model)
-                generated_dir = get_user_run_path(user['id'], run_id, "generated")
+                generated_dir = get_user_run_path(user['uuid'], run_id, "generated")
                 
                 for gen_doc in generated_docs:
                     doc_id = gen_doc.get("id")

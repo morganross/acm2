@@ -22,9 +22,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def get_run_root(user_id: int, run_id: str) -> Path:
+def get_run_root(user_uuid: str, run_id: str) -> Path:
     settings = get_settings()
-    return settings.data_dir / f"user_{user_id}" / "runs" / run_id
+    return settings.data_dir / f"user_{user_uuid}" / "runs" / run_id
 
 
 @router.get("/runs/{run_id}/report")
@@ -37,12 +37,12 @@ async def get_run_report(
     Generate and download the HTML report for a run.
     Includes the Evaluation Timeline Chart.
     """
-    repo = RunRepository(db, user_id=user['id'])
+    repo = RunRepository(db, user_id=user['uuid'])
     run = await repo.get_with_tasks(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
     
-    run_root = get_run_root(user['id'], run_id)
+    run_root = get_run_root(user['uuid'], run_id)
     reports_dir = run_root / "reports"
     generator = ReportGenerator(reports_dir)
     
@@ -70,12 +70,12 @@ async def get_run_logs(
     Returns log lines from the run's log files.
     For VERBOSE mode runs, can also include FPF subprocess output.
     """
-    repo = RunRepository(db, user_id=user['id'])
+    repo = RunRepository(db, user_id=user['uuid'])
     run = await repo.get_by_id(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
     
-    log_dir = get_run_root(user['id'], run_id) / "logs"
+    log_dir = get_run_root(user['uuid'], run_id) / "logs"
     
     # Read main run log
     run_log_file = log_dir / "run.log"
@@ -105,7 +105,9 @@ async def get_run_logs(
                 logger.warning(f"Failed to read FPF log: {e}")
     
     run_config = run.config or {}
-    log_level = run_config.get("log_level", "INFO")
+    if "log_level" not in run_config:
+        raise ValueError("run.config must contain 'log_level' - no fallback defaults allowed")
+    log_level = run_config["log_level"]
     
     return {
         "run_id": run_id,
@@ -131,14 +133,14 @@ async def get_generated_doc_content(
     Returns the markdown content of a generated or combined document.
     Documents are stored in data/user_{user_id}/runs/{run_id}/generated/{doc_id}.md
     """
-    repo = RunRepository(db, user_id=user['id'])
+    repo = RunRepository(db, user_id=user['uuid'])
     run = await repo.get_by_id(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
     
     # Sanitize doc_id for filename
     safe_doc_id = doc_id.replace(':', '_').replace('/', '_').replace('\\', '_')
-    file_path = get_run_root(user['id'], run_id) / "generated" / f"{safe_doc_id}.md"
+    file_path = get_run_root(user['uuid'], run_id) / "generated" / f"{safe_doc_id}.md"
     
     if not file_path.exists():
         raise HTTPException(

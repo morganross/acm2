@@ -114,10 +114,10 @@ def to_summary(run) -> RunSummary:
         description=run.description,
         status=run.status,
         error_message=run.error_message,  # Include error message from DB
-        generators=[GeneratorType(g) for g in (config.get("generators") or [])],
-        document_count=len(config.get("document_ids") or []),
-        model_count=len(config.get("models") or []),
-        iterations=config.get("iterations", 1),
+        generators=[GeneratorType(g) for g in config["generators"]],
+        document_count=len(config["document_ids"]),
+        model_count=len(config["models"]),
+        iterations=config["iterations"],
         progress=calculate_progress(run),
         total_cost_usd=run.total_cost_usd or 0.0,
         created_at=run.created_at,
@@ -198,29 +198,29 @@ def to_detail(run) -> RunDetail:
             pc_rankings = []
             for elo in (pce.get("elo_ratings") or []):
                 pc_rankings.append(PairwiseRanking(
-                    doc_id=elo.get("doc_id", ""),
-                    wins=elo.get("wins", 0),
-                    losses=elo.get("losses", 0),
-                    elo=elo.get("rating", 1000.0),
+                    doc_id=elo["doc_id"],
+                    wins=elo["wins"],
+                    losses=elo["losses"],
+                    elo=elo["rating"],
                 ))
             pc_comparisons = []
             for res in (pce.get("results") or []):
                 pc_comparisons.append(PairwiseComparison(
-                    doc_id_a=res.get("doc_id_1", ""),
-                    doc_id_b=res.get("doc_id_2", ""),
-                    winner=res.get("winner_doc_id", ""),
-                    judge_model=res.get("model", ""),
-                    reason=res.get("reason", ""),
+                    doc_id_a=res["doc_id_1"],
+                    doc_id_b=res["doc_id_2"],
+                    winner=res["winner_doc_id"],
+                    judge_model=res["model"],
+                    reason=res["reason"],
                     score_a=None,
                     score_b=None,
                 ))
             post_combine_pairwise = PairwiseResults(
-                total_comparisons=pce.get("total_comparisons", 0),
+                total_comparisons=pce["total_comparisons"],
                 winner_doc_id=pce.get("winner_doc_id"),
                 rankings=pc_rankings,
                 comparisons=pc_comparisons,
                 pairwise_deviations=pce.get("pairwise_deviations") or {},
-                total_cost=pce.get("total_cost", 0.0),
+                total_cost=pce["total_cost"],
             )
     except Exception as e:
         logger.warning(f"Failed to parse post_combine_eval for run {run.id}: {e}")
@@ -255,21 +255,21 @@ def to_detail(run) -> RunDetail:
                 # Handle both 'reason' and 'reasoning' field names (backend uses 'reasoning', schema expects 'reason')
                 scores = []
                 for s in (eval_data.get("scores") or []):
-                    score_reason = s.get("reason") or s.get("reasoning", "")
+                    score_reason = s.get("reason") or s.get("reasoning") or ""
                     scores.append(CriterionScoreInfo(
-                        criterion=s.get("criterion", ""),
-                        score=int(s.get("score", 0)),
+                        criterion=s["criterion"],
+                        score=int(s["score"]),
                         reason=score_reason,
                     ))
                 evaluations.append(JudgeEvaluation(
-                    judge_model=eval_data.get("judge_model", ""),
-                    trial=eval_data.get("trial", 0),
+                    judge_model=eval_data["judge_model"],
+                    trial=eval_data["trial"],
                     scores=scores,
-                    average_score=eval_data.get("average_score", 0.0),
+                    average_score=eval_data["average_score"],
                 ))
             pre_combine_evals_detailed[doc_id] = DocumentEvalDetail(
                 evaluations=evaluations,
-                overall_average=detail.get("overall_average", 0.0),
+                overall_average=detail["overall_average"],
             )
     except Exception as e:
         logger.warning(f"Failed to parse pre_combine_evals_detailed for run {run.id}: {e}")
@@ -283,21 +283,21 @@ def to_detail(run) -> RunDetail:
                 # Handle both 'reason' and 'reasoning' field names
                 scores = []
                 for s in (eval_data.get("scores") or []):
-                    score_reason = s.get("reason") or s.get("reasoning", "")
+                    score_reason = s.get("reason") or s.get("reasoning") or ""
                     scores.append(CriterionScoreInfo(
-                        criterion=s.get("criterion", ""),
-                        score=int(s.get("score", 0)),
+                        criterion=s["criterion"],
+                        score=int(s["score"]),
                         reason=score_reason,
                     ))
                 evaluations.append(JudgeEvaluation(
-                    judge_model=eval_data.get("judge_model", ""),
-                    trial=eval_data.get("trial", 0),
+                    judge_model=eval_data["judge_model"],
+                    trial=eval_data["trial"],
                     scores=scores,
-                    average_score=eval_data.get("average_score", 0.0),
+                    average_score=eval_data["average_score"],
                 ))
             post_combine_evals_detailed[doc_id] = DocumentEvalDetail(
                 evaluations=evaluations,
-                overall_average=detail.get("overall_average", 0.0),
+                overall_average=detail["overall_average"],
             )
     except Exception as e:
         logger.warning(f"Failed to parse post_combine_evals_detailed for run {run.id}: {e}")
@@ -338,18 +338,18 @@ def to_detail(run) -> RunDetail:
                         if isinstance(r, dict):
                             comparisons.append(
                                 PairwiseComparison(
-                                    doc_id_a=r.get("doc_id_1", ""),
-                                    doc_id_b=r.get("doc_id_2", ""),
-                                    winner=r.get("winner_doc_id", "") or "tie",
-                                    judge_model=r.get("model", ""),
-                                    reason=r.get("reason", ""),
+                                    doc_id_a=r["doc_id_1"],
+                                    doc_id_b=r["doc_id_2"],
+                                    winner=r["winner_doc_id"],
+                                    judge_model=r["model"],
+                                    reason=r["reason"],
                                     score_a=None,
                                     score_b=None,
                                 )
                             )
 
                     return PairwiseResults(
-                        total_comparisons=int(pw.get("total_comparisons", 0) or 0),
+                        total_comparisons=pw["total_comparisons"],
                         winner_doc_id=pw.get("winner_doc_id"),
                         rankings=rankings,
                         comparisons=comparisons,
@@ -573,14 +573,14 @@ def to_detail(run) -> RunDetail:
         description=run.description,
         status=run.status,
         error_message=run.error_message,  # Include error message from DB
-        generators=[GeneratorType(g) for g in (config.get("generators") or [])],
+        generators=[GeneratorType(g) for g in config["generators"]],
         models=models,
-        document_ids=config.get("document_ids") or [],
-        iterations=config.get("iterations", 1),
-        log_level=config.get("log_level", "INFO"),
+        document_ids=config["document_ids"],
+        iterations=config["iterations"],
+        log_level=config["log_level"],
         gptr_settings=GptrSettings(**config.get("gptr_config")) if config.get("gptr_config") else None,
-        evaluation=EvaluationSettings(enabled=config.get("evaluation_enabled", False)),
-        pairwise=PairwiseSettings(enabled=config.get("pairwise_enabled", False)),
+        evaluation=EvaluationSettings(enabled=config["evaluation_enabled"]),
+        pairwise=PairwiseSettings(enabled=config["pairwise_enabled"]),
         combine=combine_settings,
         progress=calculate_progress(run),
         tasks=[TaskSummary(

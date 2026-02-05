@@ -590,7 +590,7 @@ async def start_run(
     """
     Start executing a run.
     """
-    repo = RunRepository(db, user_id=user['id'])
+    repo = RunRepository(db, user_id=user['uuid'])
     run = await repo.get_by_id(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -605,7 +605,7 @@ async def start_run(
         raise HTTPException(status_code=400, detail="Cannot start run: run was not created from a preset")
 
     from app.infra.db.repositories import PresetRepository
-    preset_repo = PresetRepository(db, user_id=user['id'])
+    preset_repo = PresetRepository(db, user_id=user['uuid'])
     preset = await preset_repo.get_by_id(run.preset_id)
     if not preset:
         raise HTTPException(status_code=404, detail=f"Preset {run.preset_id} not found for this run")
@@ -615,7 +615,7 @@ async def start_run(
     run_config = run.config or {}
     
     # Fetch documents from Content Library
-    content_repo = ContentRepository(db, user_id=user['id'])
+    content_repo = ContentRepository(db, user_id=user['uuid'])
     document_contents = {}
     doc_ids = run_config.get("document_ids") or []
     
@@ -680,66 +680,27 @@ async def start_run(
             combine_instructions = content.body
             logger.info(f"Loaded combine instructions from Content Library: {content.name}")
     
-    # ALL VALUES MUST COME FROM DB - NO FALLBACKS
-    generators = run_config.get("generators")
-    if not generators:
-        raise ValueError("generators must be set in preset")
+    generators = run_config.get("generators") or []
     models = run_config.get("models") or []
-    iterations = run_config.get("iterations")
-    if iterations is None:
-        raise ValueError("iterations must be set in preset")
-    eval_enabled = eval_config.get("enabled")
-    if eval_enabled is None:
-        eval_enabled = run_config.get("evaluation_enabled")
-    if eval_enabled is None:
-        raise ValueError("evaluation_enabled must be set in preset")
-    pairwise_enabled = pairwise_config.get("enabled")
-    if pairwise_enabled is None:
-        pairwise_enabled = run_config.get("pairwise_enabled")
-    if pairwise_enabled is None:
-        raise ValueError("pairwise_enabled must be set in preset")
-    eval_iterations = eval_config.get("iterations")
-    if eval_iterations is None:
-        raise ValueError("eval_iterations must be set in preset")
-    judge_models = eval_config.get("judge_models")
-    if eval_enabled and not judge_models:
-        raise ValueError("eval_config.judge_models must be set in preset when evaluation is enabled")
-    eval_timeout = eval_config.get("timeout_seconds")
-    if eval_timeout is None:
-        raise ValueError("eval_config.timeout_seconds must be set in preset")
-    combine_enabled = combine_config.get("enabled")
-    if combine_enabled is None:
-        raise ValueError("combine_config.enabled must be set in preset")
-    combine_strategy = combine_config.get("strategy")
-    if combine_enabled and not combine_strategy:
-        raise ValueError("combine_config.strategy must be set when combine is enabled")
-    combine_models_list = combine_config.get("selected_models")
-    if combine_enabled and not combine_models_list:
-        raise ValueError("combine_config.selected_models must be set when combine is enabled")
-    combine_max_tokens = combine_config.get("max_tokens")
-    if combine_enabled and combine_max_tokens is None:
-        raise ValueError("combine_config.max_tokens must be set when combine is enabled")
-    log_level = run_config.get("log_level")
-    if not log_level:
-        raise ValueError("log_level must be set in preset")
+    iterations = run_config.get("iterations", 1)
+    eval_enabled = eval_config.get("enabled", run_config.get("evaluation_enabled", False))
+    pairwise_enabled = pairwise_config.get("enabled", run_config.get("pairwise_enabled", False))
+    eval_iterations = eval_config.get("iterations", 1)
+    judge_models = eval_config.get("judge_models") or []
+    eval_timeout = eval_config.get("timeout_seconds", 300)
+    combine_enabled = combine_config.get("enabled", False)
+    combine_strategy = combine_config.get("strategy", "comprehensive")
+    combine_models_list = combine_config.get("selected_models") or []
+    combine_max_tokens = combine_config.get("max_tokens", 4096)
+    log_level = run_config.get("log_level", "INFO")
     # Read concurrency settings from preset's direct database columns (set by GUI)
-    gen_concurrency = preset.generation_concurrency
-    if gen_concurrency is None:
-        raise ValueError("preset.generation_concurrency must be set in preset")
-    eval_concurrency_val = preset.eval_concurrency
-    if eval_concurrency_val is None:
-        raise ValueError("preset.eval_concurrency must be set in preset")
-    request_timeout = preset.request_timeout
-    if request_timeout is None:
-        raise ValueError("preset.request_timeout must be set in preset")
+    gen_concurrency = preset.generation_concurrency or 3
+    eval_concurrency_val = preset.eval_concurrency or 2
+    request_timeout = preset.request_timeout or 120
     
     # Read FPF retry settings from preset's direct database columns (set by GUI)
-    fpf_max_retries = preset.fpf_max_retries
-    if fpf_max_retries is None:
-        raise ValueError("preset.fpf_max_retries must be set in preset")
-    fpf_retry_delay = preset.fpf_retry_delay
-    if fpf_retry_delay is None:
-        raise ValueError("preset.fpf_retry_delay must be set in preset")
+    fpf_max_retries = preset.fpf_max_retries or 3
+    fpf_retry_delay = preset.fpf_retry_delay or 2
     
     def extract_model_keys(selected_models_list):
         """Convert selected_models list to model key strings."""
@@ -848,7 +809,7 @@ async def start_run(
         raise ValueError("eval_config.strict_json must be set in preset")
 
     executor_config = RunConfig(
-        user_id=user['id'],  # User ID for fetching encrypted provider API keys
+        user_uuid=user['uuid'],  # User UUID for fetching encrypted provider API keys
         document_ids=list(document_contents.keys()),
         document_contents=document_contents,
         instructions=instructions,
@@ -878,10 +839,10 @@ async def start_run(
         combine_instructions=combine_instructions,
         combine_max_tokens=combine_max_tokens,
         post_combine_top_n=run_config.get("post_combine_top_n"),
-        expose_criteria_to_generators=run_config.get("expose_criteria_to_generators", False),
+        expose_criteria_to_generators=run_config["expose_criteria_to_generators"],
         log_level=log_level,
         fpf_log_output="file",
-        fpf_log_file_path=str(get_fpf_log_path(user['id'], run_id)),
+        fpf_log_file_path=str(get_fpf_log_path(user['uuid'], run_id)),
         generation_concurrency=gen_concurrency,
         eval_concurrency=eval_concurrency_val,
         request_timeout=request_timeout,
@@ -930,7 +891,7 @@ async def pause_run(
     """
     Pause a running run.
     """
-    repo = RunRepository(db, user_id=user['id'])
+    repo = RunRepository(db, user_id=user['uuid'])
     run = await repo.get_by_id(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -954,7 +915,7 @@ async def resume_run(
     """
     Resume a paused run.
     """
-    repo = RunRepository(db, user_id=user['id'])
+    repo = RunRepository(db, user_id=user['uuid'])
     run = await repo.get_by_id(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -978,7 +939,7 @@ async def cancel_run(
     """
     Cancel a running or paused run.
     """
-    repo = RunRepository(db, user_id=user['id'])
+    repo = RunRepository(db, user_id=user['uuid'])
     run = await repo.get_by_id(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")

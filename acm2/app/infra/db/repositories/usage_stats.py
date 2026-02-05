@@ -23,12 +23,12 @@ class UsageStatsRepository(BaseRepository[UsageStats]):
     - Run counts
     
     Usage:
-        repo = UsageStatsRepository(session, user_id=user['id'])
+        repo = UsageStatsRepository(session, user_id=user['uuid'])
         await repo.record_usage(date.today(), "openai", "gpt-4", tokens=1000, cost=0.03)
         stats = await repo.get_stats_by_date_range(start_date, end_date)
     """
     
-    def __init__(self, session: AsyncSession, user_id: Optional[int] = None):
+    def __init__(self, session: AsyncSession, user_id: Optional[str] = None):
         super().__init__(UsageStats, session, user_id)
     
     async def record_usage(

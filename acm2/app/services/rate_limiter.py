@@ -102,29 +102,28 @@ class ProviderRegistry:
     _instance: Optional["ProviderRegistry"] = None
     _lock: asyncio.Lock = None
     
-    # Default provider configurations (delay only, no concurrency limits)
-    DEFAULT_CONFIGS: Dict[str, Dict] = {
-        "anthropic": {
-            "min_delay_seconds": 1.0,  # Small delay between calls
-        },
-        "openai": {
-            "min_delay_seconds": 0.5,
-        },
-        "google": {
-            "min_delay_seconds": 0.5,
-        },
-        "openrouter": {
-            "min_delay_seconds": 0.5,
-        },
-        # Default for unknown providers
-        "_default": {
-            "min_delay_seconds": 1.0,
-        },
-    }
+    # All rate limit settings MUST come from preset config - no hardcoded defaults
+    # Preset must specify min_delay_seconds for each provider
     
     def __init__(self):
         self._limiters: Dict[str, ProviderRateLimiter] = {}
         self._registry_lock = asyncio.Lock()
+        self._config: Dict[str, Dict] = {}  # Must be set via configure()
+    
+    def configure(self, provider_configs: Dict[str, Dict]) -> None:
+        """
+        Configure rate limits from preset. REQUIRED before use.
+        
+        provider_configs format:
+        {
+            "anthropic": {"min_delay_seconds": 1.0},
+            "openai": {"min_delay_seconds": 0.5},
+            ...
+        }
+        """
+        if not provider_configs:
+            raise ValueError("provider_configs is required - no fallback defaults allowed")
+        self._config = provider_configs
     
     @classmethod
     async def get_instance(cls) -> "ProviderRegistry":
@@ -144,10 +143,12 @@ class ProviderRegistry:
         cls._instance = None
     
     async def _initialize(self) -> None:
-        """Initialize all provider limiters from default configs."""
-        for provider_name, config_dict in self.DEFAULT_CONFIGS.items():
-            if provider_name == "_default":
-                continue
+        """Initialize provider limiters from configured values."""
+        if not self._config:
+            raise RuntimeError("ProviderRegistry not configured - call configure() with preset values first")
+        for provider_name, config_dict in self._config.items():
+            if "min_delay_seconds" not in config_dict:
+                raise ValueError(f"Provider '{provider_name}' missing required 'min_delay_seconds' - no fallback defaults allowed")
             config = ProviderConfig(
                 name=provider_name,
                 min_delay_seconds=config_dict["min_delay_seconds"],
@@ -163,22 +164,15 @@ class ProviderRegistry:
         """
         Get the rate limiter for a provider.
         
-        If provider is unknown, creates a limiter with default settings.
+        Provider MUST be configured. No fallback defaults.
         """
         provider_lower = provider.lower()
         
         async with self._registry_lock:
             if provider_lower not in self._limiters:
-                # Create limiter with default settings
-                default_config = self.DEFAULT_CONFIGS.get("_default", {})
-                config = ProviderConfig(
-                    name=provider_lower,
-                    min_delay_seconds=default_config.get("min_delay_seconds", 1.0),
-                )
-                self._limiters[provider_lower] = ProviderRateLimiter(config)
-                logger.warning(
-                    f"[RATE-LIMIT] Unknown provider '{provider}', "
-                    f"using default delay: min_delay={config.min_delay_seconds}s"
+                raise RuntimeError(
+                    f"Provider '{provider}' not configured in rate limiter - "
+                    "add it to preset provider_rate_limits, no fallback defaults allowed"
                 )
             
             return self._limiters[provider_lower]

@@ -31,7 +31,9 @@ def _normalize_model(model_id: str) -> str:
     base = raw.split(":", 1)[0]
     if base.startswith("tvly-"):
         base = base[len("tvly-"):]
-    return base or "auto"
+    if not base:
+        raise ValueError("Model ID cannot be empty - no fallback defaults allowed")
+    return base
 
 
 def build_payload(prompt: str, cfg: dict):
@@ -39,8 +41,12 @@ def build_payload(prompt: str, cfg: dict):
     if not model:
         raise RuntimeError("Tavily provider requires 'model' in config - no fallback defaults allowed")
     normalized_model = _normalize_model(model)
-    stream = bool(cfg.get("stream", False))
-    citation_format = cfg.get("citation_format", "numbered")
+    if "stream" not in cfg:
+        raise RuntimeError("Tavily config requires 'stream' - no fallback defaults allowed")
+    if "citation_format" not in cfg:
+        raise RuntimeError("Tavily config requires 'citation_format' - no fallback defaults allowed")
+    stream = bool(cfg["stream"])
+    citation_format = cfg["citation_format"]
     output_schema = cfg.get("output_schema")
 
     payload = {

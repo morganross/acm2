@@ -172,9 +172,6 @@ class Preset(Base):
         String(36), ForeignKey("contents.id"), nullable=True
     )
     
-    # Soft delete
-    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
-    
     # Relationships
     runs: Mapped[list["Run"]] = relationship("Run", back_populates="preset")
     

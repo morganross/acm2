@@ -243,18 +243,19 @@ class GptrAdapter(BaseAdapter):
         query: str,
         config: GenerationConfig, 
         *,
-        user_id: int,
+        user_id: str,
         document_content: Optional[str] = None,
         progress_callback: Optional[ProgressCallback] = None,
     ) -> GenerationResult:
         """
         Run GPT-Researcher generation with timeout and retry support.
         """
-        task_id = str(config.extra.get("task_id")) if getattr(config, 'extra', None) and "task_id" in config.extra else ("gptr-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
+        extra = config.extra or {}
+        task_id = str(extra.get("task_id", str(uuid.uuid4())[:8]))
         started_at = datetime.utcnow()
 
         # 1. Prepare Configuration
-        gptr_config = GptrConfig(**(config.extra or {}))
+        gptr_config = GptrConfig(**extra)
         
         # Get timeout and retry settings
         timeout_minutes = gptr_config.subprocess_timeout_minutes
@@ -270,7 +271,7 @@ class GptrAdapter(BaseAdapter):
         from app.security.key_injection import inject_provider_keys_for_user_auto
         try:
             env = await inject_provider_keys_for_user_auto(user_id, env)
-            logger.debug(f"GPT-R: Injected encrypted API keys for user_id={user_id}")
+            logger.debug(f"GPT-R: Injected encrypted API keys for user_uuid={user_id}")
         except Exception as e:
             logger.warning(f"GPT-R: Failed to inject provider keys for user {user_id}: {e}")
         
@@ -293,7 +294,7 @@ class GptrAdapter(BaseAdapter):
             "openai:gpt-5": 8192,
             "openai:gpt-5.1": 8192,
         }
-        safe_max_tokens = int(config.max_tokens or 4000)
+        safe_max_tokens = int(config.max_tokens or 4096)
         provider_limit = MODEL_OUTPUT_LIMITS.get(model_str, 4096)
         max_tokens = min(safe_max_tokens, provider_limit)
         

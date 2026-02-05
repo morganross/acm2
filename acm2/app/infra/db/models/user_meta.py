@@ -18,10 +18,11 @@ class UserMeta(Base):
     __tablename__ = "user_meta"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True, unique=True)
+    
+    # UUID is the ONLY user identifier - no integer user_id, no username
+    uuid: Mapped[str] = mapped_column(String(36), nullable=False, index=True, unique=True)
 
-    # User profile info
-    username: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    # User profile info - email only, no username
     email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     
     # Seed status

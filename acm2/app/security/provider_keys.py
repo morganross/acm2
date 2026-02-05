@@ -24,24 +24,24 @@ class ProviderKeyManager:
     Usage:
         # In a route with database session
         async def my_route(db: AsyncSession = Depends(get_user_db), user: dict = Depends(get_current_user)):
-            manager = ProviderKeyManager(db, user_id=user['id'])
+            manager = ProviderKeyManager(db, user_id=user['uuid'])
             await manager.save_key("openai", "sk-...")
             key = await manager.get_key("openai")
     """
     
     SUPPORTED_PROVIDERS = ['openai', 'anthropic', 'google', 'openrouter', 'groq']
     
-    def __init__(self, session: AsyncSession, user_id: int):
+    def __init__(self, session: AsyncSession, user_uuid: str):
         """Initialize provider key manager.
         
         Args:
             session: SQLAlchemy async session for the user's database
-            user_id: User ID from master database
+            user_uuid: User UUID
         """
-        self.user_id = user_id
+        self.user_uuid = user_uuid
         self.session = session
         self.encryption_service = get_encryption_service()
-        self._repo = ProviderKeyRepository(session, user_id=user_id)
+        self._repo = ProviderKeyRepository(session, user_id=user_uuid)
     
     async def save_key(self, provider: str, api_key: str):
         """Save (encrypt and store) a provider API key.
@@ -66,7 +66,7 @@ class ProviderKeyManager:
         # Store in user's database via repository
         await self._repo.save_key(provider, encrypted_key)
         
-        logger.info(f"Saved {provider} key for user {self.user_id}")
+        logger.info(f"Saved {provider} key for user {self.user_uuid}")
     
     async def get_key(self, provider: str) -> Optional[str]:
         """Get (retrieve and decrypt) a provider API key.
@@ -86,10 +86,10 @@ class ProviderKeyManager:
         # Decrypt the key
         try:
             decrypted_key = self.encryption_service.decrypt(encrypted_key)
-            logger.debug(f"Retrieved {provider} key for user {self.user_id}")
+            logger.debug(f"Retrieved {provider} key for user {self.user_uuid}")
             return decrypted_key
         except Exception as e:
-            logger.error(f"Failed to decrypt {provider} key for user {self.user_id}: {e}")
+            logger.error(f"Failed to decrypt {provider} key for user {self.user_uuid}: {e}")
             return None
     
     async def get_all_keys(self) -> Dict[str, str]:
@@ -121,7 +121,7 @@ class ProviderKeyManager:
         provider = provider.lower()
         deleted = await self._repo.delete_key(provider)
         if deleted:
-            logger.info(f"Deleted {provider} key for user {self.user_id}")
+            logger.info(f"Deleted {provider} key for user {self.user_uuid}")
         return deleted
     
     async def has_key(self, provider: str) -> bool:
@@ -166,14 +166,14 @@ class ProviderKeyManager:
         return is_valid
 
 
-def get_provider_key_manager(session: AsyncSession, user_id: int) -> ProviderKeyManager:
+def get_provider_key_manager(session: AsyncSession, user_uuid: str) -> ProviderKeyManager:
     """Get provider key manager for a user.
     
     Args:
         session: SQLAlchemy async session
-        user_id: User ID
+        user_uuid: User UUID
         
     Returns:
         ProviderKeyManager instance
     """
-    return ProviderKeyManager(session, user_id)
+    return ProviderKeyManager(session, user_uuid)

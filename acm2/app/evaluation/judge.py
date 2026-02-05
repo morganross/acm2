@@ -160,7 +160,7 @@ class Judge:
         fpf_adapter: Optional[FpfAdapter] = None,
         custom_prompt: Optional[str] = None,
         stats_tracker: Optional[FpfStatsTracker] = None,
-        user_id: Optional[int] = None,
+        user_id: Optional[str] = None,
     ):
         """
         Initialize the judge.

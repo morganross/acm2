@@ -26,6 +26,7 @@ from ..adapters.combine.adapter import CombineAdapter
 from ..adapters.combine.config import CombineConfig
 from ..adapters.base import GenerationConfig, GenerationResult, GeneratorType, ProgressCallback, TaskStatus
 from .rate_limiter import RateLimitedRequest, ProviderRegistry
+from .output_writer import OutputWriter
 from ..evaluation import (
     DocumentInput,
     EvaluationConfig,
@@ -85,7 +86,7 @@ class RunConfig:
     """Configuration for a run. All fields are REQUIRED unless explicitly Optional."""
     
     # User Context - REQUIRED for multi-user system
-    user_id: int  # User ID for fetching encrypted provider API keys
+    user_uuid: str  # User UUID for fetching encrypted provider API keys
     
     # Inputs - REQUIRED (no defaults)
     document_ids: List[str]
@@ -157,7 +158,8 @@ class RunConfig:
     # Output Configuration - Where to write the winning document
     output_destination: str = "none"  # "none", "library", or "github"
     output_filename_template: str = "{preset_name}_{timestamp}_winner"
-    github_repo_url: Optional[str] = None  # GitHub repo for pushing output
+    github_connection_id: Optional[str] = None  # GitHub connection ID for pushing output
+    github_output_path: Optional[str] = None  # Path in GitHub repo for output (e.g., "/outputs")
     github_commit_message: str = "ACM2 output: {filename}"
     preset_id: Optional[str] = None  # For output filename template
     preset_name: Optional[str] = None  # For output filename template
@@ -500,11 +502,11 @@ class RunExecutor:
     async def _persist_fpf_stats(self, run_id: str, stats_dict: dict) -> None:
         """Persist live FPF stats (including last_error) to the run results_summary."""
         try:
-            if not getattr(self, "config", None) or not self.config.user_id:
+            if not getattr(self, "config", None) or not self.config.user_uuid:
                 return
 
-            async with get_user_session_by_id(self.config.user_id) as session:
-                repo = RunRepository(session, user_id=self.config.user_id)
+            async with get_user_session_by_id(self.config.user_uuid) as session:
+                repo = RunRepository(session, user_id=self.config.user_uuid)
                 run = await repo.get_by_id(run_id)
                 if not run:
                     return
@@ -545,8 +547,8 @@ class RunExecutor:
         }
         
         try:
-            async with get_user_session_by_id(self.config.user_id) as session:
-                run_repo = RunRepository(session, user_id=self.config.user_id)
+            async with get_user_session_by_id(self.config.user_uuid) as session:
+                run_repo = RunRepository(session, user_id=self.config.user_uuid)
                 await run_repo.append_timeline_event(run_id, event)
                 self.logger.debug(f"Emitted timeline event: {phase}/{event_type} for run {run_id}")
         except Exception as e:
@@ -603,7 +605,7 @@ class RunExecutor:
         from ..config import get_settings
 
         settings = get_settings()
-        return settings.data_dir / f"user_{self.config.user_id}" / "runs" / run_id
+        return settings.data_dir / f"user_{self.config.user_uuid}" / "runs" / run_id
     
     async def execute(self, run_id: str, config: RunConfig) -> RunResult:
         """
@@ -822,6 +824,13 @@ class RunExecutor:
             success=result.status in (RunPhase.COMPLETED, RunPhase.COMPLETED_WITH_ERRORS),
         )
         
+        # =========================================================================
+        # Write Output - Push winning documents to configured destination
+        # =========================================================================
+        if result.status in (RunPhase.COMPLETED, RunPhase.COMPLETED_WITH_ERRORS):
+            if config.output_destination != "none":
+                await self._write_outputs(run_id, config, result)
+        
         self.logger.info(
             f"Run {run_id}: Multi-doc execution completed | "
             f"status={result.status.value} "
@@ -836,8 +845,8 @@ class RunExecutor:
         try:
             source_doc_id = event.get("source_doc_id")
             if source_doc_id:
-                async with get_user_session_by_id(self.config.user_id) as session:
-                    run_repo = RunRepository(session, user_id=self.config.user_id)
+                async with get_user_session_by_id(self.config.user_uuid) as session:
+                    run_repo = RunRepository(session, user_id=self.config.user_uuid)
                     await run_repo.append_source_doc_timeline_event(run_id, source_doc_id, event)
         except Exception as e:
             self.logger.warning(f"Failed to append source-doc timeline event for run {run_id}: {e}")
@@ -1091,7 +1100,7 @@ class RunExecutor:
             single_evaluator = SingleDocEvaluator(
                 eval_config,
                 stats_tracker=self._fpf_stats,
-                user_id=config.user_id,
+                user_id=config.user_uuid,
             )
             result.single_eval_results = {}
         
@@ -1391,7 +1400,7 @@ Optimize your response to score highly on each criterion:
                     gen_result = await adapter.generate(
                         query=fpf_instructions,  # Use instructions with optional criteria
                         config=gen_config,
-                        user_id=config.user_id,
+                        user_id=config.user_uuid,
                         document_content=content,
                         progress_callback=progress_callback,
                         fpf_log_output=fpf_log_output,
@@ -1427,7 +1436,7 @@ Optimize your output to score highly on each criterion:
                     gen_result = await adapter.generate(
                         query=full_query,
                         config=gen_config,
-                        user_id=config.user_id,
+                        user_id=config.user_uuid,
                         progress_callback=progress_callback,
                 )
             
@@ -1524,7 +1533,7 @@ Optimize your output to score highly on each criterion:
             pairwise_config,
             criteria_manager=criteria_manager,
             stats_tracker=self._fpf_stats,
-            user_id=config.user_id,
+            user_id=config.user_uuid,
         )
         
         # Collect doc IDs and contents, filtering out empty content
@@ -1693,7 +1702,7 @@ Optimize your output to score highly on each criterion:
                         reports=top_docs,
                         instructions=combine_instructions,
                         config=combine_gen_config,
-                        user_id=config.user_id,
+                        user_id=config.user_uuid,
                         original_instructions=original_instructions
                     )
                     combine_completed_at = datetime.utcnow()
@@ -1797,7 +1806,7 @@ Optimize your output to score highly on each criterion:
             evaluator = PairwiseEvaluator(
                 pairwise_config,
                 stats_tracker=self._fpf_stats,
-                user_id=config.user_id,
+                user_id=config.user_uuid,
             )
             
             # Collect documents for comparison
@@ -1885,6 +1894,112 @@ Optimize your output to score highly on each criterion:
         except Exception as e:
             self.logger.error(f"Post-combine eval failed: {e}", exc_info=True)
             result.errors.append(f"Post-combine eval failed: {str(e)}")
+    
+    async def _write_outputs(
+        self,
+        run_id: str,
+        config: RunConfig,
+        result: RunResult,
+    ) -> None:
+        """
+        Write winning documents to configured destinations.
+        
+        For each source document that has a winner, writes to:
+        - Content Library (always for library/github destinations)
+        - GitHub repository (if github destination)
+        
+        Args:
+            run_id: The run ID
+            config: Run configuration with output settings
+            result: Run result with per-source-doc winners
+        """
+        self.logger.info(f"Run {run_id}: Writing outputs to {config.output_destination}")
+        
+        try:
+            async with get_user_session_by_id(config.user_uuid) as db:
+                output_writer = OutputWriter(db, config.user_uuid)
+                
+                written_count = 0
+                error_count = 0
+                
+                for source_doc_id, source_doc_result in result.source_doc_results.items():
+                    # Skip failed source docs
+                    if source_doc_result.status not in (RunPhase.COMPLETED, RunPhase.COMPLETED_WITH_ERRORS):
+                        self.logger.debug(
+                            f"Run {run_id}: Skipping output for {source_doc_result.source_doc_name} "
+                            f"(status={source_doc_result.status.value})"
+                        )
+                        continue
+                    
+                    # Find winner content
+                    winner_content: Optional[str] = None
+                    winner_doc_id: Optional[str] = None
+                    winner_model: str = "unknown"
+                    
+                    # Prefer combined doc if exists
+                    if source_doc_result.combined_docs:
+                        combined_doc = source_doc_result.combined_docs[0]
+                        winner_content = combined_doc.content
+                        winner_doc_id = combined_doc.doc_id
+                        winner_model = combined_doc.model
+                    elif source_doc_result.combined_doc:
+                        winner_content = source_doc_result.combined_doc.content
+                        winner_doc_id = source_doc_result.combined_doc.doc_id
+                        winner_model = source_doc_result.combined_doc.model
+                    # Otherwise use pairwise winner
+                    elif source_doc_result.winner_doc_id:
+                        winner_doc_id = source_doc_result.winner_doc_id
+                        # Find the generated doc with this ID
+                        for gen_doc in source_doc_result.generated_docs:
+                            if gen_doc.doc_id == winner_doc_id:
+                                winner_content = gen_doc.content
+                                winner_model = gen_doc.model
+                                break
+                    
+                    if not winner_content or not winner_doc_id:
+                        self.logger.warning(
+                            f"Run {run_id}: No winner content found for {source_doc_result.source_doc_name}"
+                        )
+                        continue
+                    
+                    # Write to destination
+                    write_result = await output_writer.write_winner(
+                        content=winner_content,
+                        output_destination=config.output_destination,
+                        filename_template=config.output_filename_template,
+                        run_id=run_id,
+                        winner_doc_id=winner_doc_id,
+                        source_doc_name=source_doc_result.source_doc_name,
+                        winner_model=winner_model,
+                        github_connection_id=config.github_connection_id,
+                        github_output_path=config.github_output_path,
+                        github_commit_message=f"ACM2 Run {run_id[:8]}: Output for {source_doc_result.source_doc_name}",
+                    )
+                    
+                    if write_result.success:
+                        written_count += 1
+                        self.logger.info(
+                            f"Run {run_id}: Wrote output for {source_doc_result.source_doc_name} "
+                            f"(content_id={write_result.content_id}, github_url={write_result.github_url})"
+                        )
+                    else:
+                        error_count += 1
+                        self.logger.error(
+                            f"Run {run_id}: Failed to write output for {source_doc_result.source_doc_name}: "
+                            f"{write_result.error}"
+                        )
+                        result.errors.append(
+                            f"Output write failed for {source_doc_result.source_doc_name}: {write_result.error}"
+                        )
+                
+                self.logger.info(
+                    f"Run {run_id}: Output writing completed - "
+                    f"{written_count} written, {error_count} errors"
+                )
+                
+        except Exception as e:
+            self.logger.exception(f"Run {run_id}: Output writing failed: {e}")
+            result.errors.append(f"Output writing failed: {str(e)}")
     
     def cancel(self) -> None:
         """Cancel the running execution."""

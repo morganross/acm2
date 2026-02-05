@@ -291,10 +291,19 @@ def _load_provider_module(provider_name: str = "openai"):
 
 def _read_key_from_env_file(env_path: Path, key: str) -> Optional[str]:
     """
-    Read KEY=VALUE lines from env_path and return the value for `key` if present.
-    This is a conservative, deterministic parser used to ensure the repo .env is
-    the canonical source for sensitive keys.
+    Read KEY=VALUE from environment or env_path file.
+    
+    Priority:
+    1. Environment variable (os.environ) - allows ACM2 to inject decrypted keys
+    2. .env file - fallback for standalone FPF usage
     """
+    # First check os.environ (ACM2 injects keys here)
+    env_value = os.environ.get(key)
+    if env_value:
+        LOG.info(f"Loaded API key '{key}' from environment variable (Length: {len(env_value)})")
+        return env_value
+    
+    # Fallback to .env file
     if not env_path.exists():
         return None
     try:

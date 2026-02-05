@@ -80,9 +80,6 @@ class Content(Base):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     tags: Mapped[list] = mapped_column(JSON, default=list)
     
-    # Soft delete
-    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
-    
     def __repr__(self) -> str:
         return f"<Content(id={self.id}, name={self.name}, type={self.content_type})>"
     

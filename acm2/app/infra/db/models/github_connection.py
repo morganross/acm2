@@ -50,8 +50,5 @@ class GitHubConnection(Base):
     is_valid: Mapped[bool] = mapped_column(Boolean, default=True)
     last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
-    # Soft delete
-    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
-    
     def __repr__(self) -> str:
         return f"<GitHubConnection(id={self.id}, repo={self.repo}, branch={self.branch})>"

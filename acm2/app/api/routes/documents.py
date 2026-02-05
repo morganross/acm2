@@ -112,7 +112,7 @@ async def create_document(
     
     Provide content directly, a file_path to read from, or a url to fetch.
     """
-    repo = DocumentRepository(db, user_id=user['id'])
+    repo = DocumentRepository(db, user_id=user['uuid'])
     
     # Get content from one of the sources
     content = ""
@@ -148,7 +148,6 @@ async def create_document(
         word_count=word_count,
         file_type=_get_file_type(data.document_type),
         tags=",".join(data.tags) if data.tags else None,
-        is_deleted=False,
     )
     
     created_doc = await repo.create(doc)
@@ -165,7 +164,7 @@ async def upload_document(
     """
     Upload a document file.
     """
-    repo = DocumentRepository(db, user_id=user['id'])
+    repo = DocumentRepository(db, user_id=user['uuid'])
     
     # Read file content
     content = await file.read()
@@ -199,7 +198,6 @@ async def upload_document(
         word_count=word_count,
         file_type=file_type,
         tags=tags if tags else None,
-        is_deleted=False,
     )
     
     created_doc = await repo.create(doc)
@@ -217,7 +215,7 @@ async def list_documents(
     """
     List all documents with pagination.
     """
-    repo = DocumentRepository(db, user_id=user['id'])
+    repo = DocumentRepository(db, user_id=user['uuid'])
     offset = (page - 1) * page_size
     
     # Get documents from DB
@@ -253,9 +251,9 @@ async def get_document(
     """
     Get detailed information about a document.
     """
-    repo = DocumentRepository(db, user_id=user['id'])
+    repo = DocumentRepository(db, user_id=user['uuid'])
     doc = await repo.get_by_id(doc_id)
-    if not doc or doc.is_deleted:
+    if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     return _to_detail(doc, include_content)
 
@@ -269,9 +267,9 @@ async def get_document_content(
     """
     Get the full content of a document.
     """
-    repo = DocumentRepository(db, user_id=user['id'])
+    repo = DocumentRepository(db, user_id=user['uuid'])
     doc = await repo.get_by_id(doc_id)
-    if not doc or doc.is_deleted:
+    if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
     return DocumentContent(
@@ -292,9 +290,9 @@ async def update_document(
     """
     Update document metadata.
     """
-    repo = DocumentRepository(db, user_id=user['id'])
+    repo = DocumentRepository(db, user_id=user['uuid'])
     doc = await repo.get_by_id(doc_id)
-    if not doc or doc.is_deleted:
+    if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
     # Update fields
@@ -315,10 +313,10 @@ async def delete_document(
     db: AsyncSession = Depends(get_user_db),
 ) -> dict:
     """
-    Soft delete a document.
+    Delete a document permanently.
     """
-    repo = DocumentRepository(db, user_id=user['id'])
-    deleted = await repo.soft_delete(doc_id)
+    repo = DocumentRepository(db, user_id=user['uuid'])
+    deleted = await repo.delete(doc_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Document not found")
     return {"status": "deleted", "doc_id": doc_id}

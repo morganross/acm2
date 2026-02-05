@@ -25,7 +25,7 @@ PROVIDER_TO_ENV_VAR = {
 
 async def inject_provider_keys_for_user(
     session: AsyncSession, 
-    user_id: int, 
+    user_uuid: str, 
     env: Dict[str, str]
 ) -> Dict[str, str]:
     """
@@ -33,7 +33,7 @@ async def inject_provider_keys_for_user(
     
     Args:
         session: SQLAlchemy async session for the user's database
-        user_id: The user ID to fetch keys for
+        user_uuid: The user UUID to fetch keys for
         env: The environment dictionary to inject keys into (typically os.environ.copy())
     
     Returns:
@@ -42,10 +42,10 @@ async def inject_provider_keys_for_user(
     Example:
         env = os.environ.copy()
         async with get_user_db_session(user) as session:
-            env = await inject_provider_keys_for_user(session, user_id=1, env=env)
+            env = await inject_provider_keys_for_user(session, user_uuid="abc-123", env=env)
         # Now env contains OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.
     """
-    manager = ProviderKeyManager(session, user_id)
+    manager = ProviderKeyManager(session, user_uuid)
     
     # Get all configured providers (already decrypted)
     decrypted_keys = await manager.get_all_keys()
@@ -60,7 +60,7 @@ async def inject_provider_keys_for_user(
 
 
 async def inject_provider_keys_for_user_auto(
-    user_id: int,
+    user_uuid: str,
     env: Dict[str, str],
 ) -> Dict[str, str]:
     """
@@ -70,7 +70,7 @@ async def inject_provider_keys_for_user_auto(
     For routes that already have a session, use inject_provider_keys_for_user() instead.
     
     Args:
-        user_id: The user ID to fetch keys for
+        user_uuid: The user UUID to fetch keys for
         env: The environment dictionary to inject keys into
         
     Returns:
@@ -79,17 +79,17 @@ async def inject_provider_keys_for_user_auto(
     from app.infra.db.session import get_user_db_session
     
     # Create a minimal user dict for the session factory
-    user = {"id": user_id}
+    user = {"uuid": user_uuid}
     
     async for session in get_user_db_session(user):
-        return await inject_provider_keys_for_user(session, user_id, env)
+        return await inject_provider_keys_for_user(session, user_uuid, env)
     
     return env  # Return unchanged if session creation fails
 
 
 async def get_provider_key(
     session: AsyncSession, 
-    user_id: int, 
+    user_uuid: str, 
     provider: str
 ) -> Optional[str]:
     """
@@ -97,7 +97,7 @@ async def get_provider_key(
     
     Args:
         session: SQLAlchemy async session for the user's database
-        user_id: The user ID to fetch key for
+        user_uuid: The user UUID to fetch key for
         provider: The provider name (openai, anthropic, google, etc.)
     
     Returns:
@@ -105,22 +105,22 @@ async def get_provider_key(
         
     Example:
         async with get_user_db_session(user) as session:
-            openai_key = await get_provider_key(session, user_id=1, provider="openai")
+            openai_key = await get_provider_key(session, user_uuid="abc-123", provider="openai")
             if openai_key:
                 client = OpenAI(api_key=openai_key)
     """
-    manager = ProviderKeyManager(session, user_id)
+    manager = ProviderKeyManager(session, user_uuid)
     return await manager.get_key(provider)
 
 
-async def get_provider_key_auto(user_id: int, provider: str) -> Optional[str]:
+async def get_provider_key_auto(user_uuid: str, provider: str) -> Optional[str]:
     """
     Convenience function that automatically creates a database session.
     
     Use this when you don't have an existing session (e.g., in adapters).
     
     Args:
-        user_id: The user ID to fetch key for
+        user_uuid: The user UUID to fetch key for
         provider: The provider name
         
     Returns:
@@ -128,9 +128,9 @@ async def get_provider_key_auto(user_id: int, provider: str) -> Optional[str]:
     """
     from app.infra.db.session import get_user_db_session
     
-    user = {"id": user_id}
+    user = {"uuid": user_uuid}
     
     async for session in get_user_db_session(user):
-        return await get_provider_key(session, user_id, provider)
+        return await get_provider_key(session, user_uuid, provider)
     
     return None

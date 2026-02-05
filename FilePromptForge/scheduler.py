@@ -71,58 +71,30 @@ class GlobalRateLimiter:
             time.sleep(wait_for)
 
 
-def _derive_global_from_legacy(concurrency_cfg: Dict[str, Any]) -> Dict[str, Any]:
+def _validate_concurrency_cfg(concurrency_cfg: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Backward-compatibility mapping:
-    - enabled: passthrough if present, else True
-    - max_concurrency: passthrough or default 1
-    - qps:
-        * If top-level 'qps' present and > 0, use it
-        * Else if per_provider.*.rate_limit.qps present, use MIN positive among them
-        * Else default to 2.0
-    Burst and per-provider max_concurrency are ignored.
+    Validate concurrency config - ALL values MUST be explicitly set.
+    NO DEFAULTS. NO FALLBACKS. Raises ValueError if missing.
     """
-    out: Dict[str, Any] = {}
-    try:
-        out["enabled"] = bool(concurrency_cfg.get("enabled", True))
-    except Exception:
-        out["enabled"] = True
-
-    try:
-        out["max_concurrency"] = int(concurrency_cfg.get("max_concurrency") or 1)
-    except Exception:
-        out["max_concurrency"] = 1
-
-    # qps selection
-    qps = 0.0
-    try:
-        qps = float(concurrency_cfg.get("qps") or 0.0)
-    except Exception:
-        qps = 0.0
+    if not concurrency_cfg:
+        raise ValueError("concurrency_cfg is required - no defaults allowed")
+    
+    if "enabled" not in concurrency_cfg:
+        raise ValueError("concurrency_cfg.enabled is required")
+    if "max_concurrency" not in concurrency_cfg:
+        raise ValueError("concurrency_cfg.max_concurrency is required")
+    if "qps" not in concurrency_cfg:
+        raise ValueError("concurrency_cfg.qps is required")
+    
+    qps = float(concurrency_cfg["qps"])
     if qps <= 0.0:
-        # Try legacy per_provider
-        pp = concurrency_cfg.get("per_provider") or {}
-        if isinstance(pp, dict) and pp:
-            min_pos = None
-            for _prov, pv in pp.items():
-                if not isinstance(pv, dict):
-                    continue
-                rl = pv.get("rate_limit") or {}
-                try:
-                    v = float(rl.get("qps", 0.0))
-                except Exception:
-                    v = 0.0
-                if v > 0.0:
-                    if min_pos is None or v < min_pos:
-                        min_pos = v
-            if min_pos is not None:
-                qps = float(min_pos)
-
-    if qps <= 0.0:
-        qps = 2.0  # reasonable default; stagger ~0.5s
-
-    out["qps"] = qps
-    return out
+        raise ValueError(f"concurrency_cfg.qps must be > 0, got {qps}")
+    
+    return {
+        "enabled": bool(concurrency_cfg["enabled"]),
+        "max_concurrency": int(concurrency_cfg["max_concurrency"]),
+        "qps": qps
+    }
 
 
 class RunExecutor:
@@ -147,23 +119,28 @@ class RunExecutor:
         self.config_path = config_path
         self.env_path = env_path
 
-        eff = _derive_global_from_legacy(concurrency_cfg or {})
-        self.enabled = bool(eff.get("enabled", True))
-        self.global_max = max(int(eff.get("max_concurrency") or 1), 1)
-        self.global_qps = float(eff.get("qps") or 2.0)
-        try:
-            self.rate_limiter = GlobalRateLimiter(self.global_qps)
-        except Exception:
-            # Fallback to default if invalid qps provided
-            self.global_qps = 2.0
-            self.rate_limiter = GlobalRateLimiter(self.global_qps)
+        eff = _validate_concurrency_cfg(concurrency_cfg)
+        self.enabled = eff["enabled"]
+        self.global_max = eff["max_concurrency"]
+        self.global_qps = eff["qps"]
+        self.rate_limiter = GlobalRateLimiter(self.global_qps)
 
-        # Retry config
-        r = (concurrency_cfg or {}).get("retry") or {}
-        self.max_retries = int(r.get("max_retries") or 3)
-        self.base_delay = max(int(r.get("base_delay_ms") or 500), 0) / 1000.0
-        self.max_delay = max(int(r.get("max_delay_ms") or 60000), 0) / 1000.0
-        self.jitter_mode = (r.get("jitter") or "full").lower()
+        # Retry config - ALL values required, no defaults
+        if "retry" not in concurrency_cfg:
+            raise ValueError("concurrency_cfg.retry is required")
+        r = concurrency_cfg["retry"]
+        if "max_retries" not in r:
+            raise ValueError("concurrency_cfg.retry.max_retries is required")
+        if "base_delay_ms" not in r:
+            raise ValueError("concurrency_cfg.retry.base_delay_ms is required")
+        if "max_delay_ms" not in r:
+            raise ValueError("concurrency_cfg.retry.max_delay_ms is required")
+        if "jitter" not in r:
+            raise ValueError("concurrency_cfg.retry.jitter is required")
+        self.max_retries = int(r["max_retries"])
+        self.base_delay = int(r["base_delay_ms"]) / 1000.0
+        self.max_delay = int(r["max_delay_ms"]) / 1000.0
+        self.jitter_mode = str(r["jitter"]).lower()
 
         # Global semaphore
         self.global_sem = threading.Semaphore(self.global_max)

@@ -14,7 +14,7 @@ import time
 import aiosqlite
 from pathlib import Path
 
-from app.auth.api_keys import is_valid_key_format, validate_api_key, extract_user_id
+from app.auth.api_keys import is_valid_key_format, validate_api_key, extract_uuid
 from app.auth.user_registry import get_user_db_path, user_exists, construct_db_path
 
 logger = logging.getLogger(__name__)
@@ -65,7 +65,7 @@ async def get_current_user(
     
     NEW FLOW (no master database):
     1. Parse user_id from API key (format: acm2_u{user_id}_{random})
-    2. Open user_{user_id}.db directly
+    2. Open user_{uuid}.db directly
     3. Look up key hash in user's api_keys table
     4. Validate with bcrypt
     
@@ -73,13 +73,13 @@ async def get_current_user(
         @app.get("/api/v1/runs")
         async def list_runs(user: dict = Depends(get_current_user)):
             # user is authenticated
-            user_id = user['id']
+            user_uuid = user['uuid']
     
     Args:
         x_acm2_api_key: API key from X-ACM2-API-Key header
         
     Returns:
-        User dict with id, username, email
+        User dict with uuid and email (no username)
         
     Raises:
         AuthenticationError: If authentication fails
@@ -108,16 +108,16 @@ async def get_current_user(
         logger.warning(f"[AUTH] Invalid API key format: {x_acm2_api_key[:20]}...")
         raise AuthenticationError("Invalid API key format")
     
-    # Extract user_id from key (O(1) - just regex parse)
-    user_id = extract_user_id(x_acm2_api_key)
-    if user_id is None:
-        logger.warning("[AUTH] Could not extract user_id from key")
+    # Extract UUID from key (O(1) - just regex parse)
+    user_uuid = extract_uuid(x_acm2_api_key)
+    if user_uuid is None:
+        logger.warning("[AUTH] Could not extract UUID from key")
         raise AuthenticationError("Invalid API key format")
     
-    logger.info(f"[AUTH] Extracted user_id={user_id} from key")
+    logger.info(f"[AUTH] Extracted user_uuid={user_uuid} from key")
     
     # Construct database path directly (O(1) - string concatenation)
-    db_path = construct_db_path(user_id)
+    db_path = construct_db_path(user_uuid)
     logger.info(f"[AUTH] User database path: {db_path}")
     
     if not db_path.exists():
@@ -135,7 +135,7 @@ async def get_current_user(
                 "SELECT key_hash FROM api_keys WHERE is_active = 1 AND revoked_at IS NULL"
             )
             rows = await cursor.fetchall()
-            logger.info(f"[AUTH] Found {len(rows)} active API keys for user {user_id}")
+            logger.info(f"[AUTH] Found {len(rows)} active API keys for user {user_uuid}")
             
             # Check each key hash (usually just 1-2 keys per user)
             valid_key_found = False
@@ -154,26 +154,24 @@ async def get_current_user(
                     break
             
             if not valid_key_found:
-                logger.warning(f"[AUTH] No matching key hash for user {user_id}")
+                logger.warning(f"[AUTH] No matching key hash for user {user_uuid}")
                 raise AuthenticationError("Invalid API key")
             
-            # Get user info from user_meta table
+            # Get user info from user_meta table (UUID and email only - NO USERNAME)
             cursor = await conn.execute(
-                "SELECT username, email FROM user_meta LIMIT 1"
+                "SELECT uuid, email FROM user_meta LIMIT 1"
             )
             user_meta = await cursor.fetchone()
             
             if user_meta:
                 user = {
-                    'id': user_id,
-                    'username': user_meta['username'],
+                    'uuid': user_meta['uuid'],
                     'email': user_meta['email']
                 }
             else:
-                # Fallback if no user_meta
+                # Fallback if no user_meta - use UUID from key
                 user = {
-                    'id': user_id,
-                    'username': f'user_{user_id}',
+                    'uuid': user_uuid,
                     'email': None
                 }
             
@@ -185,10 +183,10 @@ async def get_current_user(
     
     # Cache the authenticated user for future requests
     _cache_user(x_acm2_api_key, user)
-    logger.info(f"[AUTH] Cached user {user_id}")
+    logger.info(f"[AUTH] Cached user {user_uuid}")
     
     logger.info("[AUTH] ========================================")
-    logger.info(f"[AUTH] SUCCESS: Authenticated user {user_id}")
+    logger.info(f"[AUTH] SUCCESS: Authenticated user {user_uuid}")
     logger.info("[AUTH] ========================================")
     
     return user

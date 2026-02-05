@@ -24,7 +24,7 @@ from app.infra.db.models.user_meta import UserMeta
 from app.infra.db.models.run import Run, RunStatus
 
 logger = logging.getLogger(__name__)
-_seed_locks: Dict[int, asyncio.Lock] = {}
+_seed_locks: Dict[str, asyncio.Lock] = {}  # Keyed by UUID
 
 # Cached seed database engine (created on first use)
 _seed_engine = None
@@ -60,7 +60,7 @@ def _get_seed_session_factory():
     return _seed_session_factory
 
 
-async def seed_user_data(user_id: int, source_session: AsyncSession, target_session: AsyncSession) -> Dict[str, str]:
+async def seed_user_data(user_uuid: str, source_session: AsyncSession, target_session: AsyncSession) -> Dict[str, str]:
     """
     Seed a new user's database with a preset and associated contents.
     
@@ -68,7 +68,7 @@ async def seed_user_data(user_id: int, source_session: AsyncSession, target_sess
     target_session (per-user DB).
     
     Args:
-        user_id: The user's ID from the master database
+        user_uuid: The user's UUID
         source_session: SQLAlchemy session connected to shared DB (for reading defaults)
         target_session: SQLAlchemy session connected to per-user DB (for writing)
         
@@ -87,7 +87,7 @@ async def seed_user_data(user_id: int, source_session: AsyncSession, target_sess
         # 1. Load preset from the source database
         preset_result = await source_session.execute(
             select(Preset)
-            .where(Preset.id == settings.seed_preset_id, Preset.is_deleted == False)
+            .where(Preset.id == settings.seed_preset_id)
         )
         original_preset = preset_result.scalar_one_or_none()
         
@@ -98,13 +98,13 @@ async def seed_user_data(user_id: int, source_session: AsyncSession, target_sess
         # Create or update user_meta to mark seed in progress
         seed_version = settings.seed_version
         meta_result = await target_session.execute(
-            select(UserMeta).where(UserMeta.user_id == user_id)
+            select(UserMeta).where(UserMeta.uuid == user_uuid)
         )
         meta = meta_result.scalar_one_or_none()
         if not meta:
             meta = UserMeta(
                 id=str(uuid.uuid4()),
-                user_id=user_id,
+                uuid=user_uuid,
                 seed_status="in_progress",
                 seed_version=seed_version,
                 seeded_at=None,
@@ -115,32 +115,14 @@ async def seed_user_data(user_id: int, source_session: AsyncSession, target_sess
             meta.seed_version = seed_version
             meta.seeded_at = None
 
-        # 2. Copy content items referenced by the preset
-        # NOTE: preset.documents contains Content IDs (content_type=input_document), 
-        # NOT entries from the legacy 'documents' table
-        content_ids = set()
-        # Add input documents from preset.documents field
-        content_ids.update(original_preset.documents or [])
-        # Add input content IDs 
-        content_ids.update(original_preset.input_content_ids or [])
-        for content_id in [
-            original_preset.generation_instructions_id,
-            original_preset.single_eval_instructions_id,
-            original_preset.pairwise_eval_instructions_id,
-            original_preset.eval_criteria_id,
-            original_preset.combine_instructions_id,
-        ]:
-            if content_id:
-                content_ids.add(content_id)
-
-        if content_ids:
-            result = await source_session.execute(
-                select(Content).where(Content.id.in_(content_ids), Content.is_deleted == False)
-            )
-            originals = {content.id: content for content in result.scalars().all()}
-            missing = set(content_ids) - set(originals.keys())
-            if missing:
-                raise ValueError(f"Content not found in source DB: {sorted(missing)}")
+        # 2. Copy ALL content items from seed database
+        # If it's in seed.db, it gets seeded. To exclude content, remove it from seed.db.
+        result = await source_session.execute(
+            select(Content)
+        )
+        originals = {content.id: content for content in result.scalars().all()}
+        
+        if originals:
 
             new_contents = []
             for content_id, original in originals.items():
@@ -148,18 +130,17 @@ async def seed_user_data(user_id: int, source_session: AsyncSession, target_sess
                 new_contents.append(
                     Content(
                         id=new_id,
-                        user_id=user_id,
+                        # No user_id - each user has own DB file
                         name=original.name,
                         content_type=original.content_type,
                         body=original.body,
                         variables=dict(original.variables) if original.variables else {},
                         description=original.description,
                         tags=list(original.tags) if original.tags else [],
-                        is_deleted=False,
                     )
                 )
                 id_mapping[content_id] = new_id
-                logger.info(f"Created content '{original.name}' for user {user_id}: {new_id}")
+                logger.info(f"Created content '{original.name}' for user {user_uuid}: {new_id}")
 
             target_session.add_all(new_contents)
 
@@ -176,7 +157,7 @@ async def seed_user_data(user_id: int, source_session: AsyncSession, target_sess
         new_document_ids = [id_mapping.get(doc_id, doc_id) for doc_id in (original_preset.documents or [])]
         new_preset = Preset(
             id=new_preset_id,
-            user_id=user_id,
+            # No user_id - each user has own DB file
             name=original_preset.name,
             description=original_preset.description,
             documents=new_document_ids,
@@ -212,11 +193,10 @@ async def seed_user_data(user_id: int, source_session: AsyncSession, target_sess
             pairwise_eval_instructions_id=id_mapping.get(original_preset.pairwise_eval_instructions_id),
             eval_criteria_id=id_mapping.get(original_preset.eval_criteria_id),
             combine_instructions_id=id_mapping.get(original_preset.combine_instructions_id),
-            is_deleted=False,
         )
         target_session.add(new_preset)
         id_mapping[original_preset.id] = new_preset_id
-        logger.info(f"Created preset '{original_preset.name}' for user {user_id}: {new_preset_id}")
+        logger.info(f"Created preset '{original_preset.name}' for user {user_uuid}: {new_preset_id}")
         
         # NOTE: Sample run copying removed - source DB has incompatible schema (no user_id column)
         # Seed a historical run so evaluation tabs render immediately
@@ -226,33 +206,33 @@ async def seed_user_data(user_id: int, source_session: AsyncSession, target_sess
 
         # Commit DB after content and preset seeding
         await target_session.commit()
-        logger.info(f"Successfully seeded data for user {user_id}")
+        logger.info(f"Successfully seeded data for user {user_uuid}")
         
     except Exception as e:
-        logger.error(f"Error seeding user {user_id}: {e}")
+        logger.error(f"Error seeding user {user_uuid}: {e}")
         await target_session.rollback()
         raise
     
     return id_mapping
 
 
-async def initialize_user(user_id: int) -> Dict[str, str]:
+async def initialize_user(user_uuid: str) -> Dict[str, str]:
     """
     Full initialization for a new user:
     1. Create per-user SQLite database schema using SQLAlchemy
     2. Seed per-user database with copies of a preset + contents from seed.db
     
     Args:
-        user_id: The user's ID from the master database
+        user_uuid: The user's UUID
         
     Returns:
         Dict mapping original IDs to new user-specific IDs
     """
-    lock = _seed_locks.setdefault(user_id, asyncio.Lock())
+    lock = _seed_locks.setdefault(user_uuid, asyncio.Lock())
     async with lock:
         # 1. Get or create per-user SQLAlchemy engine (creates SQLite file and schema)
-        _, target_session_factory = await _get_or_create_user_engine(user_id)
-        logger.info(f"Initialized per-user SQLAlchemy database for user {user_id}")
+        _, target_session_factory = await _get_or_create_user_engine(user_uuid)
+        logger.info(f"Initialized per-user SQLAlchemy database for user {user_uuid}")
 
         # 2. Use TWO sessions: source (seed.db) and target (per-user DB)
         seed_session_factory = _get_seed_session_factory()
@@ -261,13 +241,13 @@ async def initialize_user(user_id: int) -> Dict[str, str]:
             async with target_session_factory() as target_session:
                 try:
                     existing_meta = await target_session.execute(
-                        select(UserMeta).where(UserMeta.user_id == user_id)
+                        select(UserMeta).where(UserMeta.uuid == user_uuid)
                     )
                     meta = existing_meta.scalar_one_or_none()
                     if meta and meta.seed_status == "ready":
-                        logger.info(f"User {user_id} already seeded (version={meta.seed_version})")
+                        logger.info(f"User {user_uuid} already seeded (version={meta.seed_version})")
                         return {}
-                    id_mapping = await seed_user_data(user_id, source_session, target_session)
+                    id_mapping = await seed_user_data(user_uuid, source_session, target_session)
                     # Commit is handled in seed_user_data
                 except Exception:
                     await target_session.rollback()
@@ -283,18 +263,18 @@ async def main():
     logging.basicConfig(level=logging.INFO)
 
     if len(sys.argv) < 2:
-        print("Usage: python -m app.db.seed_user <user_id>")
+        print("Usage: python -m app.db.seed_user <user_uuid>")
         sys.exit(1)
 
-    user_id = int(sys.argv[1])
+    user_uuid = sys.argv[1]  # UUID as string
 
     # Ensure tables exist with new columns
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    id_mapping = await initialize_user(user_id)
+    id_mapping = await initialize_user(user_uuid)
 
-    print(f"\nSeeded data for user {user_id}:")
+    print(f"\nSeeded data for user {user_uuid}:")
     for original_id, new_id in id_mapping.items():
         print(f"  {original_id} -> {new_id}")
 

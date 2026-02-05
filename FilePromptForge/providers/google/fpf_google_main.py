@@ -418,7 +418,6 @@ def execute_and_verify(provider_url: str, payload: Dict, headers: Optional[Dict]
                 verify_helpers.assert_grounding_and_reasoning(raw_json, provider=__import__(__name__))
             except verify_helpers.ValidationError as ve:
                 # LAYER 1: Exit with specific code based on validation failure type
-                import sys
                 print(f"[VALIDATION FAILED] {ve}", file=sys.stderr, flush=True)
                 
                 # Minimal failure artifact to speed debugging
@@ -467,7 +466,6 @@ def execute_and_verify(provider_url: str, payload: Dict, headers: Optional[Dict]
                     sys.exit(4)  # Unknown validation error
             except Exception as e:
                 # Non-validation errors: exit with code 5
-                import sys
                 print(f"[FPF ERROR] {e}", file=sys.stderr, flush=True)
                 sys.exit(5)
             return raw_json

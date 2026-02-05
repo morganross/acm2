@@ -21,12 +21,12 @@ class ProviderKeyRepository(BaseRepository[ProviderKey]):
     is handled by the caller (ProviderKeyManager), not this repository.
     
     Usage:
-        repo = ProviderKeyRepository(session, user_id=user['id'])
+        repo = ProviderKeyRepository(session, user_id=user['uuid'])
         await repo.save_key("openai", encrypted_key)
         key = await repo.get_key("openai")
     """
     
-    def __init__(self, session: AsyncSession, user_id: Optional[int] = None):
+    def __init__(self, session: AsyncSession, user_id: Optional[str] = None):
         super().__init__(ProviderKey, session, user_id)
     
     async def save_key(self, provider: str, encrypted_key: str) -> ProviderKey:

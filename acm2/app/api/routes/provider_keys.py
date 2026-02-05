@@ -39,7 +39,7 @@ class ProviderKeysList(BaseModel):
 
 
 # Routes
-@router.post("/", status_code=status.HTTP_201_CREATED)
+@router.post("", status_code=status.HTTP_201_CREATED)
 async def save_provider_key(
     key_data: ProviderKeyCreate,
     user: dict = Depends(get_current_user),
@@ -50,7 +50,7 @@ async def save_provider_key(
     The key will be encrypted before storage and only decrypted when needed
     to call the LLM API.
     """
-    user_id = user['id']
+    user_id = user['uuid']
     key_manager = get_provider_key_manager(db, user_id)
     
     try:
@@ -72,13 +72,13 @@ async def save_provider_key(
         )
 
 
-@router.get("/", response_model=ProviderKeysList)
+@router.get("", response_model=ProviderKeysList)
 async def list_provider_keys(
     user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_user_db)
 ):
     """List all configured providers (without exposing the actual keys)."""
-    user_id = user['id']
+    user_id = user['uuid']
     key_manager = get_provider_key_manager(db, user_id)
     
     try:
@@ -99,7 +99,7 @@ async def get_provider_key_info(
     db: AsyncSession = Depends(get_user_db)
 ):
     """Check if a provider key is configured (without exposing the actual key)."""
-    user_id = user['id']
+    user_id = user['uuid']
     key_manager = get_provider_key_manager(db, user_id)
     
     try:
@@ -132,7 +132,7 @@ async def delete_provider_key(
     db: AsyncSession = Depends(get_user_db)
 ):
     """Delete a provider API key."""
-    user_id = user['id']
+    user_id = user['uuid']
     key_manager = get_provider_key_manager(db, user_id)
     
     try:
@@ -165,7 +165,7 @@ async def test_provider_key(
     
     This is useful for validating keys after configuration.
     """
-    user_id = user['id']
+    user_id = user['uuid']
     key_manager = get_provider_key_manager(db, user_id)
     
     try:

@@ -55,10 +55,10 @@ class OutputWriter:
     - GITHUB: Also pushes to GitHub repository
     """
     
-    def __init__(self, db: AsyncSession, user_id: int):
+    def __init__(self, db: AsyncSession, user_uuid: str):
         self.db = db
-        self.user_id = user_id
-        self.content_repo = ContentRepository(db, user_id=user_id)
+        self.user_uuid = user_uuid
+        self.content_repo = ContentRepository(db, user_id=user_uuid)
     
     def render_filename(
         self,
@@ -198,7 +198,7 @@ class OutputWriter:
             gh_repo = GitHubConnectionRepository(self.db, user_id=self.user_id)
             connection = await gh_repo.get_by_id(connection_id)
             
-            if not connection or connection.is_deleted:
+            if not connection:
                 return OutputWriteResult(
                     success=False,
                     error=f"GitHub connection {connection_id} not found",
@@ -339,12 +339,25 @@ class OutputWriter:
                     error="GitHub destination selected but no connection configured",
                 )
             
+            if not github_output_path:
+                return OutputWriteResult(
+                    success=False,
+                    content_id=library_result.content_id,
+                    error="github_output_path is required when GitHub destination is selected",
+                )
+            if not github_commit_message:
+                return OutputWriteResult(
+                    success=False,
+                    content_id=library_result.content_id,
+                    error="github_commit_message is required when GitHub destination is selected",
+                )
+            
             github_result = await self.push_to_github(
                 content=content,
                 connection_id=github_connection_id,
-                output_path=github_output_path or "/outputs",
+                output_path=github_output_path,
                 filename=filename,
-                commit_message=github_commit_message or f"ACM2: Add {filename}",
+                commit_message=github_commit_message,
             )
             
             # Combine results

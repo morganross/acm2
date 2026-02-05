@@ -25,16 +25,15 @@ class DocumentRepository(BaseRepository[Document]):
     
     async def get_by_name(self, name: str) -> Optional[Document]:
         """Get a document by its exact name (scoped to user if user_id is set)."""
-        stmt = select(Document).where(Document.name == name).where(Document.is_deleted == False)
+        stmt = select(Document).where(Document.name == name)
         stmt = self._apply_user_filter(stmt)
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
     
     async def get_active(self, limit: int = 100, offset: int = 0) -> Sequence[Document]:
-        """Get non-deleted documents (scoped to user if user_id is set)."""
+        """Get all documents (scoped to user if user_id is set)."""
         stmt = (
             select(Document)
-            .where(Document.is_deleted == False)
             .offset(offset)
             .limit(limit)
             .order_by(Document.created_at.desc())
@@ -48,7 +47,6 @@ class DocumentRepository(BaseRepository[Document]):
         stmt = (
             select(Document)
             .where(Document.file_type == file_type)
-            .where(Document.is_deleted == False)
             .order_by(Document.name)
         )
         stmt = self._apply_user_filter(stmt)
@@ -60,7 +58,6 @@ class DocumentRepository(BaseRepository[Document]):
         stmt = (
             select(Document)
             .where(Document.name.ilike(f"%{query}%"))
-            .where(Document.is_deleted == False)
             .limit(limit)
             .order_by(Document.name)
         )
@@ -68,11 +65,11 @@ class DocumentRepository(BaseRepository[Document]):
         result = await self.session.execute(stmt)
         return result.scalars().all()
     
-    async def soft_delete(self, id: str) -> bool:
-        """Soft delete a document (scoped to user if user_id is set)."""
+    async def delete(self, id: str) -> bool:
+        """Permanently delete a document from the database."""
         doc = await self.get_by_id(id)
         if doc:
-            doc.is_deleted = True
+            await self.session.delete(doc)
             await self.session.commit()
             return True
         return False

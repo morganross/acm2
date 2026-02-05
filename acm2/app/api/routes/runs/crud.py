@@ -4,7 +4,7 @@ CRUD operations for runs.
 Endpoints for creating, listing, getting, and deleting runs.
 """
 import logging
-from typing import Any, Optional
+from typing import Any, Optional, List
 
 from fastapi import APIRouter, HTTPException, Query, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +13,7 @@ from typing import Any, Optional, Dict
 from app.infra.db.session import get_user_db
 from app.infra.db.repositories import RunRepository
 from app.auth.middleware import get_current_user
+from app.services.github_input_service import GitHubInputService
 
 from ...schemas.runs import (
     RunCreate,
@@ -42,8 +43,8 @@ async def create_run(
     """
     from app.infra.db.repositories import PresetRepository
     
-    repo = RunRepository(db, user_id=user['id'])
-    preset_repo = PresetRepository(db, user_id=user['id'])
+    repo = RunRepository(db, user_id=user['uuid'])
+    preset_repo = PresetRepository(db, user_id=user['uuid'])
     
     # Require a preset_id: runs must be created from an existing preset
     if not data.preset_id:
@@ -54,8 +55,51 @@ async def create_run(
         raise HTTPException(status_code=404, detail=f"Preset {data.preset_id} not found")
     logger.info(f"Loading config from preset: {preset.name} (id={data.preset_id})")
     
-    # Use preset values if available, otherwise use request data or defaults
-    document_ids = data.document_ids or (preset.documents if preset else [])
+    # =========================================================================
+    # Handle GitHub Input Source
+    # =========================================================================
+    # If preset uses GitHub as input source, fetch the files and import them
+    document_ids: List[str] = []
+    
+    if preset.input_source_type == "github":
+        # Validate GitHub configuration
+        if not preset.github_connection_id:
+            raise HTTPException(
+                status_code=400, 
+                detail="Preset uses GitHub input but no github_connection_id is configured"
+            )
+        if not preset.github_input_paths or len(preset.github_input_paths) == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Preset uses GitHub input but no github_input_paths are configured"
+            )
+        
+        # Fetch files from GitHub and import as content
+        github_service = GitHubInputService(db, user_id=user['uuid'])
+        result = await github_service.fetch_and_import(
+            connection_id=preset.github_connection_id,
+            paths=preset.github_input_paths,
+            run_id=None  # Will be set after run is created
+        )
+        
+        if not result.success:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to fetch GitHub input: {result.error}"
+            )
+        
+        if not result.document_ids:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No documents found at GitHub paths: {preset.github_input_paths}"
+            )
+        
+        document_ids = result.document_ids
+        logger.info(f"Fetched {len(document_ids)} documents from GitHub: {[f.name for f in result.files]}")
+    else:
+        # Use preset documents or request data
+        document_ids = data.document_ids or (preset.documents if preset else [])
+    
     generators = (preset.generators if preset and preset.generators else [g.value for g in data.generators])
     
     # Get config_overrides first - this has the real configuration
@@ -155,7 +199,7 @@ async def count_runs(
     db: AsyncSession = Depends(get_user_db)
 ) -> dict:
     """Return total number of runs (optionally filtered by status)."""
-    repo = RunRepository(db, user_id=user['id'])
+    repo = RunRepository(db, user_id=user['uuid'])
     total = await repo.count(status=status)
     return {"total": total, "status": status}
 
@@ -171,7 +215,7 @@ async def list_runs(
     """
     List all runs with pagination.
     """
-    repo = RunRepository(db, user_id=user['id'])
+    repo = RunRepository(db, user_id=user['uuid'])
     offset = (page - 1) * page_size
     
     runs = await repo.get_all_with_tasks(limit=page_size, offset=offset, status=status)
@@ -199,7 +243,7 @@ async def get_run(
     Get detailed information about a specific run.
     """
     logger.debug(f"Getting run {run_id}")
-    repo = RunRepository(db, user_id=user['id'])
+    repo = RunRepository(db, user_id=user['uuid'])
     run = await repo.get_with_tasks(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -217,7 +261,7 @@ async def bulk_delete_runs(
     db: AsyncSession = Depends(get_user_db)
 ) -> dict:
     """Bulk delete runs by status groups."""
-    repo = RunRepository(db, user_id=user['id'])
+    repo = RunRepository(db, user_id=user['uuid'])
     if target == "failed":
         statuses = [RunStatus.FAILED.value, RunStatus.CANCELLED.value]
     else:
@@ -237,7 +281,7 @@ async def delete_run(
     
     Only allowed for runs in PENDING, COMPLETED, FAILED, or CANCELLED status.
     """
-    repo = RunRepository(db, user_id=user['id'])
+    repo = RunRepository(db, user_id=user['uuid'])
     run = await repo.get_by_id(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")

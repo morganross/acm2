@@ -63,7 +63,7 @@ class FpfAdapter(BaseAdapter):
         query: str,
         config: GenerationConfig,
         *,
-        user_id: int,
+        user_id: str,
         document_content: Optional[str] = None,
         progress_callback: Optional[ProgressCallback] = None,
         fpf_log_output: str = "console",
@@ -76,7 +76,7 @@ class FpfAdapter(BaseAdapter):
         Args:
             query: The research question/instructions
             config: Generation configuration (model, provider, etc.)
-            user_id: User ID for fetching encrypted provider API keys
+            user_id: User UUID for fetching encrypted provider API keys
             document_content: Optional document content for file_a
             progress_callback: Optional callback for progress updates
             fpf_log_output: FPF log destination ("console", "file", "both", "none")
@@ -87,11 +87,7 @@ class FpfAdapter(BaseAdapter):
             GenerationResult with report, sources, and costs
         """
         extra = config.extra or {}
-        missing = [key for key in ("task_id",) if key not in extra]
-        if missing:
-            raise ValueError(f"FPF config missing required fields: {', '.join(missing)}")
-
-        task_id = str(extra["task_id"])
+        task_id = str(extra.get("task_id", str(uuid.uuid4())[:8]))
         started_at = datetime.utcnow()
 
         # Create temporary files for FPF
@@ -136,7 +132,7 @@ class FpfAdapter(BaseAdapter):
             from app.security.key_injection import inject_provider_keys_for_user_auto, PROVIDER_TO_ENV_VAR
             try:
                 env = await inject_provider_keys_for_user_auto(user_id, env)
-                logger.debug(f"FPF: Injected encrypted API keys for user_id={user_id}")
+                logger.debug(f"FPF: Injected encrypted API keys for user_uuid={user_id}")
             except Exception as e:
                 logger.warning(f"FPF: Failed to inject provider keys for user {user_id}: {e}")
 
@@ -402,10 +398,10 @@ class FpfAdapter(BaseAdapter):
 
         return cmd
 
-    def _parse_fpf_cost_log(self, run_id: str, user_id: int) -> dict | None:
+    def _parse_fpf_cost_log(self, run_id: str, user_id: str) -> dict | None:
         """Parse FPF's JSON log file to extract cost and token usage.
         
-        FPF writes logs to data/user_{user_id}/runs/{run_id}/logs/YYYYMMDDTHHMMSS-{run_id}.json
+        FPF writes logs to data/user_{user_uuid}/runs/{run_id}/logs/YYYYMMDDTHHMMSS-{run_id}.json
         with fields: total_cost_usd, usage.prompt_tokens, usage.completion_tokens
         """
         import json
@@ -454,7 +450,7 @@ class FpfAdapter(BaseAdapter):
             logger.error(f"Failed to parse FPF cost log for run {run_id}: {e}", exc_info=True)
             return None
 
-    def _get_run_root(self, user_id: int, run_id: str) -> Path:
+    def _get_run_root(self, user_id: str, run_id: str) -> Path:
         settings = get_settings()
         return settings.data_dir / f"user_{user_id}" / "runs" / run_id
 

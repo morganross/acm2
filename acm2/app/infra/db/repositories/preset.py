@@ -25,11 +25,10 @@ class PresetRepository(BaseRepository[Preset]):
         return result.scalar_one_or_none()
     
     async def get_active(self, limit: int = 100, offset: int = 0) -> Sequence[Preset]:
-        """Get non-deleted presets with runs eagerly loaded (scoped to user if user_id is set)."""
+        """Get all presets with runs eagerly loaded (scoped to user if user_id is set)."""
         stmt = (
             select(Preset)
             .options(selectinload(Preset.runs))
-            .where(Preset.is_deleted == False)
             .offset(offset)
             .limit(limit)
             .order_by(Preset.created_at.desc())
@@ -70,11 +69,11 @@ class PresetRepository(BaseRepository[Preset]):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
     
-    async def soft_delete(self, id: str) -> bool:
-        """Soft delete a preset by setting is_deleted=True."""
+    async def delete(self, id: str) -> bool:
+        """Permanently delete a preset from the database."""
         preset = await self.get_by_id(id)
         if preset:
-            preset.is_deleted = True
+            await self.session.delete(preset)
             await self.session.commit()
             return True
         return False

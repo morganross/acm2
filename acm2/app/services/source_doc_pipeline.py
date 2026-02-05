@@ -120,7 +120,7 @@ class SourceDocPipeline:
         from ..config import get_settings
 
         settings = get_settings()
-        return settings.data_dir / f"user_{self.config.user_id}" / "runs" / self.run_id
+        return settings.data_dir / f"user_{self.config.user_uuid}" / "runs" / self.run_id
         
     def cancel(self) -> None:
         """Cancel this pipeline."""
@@ -306,7 +306,7 @@ class SourceDocPipeline:
     async def _save_generated_content(self, gen_doc: GeneratedDocument) -> None:
         """Save generated document content to a file for later retrieval.
         
-        Files are stored in data/user_{user_id}/runs/{run_id}/generated/{doc_id}.md
+        Files are stored in data/user_{user_uuid}/runs/{run_id}/generated/{doc_id}.md
         """
         import aiofiles
         
@@ -404,7 +404,7 @@ class SourceDocPipeline:
             single_evaluator = SingleDocEvaluator(
                 eval_config,
                 stats_tracker=self.stats,
-                user_id=self.config.user_id,
+                user_id=self.config.user_uuid,
             )
         
         async def process_task(task_info):
@@ -661,7 +661,7 @@ Optimize your response to score highly on each criterion:
                     gen_result = await adapter.generate(
                         query=instructions,
                         config=gen_config,
-                        user_id=self.config.user_id,
+                        user_id=self.config.user_uuid,
                         document_content=self.content,
                         progress_callback=progress_callback,
                         fpf_log_output=fpf_log_output,
@@ -680,7 +680,7 @@ Optimize your response to score highly on each criterion:
                     gen_result = await adapter.generate(
                         query=full_query,
                         config=gen_config,
-                        user_id=self.config.user_id,
+                        user_id=self.config.user_uuid,
                         progress_callback=progress_callback,
                     )
             
@@ -739,14 +739,13 @@ Optimize your response to score highly on each criterion:
                     parsed_criteria = []
                     for item in data["criteria"]:
                         if isinstance(item, str):
-                            parsed_criteria.append(EvaluationCriterion(
-                                name=item,
-                                description=f"Evaluate the {item} of the document.",
-                            ))
+                            raise ValueError(f"Criteria '{item}' must have a description - no fallback defaults allowed")
                         elif isinstance(item, dict) and "name" in item:
+                            if "description" not in item:
+                                raise ValueError(f"Criteria '{item['name']}' missing 'description' - no fallback defaults allowed")
                             parsed_criteria.append(EvaluationCriterion(
                                 name=item["name"],
-                                description=item.get("description", f"Evaluate the {item['name']}."),
+                                description=item["description"],
                             ))
                     if parsed_criteria:
                         criteria_manager.set_criteria(parsed_criteria)
@@ -757,7 +756,7 @@ Optimize your response to score highly on each criterion:
             pairwise_config,
             criteria_manager=criteria_manager,
             stats_tracker=self.stats,
-            user_id=self.config.user_id,
+            user_id=self.config.user_uuid,
         )
         
         # Filter out empty content
@@ -882,7 +881,7 @@ Optimize your response to score highly on each criterion:
                         reports=top_docs,
                         instructions=combine_instructions,
                         config=combine_gen_config,
-                        user_id=self.config.user_id,
+                        user_id=self.config.user_uuid,
                         original_instructions=original_instructions,
                     )
                     combine_completed_at = datetime.utcnow()
@@ -990,7 +989,7 @@ Optimize your response to score highly on each criterion:
                 pairwise_config,
                 criteria_manager=criteria_manager,
                 stats_tracker=self.stats,
-                user_id=self.config.user_id,
+                user_id=self.config.user_uuid,
             )
             
             # Collect documents for comparison

@@ -160,7 +160,7 @@ class EvaluationService:
         self,
         config: Optional[EvaluationConfig] = None,
         criteria_manager: Optional[CriteriaManager] = None,
-        user_id: Optional[int] = None,
+        user_id: Optional[str] = None,
     ):
         """
         Initialize the service.

@@ -258,16 +258,19 @@ mkdir C:\devlop\acm2\certs -Force
 
 ## Part 4: Start Services
 
-### 4.1 Backend - Create Startup Script
+### 4.1 Backend - Restart Script
 
-The `purge_and_restart.ps1` script handles:
+The unified `restart.ps1` script handles:
 - Stopping existing uvicorn
-- Clearing Python cache
-- Starting uvicorn with SSL
+- Clearing Python caches
+- Checkpointing SQLite databases
+- Starting uvicorn with SSL (detached, survives VS Code interruptions)
+- Logging to `server.log`
 
 ```powershell
 cd C:\devlop\acm2
-.\purge_and_restart.ps1
+.\restart.ps1            # Normal restart (keeps user data)
+.\restart.ps1 -Purge     # DESTRUCTIVE: Delete all user data
 ```
 
 ### 4.2 Backend - Set Up Auto-Start (Optional)
@@ -278,12 +281,14 @@ Create a scheduled task to start the backend on boot:
 3. Trigger: At startup
 4. Action: Start a program
 5. Program: `powershell.exe`
-6. Arguments: `-ExecutionPolicy Bypass -File C:\devlop\acm2\purge_and_restart.ps1`
+6. Arguments: `-ExecutionPolicy Bypass -File C:\devlop\acm2\restart.ps1`
 
-### 4.3 Frontend - Restart Apache
+### 4.3 Frontend - Restart Apache (Separate Server)
+
+**NOTE**: Frontend is on a SEPARATE server (35.88.196.59). Restart via SSH:
 
 ```bash
-sudo /opt/bitnami/ctlscript.sh restart apache
+ssh ubuntu@35.88.196.59 'sudo /opt/bitnami/ctlscript.sh restart apache'
 ```
 
 ---

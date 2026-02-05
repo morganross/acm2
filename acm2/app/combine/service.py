@@ -215,7 +215,7 @@ class CombineService:
         
         # Build filename
         strategy_suffix = result.strategy_used.value
-        model_suffix = result.model_used or "local"
+        model_suffix = result.model_used or "unknown"
         filename = f"{base_name}.{strategy_suffix}.{model_suffix}.md"
         
         filepath = os.path.join(output_dir, filename)

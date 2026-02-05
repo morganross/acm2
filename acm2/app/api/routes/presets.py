@@ -497,11 +497,9 @@ def _get_runs_safely(preset):
     return preset.runs or []
 
 def _derive_iterations(preset) -> int:
-    """Get iterations from config_overrides.general - NO FALLBACKS."""
-    general_cfg = preset.config_overrides["general"]
-    iterations = general_cfg["iterations"]
-    if iterations is None:
-        raise ValueError(f"Preset {preset.name} ({preset.id}) has no iterations configured - set this in the GUI")
+    """Get iterations from config_overrides.general with fallback."""
+    general_cfg = (preset.config_overrides or {}).get("general", {})
+    iterations = general_cfg.get("iterations", 1)
     return iterations
 
 
@@ -573,16 +571,16 @@ def _preset_to_response(preset) -> PresetResponse:
         pairwise_config=pairwise_config,
         combine_config=combine_config,
         concurrency_config=concurrency_config,
-        # Logging
-        log_level=getattr(preset, 'log_level', None) or "INFO",
-        # GitHub input source configuration
-        input_source_type=getattr(preset, 'input_source_type', None) or 'database',
+        # Logging - REQUIRED
+        log_level=preset.log_level,
+        # GitHub input source configuration - REQUIRED
+        input_source_type=preset.input_source_type,
         github_connection_id=getattr(preset, 'github_connection_id', None),
-        github_input_paths=getattr(preset, 'github_input_paths', None) or [],
+        github_input_paths=preset.github_input_paths,
         github_output_path=getattr(preset, 'github_output_path', None),
-        # Legacy fields (backward compatibility)
-        generators=[GeneratorType(g) for g in (preset.generators or ["gptr"])],
-        models=[ModelConfig(**m) for m in (preset.models or [])],
+        # Legacy fields - REQUIRED from preset
+        generators=[GeneratorType(g) for g in preset.generators],
+        models=[ModelConfig(**m) for m in preset.models],
         iterations=_derive_iterations(preset),
         gptr_settings=GptrSettings(**preset.gptr_config) if preset.gptr_config else None,
         fpf_settings=FpfSettings(**preset.fpf_config) if preset.fpf_config else None,
@@ -626,7 +624,7 @@ async def create_preset(
     """
     Create a new preset configuration.
     """
-    repo = PresetRepository(db, user_id=user['id'])
+    repo = PresetRepository(db, user_id=user['uuid'])
     
     # Check for duplicate name
     existing = await repo.get_by_name(data.name)
@@ -659,28 +657,28 @@ async def create_preset(
     if data.combine and "combine" not in config_overrides:
         config_overrides["combine"] = data.combine.model_dump()
     
-    # Extract values for DB columns - NO FALLBACKS, values MUST be set
+    # Extract values for DB columns with fallback defaults
     if data.eval_config:
         evaluation_enabled = data.eval_config.enabled
     elif data.evaluation:
         evaluation_enabled = data.evaluation.enabled
     else:
-        raise ValueError("evaluation_enabled must be set in preset")
+        evaluation_enabled = False
     
     if data.pairwise_config:
         pairwise_enabled = data.pairwise_config.enabled
     elif data.pairwise:
         pairwise_enabled = data.pairwise.enabled
     else:
-        raise ValueError("pairwise_enabled must be set in preset")
+        pairwise_enabled = False
     
-    # Extract log_level - MUST be set, no fallback
+    # Extract log_level with fallback to INFO
     if data.log_level:
         log_level = data.log_level
     elif data.general_config and hasattr(data.general_config, 'log_level') and data.general_config.log_level:
         log_level = data.general_config.log_level
     else:
-        raise ValueError("log_level must be set in preset")
+        log_level = "INFO"
     
     # Get generators from fpf/gptr enabled flags or legacy
     generators = []
@@ -747,7 +745,7 @@ async def list_presets(
     """
     List all presets with pagination.
     """
-    repo = PresetRepository(db, user_id=user['id'])
+    repo = PresetRepository(db, user_id=user['uuid'])
     
     # Get active (non-deleted) presets
     offset = (page - 1) * page_size
@@ -773,10 +771,10 @@ async def get_preset(
     """
     Get a specific preset by ID.
     """
-    repo = PresetRepository(db, user_id=user['id'])
+    repo = PresetRepository(db, user_id=user['uuid'])
     preset = await repo.get_by_id(preset_id)
     
-    if not preset or preset.is_deleted:
+    if not preset:
         raise HTTPException(status_code=404, detail="Preset not found")
     
     return _preset_to_response(preset)
@@ -792,10 +790,10 @@ async def update_preset(
     """
     Update a preset.
     """
-    repo = PresetRepository(db, user_id=user['id'])
+    repo = PresetRepository(db, user_id=user['uuid'])
     preset = await repo.get_by_id(preset_id)
     
-    if not preset or preset.is_deleted:
+    if not preset:
         raise HTTPException(status_code=404, detail="Preset not found")
     
     # Build update dict from non-None values
@@ -956,7 +954,7 @@ async def delete_preset(
     
     By default performs a soft delete. Use permanent=true for hard delete.
     """
-    repo = PresetRepository(db, user_id=user['id'])
+    repo = PresetRepository(db, user_id=user['uuid'])
     preset = await repo.get_by_id(preset_id)
     
     if not preset:
@@ -980,11 +978,11 @@ async def duplicate_preset(
     """
     Create a copy of an existing preset with a new name.
     """
-    repo = PresetRepository(db, user_id=user['id'])
+    repo = PresetRepository(db, user_id=user['uuid'])
     
     # Check original exists
     original = await repo.get_by_id(preset_id)
-    if not original or original.is_deleted:
+    if not original:
         raise HTTPException(status_code=404, detail="Preset not found")
     
     # Check new name doesn't exist
@@ -1016,14 +1014,14 @@ async def execute_preset(
     
     Returns the created run ID.
     """
-    repo = PresetRepository(db, user_id=user['id'])
+    repo = PresetRepository(db, user_id=user['uuid'])
     preset = await repo.get_by_id(preset_id)
     
-    if not preset or preset.is_deleted:
+    if not preset:
         raise HTTPException(status_code=404, detail="Preset not found")
     
     # Create a new run from the preset
-    run_repo = RunRepository(db, user_id=user['id'])
+    run_repo = RunRepository(db, user_id=user['uuid'])
     run = await run_repo.create(
         preset_id=preset_id,
         title=f"Run from {preset.name} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
@@ -1038,8 +1036,8 @@ async def execute_preset(
         raise HTTPException(status_code=500, detail="Failed to start run")
         
     # Fetch document contents for execution
-    doc_repo = DocumentRepository(db, user_id=user['id'])
-    content_repo = ContentRepository(db, user_id=user['id'])
+    doc_repo = DocumentRepository(db, user_id=user['uuid'])
+    content_repo = ContentRepository(db, user_id=user['uuid'])
     document_contents = {}
     
     # preset.documents is a list of IDs that can reference either:
@@ -1277,7 +1275,7 @@ async def execute_preset(
         raise ValueError(f"Preset {preset.name} has no eval timeout configured")
 
     config = RunConfig(
-        user_id=user['id'],
+        user_uuid=user['uuid'],
         document_ids=list(document_contents.keys()),
         document_contents=document_contents,
         instructions=instructions,

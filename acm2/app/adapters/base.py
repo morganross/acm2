@@ -105,7 +105,7 @@ class BaseAdapter(ABC):
         query: str,
         config: GenerationConfig,
         *,
-        user_id: int,
+        user_id: str,
         document_content: Optional[str] = None,
         progress_callback: Optional[ProgressCallback] = None,
     ) -> GenerationResult:
@@ -115,7 +115,7 @@ class BaseAdapter(ABC):
         Args:
             query: The research question or prompt
             config: Generator configuration
-            user_id: User ID for fetching encrypted provider API keys
+            user_id: User UUID for fetching encrypted provider API keys
             document_content: Optional source document content (for FPF)
             progress_callback: Optional callback for progress updates
             

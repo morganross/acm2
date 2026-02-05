@@ -186,7 +186,7 @@ class PairwiseEvaluator:
         config: Optional[PairwiseConfig] = None,
         criteria_manager: Optional[CriteriaManager] = None,
         stats_tracker: Optional[FpfStatsTracker] = None,
-        user_id: Optional[int] = None,
+        user_id: Optional[str] = None,
     ):
         """
         Initialize the evaluator.

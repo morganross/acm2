@@ -17,9 +17,10 @@ settings = get_settings()
 print(f"SESSION DB URL: {settings.database_url}")
 
 # Cache for per-user engines to avoid creating new engine for each request
-_user_engines: Dict[int, Any] = {}
-_user_session_factories: Dict[int, async_sessionmaker] = {}
-_user_schema_valid: Dict[int, bool] = {}
+# Keys are now UUID strings, not integers
+_user_engines: Dict[str, Any] = {}
+_user_session_factories: Dict[str, async_sessionmaker] = {}
+_user_schema_valid: Dict[str, bool] = {}
 
 
 def _set_sqlite_pragma(dbapi_conn, connection_record):
@@ -79,18 +80,18 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             raise
 
 
-def _get_user_db_url(user_id: int) -> str:
-    """Get SQLite database URL for a specific user."""
+def _get_user_db_url(user_uuid: str) -> str:
+    """Get SQLite database URL for a specific user by UUID."""
     data_dir = Path("data")
     data_dir.mkdir(parents=True, exist_ok=True)
-    db_path = data_dir / f"user_{user_id}.db"
+    db_path = data_dir / f"user_{user_uuid}.db"
     return f"sqlite+aiosqlite:///{db_path}"
 
 
-def _get_user_db_path(user_id: int) -> Path:
+def _get_user_db_path(user_uuid: str) -> Path:
     data_dir = Path("data")
     data_dir.mkdir(parents=True, exist_ok=True)
-    return data_dir / f"user_{user_id}.db"
+    return data_dir / f"user_{user_uuid}.db"
 
 
 def _build_user_engine(db_url: str):
@@ -109,22 +110,22 @@ async def _has_required_runs_schema(conn) -> bool:
     return "preset_id" in columns
 
 
-async def _rebuild_user_db(user_id: int) -> None:
-    db_path = _get_user_db_path(user_id)
+async def _rebuild_user_db(user_uuid: str) -> None:
+    db_path = _get_user_db_path(user_uuid)
     for suffix in ("", "-wal", "-shm"):
         path = Path(f"{db_path}{suffix}")
         if path.exists():
             path.unlink()
 
 
-async def _get_or_create_user_engine(user_id: int):
-    """Get or create SQLAlchemy engine for a user's database."""
-    if user_id not in _user_engines:
-        db_url = _get_user_db_url(user_id)
+async def _get_or_create_user_engine(user_uuid: str):
+    """Get or create SQLAlchemy engine for a user's database by UUID."""
+    if user_uuid not in _user_engines:
+        db_url = _get_user_db_url(user_uuid)
         user_engine = _build_user_engine(db_url)
 
-        _user_engines[user_id] = user_engine
-        _user_session_factories[user_id] = async_sessionmaker(
+        _user_engines[user_uuid] = user_engine
+        _user_session_factories[user_uuid] = async_sessionmaker(
             user_engine,
             class_=AsyncSession,
             expire_on_commit=False,
@@ -139,22 +140,22 @@ async def _get_or_create_user_engine(user_id: int):
         async with user_engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
 
-    if not _user_schema_valid.get(user_id):
-        user_engine = _user_engines[user_id]
+    if not _user_schema_valid.get(user_uuid):
+        user_engine = _user_engines[user_uuid]
         async with user_engine.begin() as conn:
             is_valid = await _has_required_runs_schema(conn)
 
         if not is_valid:
             await user_engine.dispose()
-            _user_engines.pop(user_id, None)
-            _user_session_factories.pop(user_id, None)
-            _user_schema_valid.pop(user_id, None)
-            await _rebuild_user_db(user_id)
+            _user_engines.pop(user_uuid, None)
+            _user_session_factories.pop(user_uuid, None)
+            _user_schema_valid.pop(user_uuid, None)
+            await _rebuild_user_db(user_uuid)
 
-            db_url = _get_user_db_url(user_id)
+            db_url = _get_user_db_url(user_uuid)
             user_engine = _build_user_engine(db_url)
-            _user_engines[user_id] = user_engine
-            _user_session_factories[user_id] = async_sessionmaker(
+            _user_engines[user_uuid] = user_engine
+            _user_session_factories[user_uuid] = async_sessionmaker(
                 user_engine,
                 class_=AsyncSession,
                 expire_on_commit=False,
@@ -174,25 +175,24 @@ async def _get_or_create_user_engine(user_id: int):
             if not is_valid:
                 raise RuntimeError("Per-user database schema is invalid after rebuild")
 
-        _user_schema_valid[user_id] = True
+        _user_schema_valid[user_uuid] = True
     
-    return _user_engines[user_id], _user_session_factories[user_id]
+    return _user_engines[user_uuid], _user_session_factories[user_uuid]
 
 
 @asynccontextmanager
-async def get_user_session_by_id(user_id: int) -> AsyncGenerator[AsyncSession, None]:
+async def get_user_session_by_uuid(user_uuid: str) -> AsyncGenerator[AsyncSession, None]:
     """
-    Get database session for a user by user_id (for background tasks).
+    Get database session for a user by UUID (for background tasks).
     
-    Unlike get_user_db_session, this takes just the user_id int directly.
     Use this in background tasks where you don't have a Request object.
     
     Example:
-        async with get_user_session_by_id(user_id) as session:
-            repo = RunRepository(session, user_id=user_id)
+        async with get_user_session_by_uuid(user_uuid) as session:
+            repo = RunRepository(session, user_uuid=user_uuid)
             ...
     """
-    _, session_factory = await _get_or_create_user_engine(user_id)
+    _, session_factory = await _get_or_create_user_engine(user_uuid)
     
     async with session_factory() as session:
         try:
@@ -203,15 +203,26 @@ async def get_user_session_by_id(user_id: int) -> AsyncGenerator[AsyncSession, N
             raise
 
 
+# Backwards compatibility alias - will be removed
+@asynccontextmanager
+async def get_user_session_by_id(user_id) -> AsyncGenerator[AsyncSession, None]:
+    """DEPRECATED: Use get_user_session_by_uuid instead."""
+    # If called with a string (UUID), use it directly
+    # If called with an int (old code), this will fail - good, forces migration
+    user_uuid = str(user_id) if not isinstance(user_id, str) else user_id
+    async with get_user_session_by_uuid(user_uuid) as session:
+        yield session
+
+
 async def get_user_db_session(user: Dict[str, Any]) -> AsyncGenerator[AsyncSession, None]:
     """
     Get database session for authenticated user (internal use).
     
-    This creates/uses a per-user SQLite database at data/user_{id}.db.
+    This creates/uses a per-user SQLite database at data/user_{uuid}.db.
     All tables (presets, runs, documents, etc.) are created automatically.
     """
-    user_id = user['id']
-    _, session_factory = await _get_or_create_user_engine(user_id)
+    user_uuid = user['uuid']
+    _, session_factory = await _get_or_create_user_engine(user_uuid)
     
     async with session_factory() as session:
         try:
@@ -229,22 +240,20 @@ async def get_user_db_session(user: Dict[str, Any]) -> AsyncGenerator[AsyncSessi
 # SECURITY: PER-USER DATABASE ISOLATION
 # =====================================
 # Each authenticated user gets their own SQLite database file at:
-#   data/user_{id}.db
+#   data/user_{uuid}.db
 #
 # This provides complete data isolation between users - User A cannot
 # access User B's presets, runs, documents, etc. because they are stored
 # in separate database files.
 #
-# The user_id comes from the JWT token (verified by get_current_user), which
-# is linked to a valid user record in the master MySQL database. This chain
-# of trust ensures:
-#   1. API key/JWT is validated against master DB
-#   2. user_id is extracted from the verified token (not user input)
-#   3. user_id determines which SQLite database file to use
+# The UUID comes from the API key (verified by get_current_user), which
+# is linked to a valid user record. This chain of trust ensures:
+#   1. API key is validated against user's database
+#   2. UUID is extracted from the verified key (not user input)
+#   3. UUID determines which SQLite database file to use
 #   4. User can only access their own database
 #
-# Repository classes additionally store user_id for audit trails and
-# potential future cross-user queries by admin users.
+# Repository classes additionally store user_uuid for audit trails.
 #
 # Usage pattern in route handlers:
 #   from app.infra.db.session import get_user_db
@@ -255,10 +264,10 @@ async def get_user_db_session(user: Dict[str, Any]) -> AsyncGenerator[AsyncSessi
 #       user: dict = Depends(get_current_user),
 #       db: AsyncSession = Depends(get_user_db),
 #   ):
-#       repo = PresetRepository(db, user_id=user['id'])
+#       repo = PresetRepository(db, user_uuid=user['uuid'])
 #       ...
 #
-# NOTE: get_user_db extracts user_id from request.state.user which is set
+# NOTE: get_user_db extracts user_uuid from request.state.user which is set
 # by get_current_user. Make sure get_current_user is called BEFORE get_user_db
 # by listing it first in the function signature.
 # ==============================================================================
@@ -272,12 +281,12 @@ async def get_user_db(request: Request) -> AsyncGenerator[AsyncSession, None]:
     """
     FastAPI dependency: Get per-user database session.
     
-    This reads user_id from request.state.user which MUST be set by
+    This reads user_uuid from request.state.user which MUST be set by
     get_current_user before this dependency runs.
     
     Routes should declare dependencies in this order:
         user: dict = Depends(get_current_user),  # First - sets request.state.user
-        db: AsyncSession = Depends(get_user_db),  # Second - reads user_id
+        db: AsyncSession = Depends(get_user_db),  # Second - reads user_uuid
     """
     # Import here to avoid circular imports
     from app.auth.middleware import get_current_user
@@ -296,23 +305,23 @@ async def get_user_db(request: Request) -> AsyncGenerator[AsyncSession, None]:
     user = await get_current_user(api_key)
     
     async for session in get_user_db_session(user):
-        await _ensure_seed_ready(session, user["id"])
+        await _ensure_seed_ready(session, user["uuid"])
         yield session
 
 
-async def _ensure_seed_ready(session: AsyncSession, user_id: int) -> None:
+async def _ensure_seed_ready(session: AsyncSession, user_uuid: str) -> None:
     from app.infra.db.models.user_meta import UserMeta
     from app.db.seed_user import initialize_user
 
     result = await session.execute(
-        select(UserMeta).where(UserMeta.user_id == user_id)
+        select(UserMeta).where(UserMeta.uuid == user_uuid)
     )
     meta = result.scalar_one_or_none()
     if not meta or meta.seed_status != "ready":
-        await initialize_user(user_id)
+        await initialize_user(user_uuid)
 
         result = await session.execute(
-            select(UserMeta).where(UserMeta.user_id == user_id)
+            select(UserMeta).where(UserMeta.uuid == user_uuid)
         )
         meta = result.scalar_one_or_none()
         if not meta or meta.seed_status != "ready":

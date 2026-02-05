@@ -29,19 +29,19 @@ def build_expected_plan(run: Union[Run, Dict[str, Any]]) -> List[TimelineRow]:
     # So they are at top level.
     
     if isinstance(run, dict):
-        doc_ids = run.get("document_ids", [])
-        generators = run.get("generators", [])
-        models = run.get("models", [])
+        doc_ids = run.get("document_ids") or []
+        generators = run.get("generators") or []
+        models = run.get("models") or []
         iterations = run.get("iterations", 1)
-        eval_settings = run.get("evaluation", {})
-        pairwise_settings = run.get("pairwise", {})
+        eval_settings = run.get("evaluation") or {}
+        pairwise_settings = run.get("pairwise") or {}
     else:
-        doc_ids = config.get("document_ids", [])
-        generators = config.get("generators", [])
-        models = config.get("models", [])
+        doc_ids = config.get("document_ids") or []
+        generators = config.get("generators") or []
+        models = config.get("models") or []
         iterations = config.get("iterations", 1)
-        eval_settings = config.get("evaluation", {})
-        pairwise_settings = config.get("pairwise", {})
+        eval_settings = config.get("evaluation") or {}
+        pairwise_settings = config.get("pairwise") or {}
     
     run_index = 1
     
@@ -73,7 +73,7 @@ def build_expected_plan(run: Union[Run, Dict[str, Any]]) -> List[TimelineRow]:
 
     # 2. Single Eval Phase
     if eval_settings.get("enabled", True):
-        eval_model = eval_settings.get("eval_model", "")  # REQUIRED from preset
+        eval_model = eval_settings.get("eval_model", "")
         if not eval_model:
             raise ValueError("eval_model is required from preset when evaluation is enabled")
         
@@ -100,7 +100,7 @@ def build_expected_plan(run: Union[Run, Dict[str, Any]]) -> List[TimelineRow]:
 
     # 3. Pairwise Eval Phase
     if pairwise_settings.get("enabled", False):
-        judge_model = pairwise_settings.get("judge_model", "")  # REQUIRED from preset
+        judge_model = pairwise_settings.get("judge_model", "")
         if not judge_model:
             raise ValueError("judge_model is required from preset when pairwise is enabled")
         # We can't predict exact pairs if top_n is used, but we can add a placeholder

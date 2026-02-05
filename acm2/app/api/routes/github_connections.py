@@ -143,7 +143,7 @@ async def list_connections(
     db: AsyncSession = Depends(get_user_db),
 ) -> GitHubConnectionList:
     """List all GitHub connections."""
-    repo = GitHubConnectionRepository(db, user_id=user['id'])
+    repo = GitHubConnectionRepository(db, user_id=user['uuid'])
     connections = await repo.get_active()
     
     return GitHubConnectionList(
@@ -159,7 +159,7 @@ async def create_connection(
     db: AsyncSession = Depends(get_user_db),
 ) -> GitHubConnectionDetail:
     """Create a new GitHub connection."""
-    repo = GitHubConnectionRepository(db, user_id=user['id'])
+    repo = GitHubConnectionRepository(db, user_id=user['uuid'])
     
     # Check if connection to this repo already exists
     existing = await repo.get_by_repo(data.repo)
@@ -197,10 +197,10 @@ async def get_connection(
     db: AsyncSession = Depends(get_user_db),
 ) -> GitHubConnectionDetail:
     """Get a GitHub connection by ID."""
-    repo = GitHubConnectionRepository(db, user_id=user['id'])
+    repo = GitHubConnectionRepository(db, user_id=user['uuid'])
     connection = await repo.get_by_id(connection_id)
     
-    if not connection or connection.is_deleted:
+    if not connection:
         raise HTTPException(status_code=404, detail="Connection not found")
     
     return _connection_to_detail(connection)
@@ -214,10 +214,10 @@ async def update_connection(
     db: AsyncSession = Depends(get_user_db),
 ) -> GitHubConnectionDetail:
     """Update a GitHub connection."""
-    repo = GitHubConnectionRepository(db, user_id=user['id'])
+    repo = GitHubConnectionRepository(db, user_id=user['uuid'])
     connection = await repo.get_by_id(connection_id)
     
-    if not connection or connection.is_deleted:
+    if not connection:
         raise HTTPException(status_code=404, detail="Connection not found")
     
     # Update fields
@@ -251,7 +251,7 @@ async def delete_connection(
     db: AsyncSession = Depends(get_user_db),
 ):
     """Delete a GitHub connection (soft delete)."""
-    repo = GitHubConnectionRepository(db, user_id=user['id'])
+    repo = GitHubConnectionRepository(db, user_id=user['uuid'])
     
     success = await repo.soft_delete(connection_id)
     if not success:
@@ -271,10 +271,10 @@ async def test_connection(
     db: AsyncSession = Depends(get_user_db),
 ) -> GitHubConnectionTestResult:
     """Test a GitHub connection and update its status."""
-    repo = GitHubConnectionRepository(db, user_id=user['id'])
+    repo = GitHubConnectionRepository(db, user_id=user['uuid'])
     connection = await repo.get_by_id(connection_id)
     
-    if not connection or connection.is_deleted:
+    if not connection:
         raise HTTPException(status_code=404, detail="Connection not found")
     
     # Decrypt token and test
@@ -306,10 +306,10 @@ async def browse_repository(
     db: AsyncSession = Depends(get_user_db),
 ) -> GitHubBrowseResponse:
     """Browse files and directories in a GitHub repository."""
-    repo = GitHubConnectionRepository(db, user_id=user['id'])
+    repo = GitHubConnectionRepository(db, user_id=user['uuid'])
     connection = await repo.get_by_id(connection_id)
     
-    if not connection or connection.is_deleted:
+    if not connection:
         raise HTTPException(status_code=404, detail="Connection not found")
     
     try:
@@ -374,10 +374,10 @@ async def get_file_content(
     db: AsyncSession = Depends(get_user_db),
 ) -> GitHubFileContent:
     """Get the content of a file from GitHub."""
-    repo = GitHubConnectionRepository(db, user_id=user['id'])
+    repo = GitHubConnectionRepository(db, user_id=user['uuid'])
     connection = await repo.get_by_id(connection_id)
     
-    if not connection or connection.is_deleted:
+    if not connection:
         raise HTTPException(status_code=404, detail="Connection not found")
     
     try:
@@ -428,11 +428,11 @@ async def import_file_as_content(
     db: AsyncSession = Depends(get_user_db),
 ) -> ContentDetail:
     """Import a file from GitHub as content in the database."""
-    gh_repo = GitHubConnectionRepository(db, user_id=user['id'])
-    content_repo = ContentRepository(db, user_id=user['id'])
+    gh_repo = GitHubConnectionRepository(db, user_id=user['uuid'])
+    content_repo = ContentRepository(db, user_id=user['uuid'])
     
     connection = await gh_repo.get_by_id(connection_id)
-    if not connection or connection.is_deleted:
+    if not connection:
         raise HTTPException(status_code=404, detail="Connection not found")
     
     try:

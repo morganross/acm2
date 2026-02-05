@@ -35,7 +35,7 @@ class DrAdapter(GptrAdapter):
         query: str,
         config: GenerationConfig, 
         *,
-        user_id: int,
+        user_id: str,
         document_content: Optional[str] = None,
         progress_callback: Optional[ProgressCallback] = None,
     ) -> GenerationResult:

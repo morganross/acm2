@@ -47,8 +47,5 @@ class Document(Base):
     # Categorization
     tags: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Comma-separated
     
-    # Soft delete
-    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
-    
     def __repr__(self) -> str:
         return f"<Document(id={self.id}, name={self.name})>"

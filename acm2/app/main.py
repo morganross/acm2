@@ -52,6 +52,25 @@ class NoCacheMiddleware(BaseHTTPMiddleware):
         return response
 
 
+class TrailingSlashMiddleware(BaseHTTPMiddleware):
+    """
+    Middleware to normalize trailing slashes.
+    
+    Strips trailing slashes from all requests (except root "/") BEFORE routing.
+    This ensures both /api/v1/provider-keys and /api/v1/provider-keys/ work
+    without 307 redirects that cause browsers to lose headers.
+    
+    Combined with redirect_slashes=False on the FastAPI app, this handles
+    any slash variation consistently.
+    """
+    async def dispatch(self, request: Request, call_next):
+        # Strip trailing slash from path (except for root "/")
+        path = request.scope["path"]
+        if path != "/" and path.endswith("/"):
+            request.scope["path"] = path.rstrip("/")
+        return await call_next(request)
+
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -124,6 +143,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
         docs_url="/docs",
         redoc_url="/redoc",
+        redirect_slashes=False,  # Disable 307 redirects - TrailingSlashMiddleware handles normalization
     )
     
     # CORS middleware for frontend
@@ -141,6 +161,9 @@ def create_app() -> FastAPI:
         # Production WordPress frontend
         "http://16.145.206.59",
         "https://16.145.206.59",
+        # Production domain (Cloudflare)
+        "https://apicostx.com",
+        "https://www.apicostx.com",
     ]
     # Add any custom origins from environment (for production deployment)
     extra_origins = os.environ.get("ACM2_CORS_ORIGINS", "")
@@ -154,6 +177,11 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    
+    # TRAILING SLASH MIDDLEWARE - CRITICAL
+    # Normalizes /path/ to /path so both work without 307 redirects.
+    # 307 redirects cause browsers to lose headers (like X-ACM2-API-Key).
+    app.add_middleware(TrailingSlashMiddleware)
     
     # NO-CACHE MIDDLEWARE - CRITICAL
     # Caching has caused 3 years of "works once, never again" bugs.
