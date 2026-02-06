@@ -24,12 +24,12 @@ class ProviderKeyManager:
     Usage:
         # In a route with database session
         async def my_route(db: AsyncSession = Depends(get_user_db), user: dict = Depends(get_current_user)):
-            manager = ProviderKeyManager(db, user_id=user['uuid'])
+            manager = ProviderKeyManager(db, user_uuid=user['uuid'])
             await manager.save_key("openai", "sk-...")
             key = await manager.get_key("openai")
     """
     
-    SUPPORTED_PROVIDERS = ['openai', 'anthropic', 'google', 'openrouter', 'groq']
+    SUPPORTED_PROVIDERS = ['openai', 'anthropic', 'google', 'openrouter', 'tavily', 'github']
     
     def __init__(self, session: AsyncSession, user_uuid: str):
         """Initialize provider key manager.
@@ -41,7 +41,7 @@ class ProviderKeyManager:
         self.user_uuid = user_uuid
         self.session = session
         self.encryption_service = get_encryption_service()
-        self._repo = ProviderKeyRepository(session, user_id=user_uuid)
+        self._repo = ProviderKeyRepository(session, user_uuid=user_uuid)
     
     async def save_key(self, provider: str, api_key: str):
         """Save (encrypt and store) a provider API key.

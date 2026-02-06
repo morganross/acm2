@@ -13,8 +13,8 @@ from app.infra.db.repositories.base import BaseRepository
 class ContentRepository(BaseRepository[Content]):
     """Repository for Content CRUD operations."""
     
-    def __init__(self, session: AsyncSession, user_id: Optional[int] = None):
-        super().__init__(Content, session, user_id)
+    def __init__(self, session: AsyncSession, user_uuid: Optional[str] = None):
+        super().__init__(Content, session, user_uuid)
     
     async def get_by_type(
         self, 
@@ -22,7 +22,7 @@ class ContentRepository(BaseRepository[Content]):
         limit: int = 100,
         offset: int = 0
     ) -> Sequence[Content]:
-        """Get all contents of a specific type (scoped to user if user_id is set)."""
+        """Get all contents of a specific type (scoped to user if user_uuid is set)."""
         stmt = (
             select(Content)
             .where(Content.content_type == content_type.value)
@@ -39,7 +39,7 @@ class ContentRepository(BaseRepository[Content]):
         limit: int = 100, 
         offset: int = 0
     ) -> Sequence[Content]:
-        """Get all contents (scoped to user if user_id is set)."""
+        """Get all contents (scoped to user if user_uuid is set)."""
         stmt = (
             select(Content)
             .offset(offset)
@@ -51,7 +51,7 @@ class ContentRepository(BaseRepository[Content]):
         return result.scalars().all()
     
     async def get_by_name(self, name: str) -> Optional[Content]:
-        """Get a content by its exact name (scoped to user if user_id is set)."""
+        """Get a content by its exact name (scoped to user if user_uuid is set)."""
         stmt = (
             select(Content)
             .where(Content.name == name)
@@ -66,7 +66,7 @@ class ContentRepository(BaseRepository[Content]):
         content_type: Optional[ContentType] = None,
         limit: int = 50
     ) -> Sequence[Content]:
-        """Search contents by name (case-insensitive contains, scoped to user if user_id is set)."""
+        """Search contents by name (case-insensitive contains, scoped to user if user_uuid is set)."""
         stmt = (
             select(Content)
             .where(Content.name.ilike(f"%{query}%"))
@@ -84,7 +84,7 @@ class ContentRepository(BaseRepository[Content]):
         content_type: Optional[ContentType] = None,
         limit: int = 50
     ) -> Sequence[Content]:
-        """Search contents by tag (scoped to user if user_id is set)."""
+        """Search contents by tag (scoped to user if user_uuid is set)."""
         # Note: This is a simple approach; for complex JSON queries,
         # consider using JSON operators specific to your database
         stmt = select(Content)
@@ -107,7 +107,7 @@ class ContentRepository(BaseRepository[Content]):
         return False
     
     async def get_by_ids(self, ids: list[str]) -> Sequence[Content]:
-        """Get multiple contents by their IDs (scoped to user if user_id is set)."""
+        """Get multiple contents by their IDs (scoped to user if user_uuid is set)."""
         if not ids:
             return []
         stmt = (
@@ -136,7 +136,7 @@ class ContentRepository(BaseRepository[Content]):
         return None
     
     async def count_by_type(self, content_type: ContentType) -> int:
-        """Count contents of a specific type (scoped to user if user_id is set)."""
+        """Count contents of a specific type (scoped to user if user_uuid is set)."""
         stmt = (
             select(Content)
             .where(Content.content_type == content_type.value)

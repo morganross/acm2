@@ -10,7 +10,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Dict, Any
 
-from app.infra.db.session import get_user_db, get_user_session_by_id
+from app.infra.db.session import get_user_db, get_user_session_by_uuid
 from app.infra.db.repositories import RunRepository, ContentRepository
 from app.auth.middleware import get_current_user
 from app.utils.paths import get_user_run_path
@@ -38,7 +38,7 @@ async def reevaluate_run(
     """
     from app.evaluation.single_doc import SingleDocEvaluator, SingleEvalConfig, DocumentInput
     
-    repo = RunRepository(db, user_id=user['uuid'])
+    repo = RunRepository(db, user_uuid=user['uuid'])
     run = await repo.get_by_id(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -50,7 +50,7 @@ async def reevaluate_run(
     
     # Get preset to load eval config
     from app.infra.db.repositories import PresetRepository
-    preset_repo = PresetRepository(db, user_id=user['uuid'])
+    preset_repo = PresetRepository(db, user_uuid=user['uuid'])
     preset = await preset_repo.get_by_id(run.preset_id) if run.preset_id else None
     if not preset:
         raise HTTPException(status_code=400, detail="Run has no associated preset")
@@ -63,7 +63,7 @@ async def reevaluate_run(
         raise HTTPException(status_code=400, detail="No eval config found in run or preset config_overrides")
     
     # Get criteria from Content Library
-    content_repo = ContentRepository(db, user_id=user['uuid'])
+    content_repo = ContentRepository(db, user_uuid=user['uuid'])
     eval_criteria_id = preset.eval_criteria_id or config_overrides.get("eval_criteria_id") or results_summary.get("eval_criteria_id")
     custom_criteria = None
     if eval_criteria_id:
@@ -118,8 +118,8 @@ async def reevaluate_run(
         import asyncio
         from app.evaluation.models import SingleEvalResult
         
-        async with get_user_session_by_id(user['uuid']) as session:
-            repo_inner = RunRepository(session, user_id=user['uuid'])
+        async with get_user_session_by_uuid(user['uuid']) as session:
+            repo_inner = RunRepository(session, user_uuid=user['uuid'])
             
             # Lock for serializing DB writes
             db_lock = asyncio.Lock()
@@ -129,7 +129,7 @@ async def reevaluate_run(
             eval_count = 0
             
             try:
-                evaluator = SingleDocEvaluator(single_config, user_id=user["uuid"])
+                evaluator = SingleDocEvaluator(single_config, user_uuid=user["uuid"])
                 
                 # Build list of document inputs (parallel preparation)
                 doc_inputs = []

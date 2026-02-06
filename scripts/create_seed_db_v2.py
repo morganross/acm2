@@ -90,7 +90,7 @@ def main():
         # ============================================================================
         gen_instructions = Content(
             id=CONTENT_GEN_ID,
-            user_id=None,  # Seed data has no user
+            user_uuid=None,  # Seed data has no user
             created_at=now,
             name="Default Generation Instructions",
             content_type=ContentType.GENERATION_INSTRUCTIONS.value,
@@ -129,7 +129,7 @@ Generate a comprehensive version of the content that incorporates verified infor
         # ============================================================================
         single_eval = Content(
             id=CONTENT_SINGLE_EVAL_ID,
-            user_id=None,
+            user_uuid=None,
             created_at=now,
             name="Default Single Evaluation Instructions",
             content_type=ContentType.SINGLE_EVAL_INSTRUCTIONS.value,
@@ -168,7 +168,7 @@ Provide your evaluation as a structured assessment with:
         # ============================================================================
         pairwise_eval = Content(
             id=CONTENT_PAIRWISE_EVAL_ID,
-            user_id=None,
+            user_uuid=None,
             created_at=now,
             name="Default Pairwise Evaluation Instructions",
             content_type=ContentType.PAIRWISE_EVAL_INSTRUCTIONS.value,
@@ -207,7 +207,7 @@ Provide your comparison as:
         # ============================================================================
         eval_criteria = Content(
             id=CONTENT_CRITERIA_ID,
-            user_id=None,
+            user_uuid=None,
             created_at=now,
             name="Default Evaluation Criteria",
             content_type=ContentType.EVAL_CRITERIA.value,
@@ -314,7 +314,7 @@ Provide your comparison as:
         # ============================================================================
         combine_instructions = Content(
             id=CONTENT_COMBINE_ID,
-            user_id=None,
+            user_uuid=None,
             created_at=now,
             name="Default Combine Instructions",
             content_type=ContentType.COMBINE_INSTRUCTIONS.value,
@@ -351,7 +351,7 @@ Provide your comparison as:
         # ============================================================================
         sample_input = Content(
             id=SAMPLE_INPUT_ID,
-            user_id=None,
+            user_uuid=None,
             created_at=now,
             name="Sample Input Document",
             content_type=ContentType.INPUT_DOCUMENT.value,
@@ -375,7 +375,7 @@ In healthcare, AI is being used to diagnose diseases with higher accuracy than h
         # ============================================================================
         default_preset = Preset(
             id=PRESET_ID,
-            user_id=None,  # Seed data has no user
+            user_uuid=None,  # Seed data has no user
             created_at=now,
             name="Default Preset",
             description="Default preset configuration for content generation and evaluation with web search verification",

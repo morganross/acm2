@@ -2,7 +2,7 @@
 API Keys Model for User Database
 
 Stores API keys in each user's individual SQLite database.
-Enables master-db-free authentication with embedded user_id in key.
+Enables master-db-free authentication with embedded user_uuid in key.
 """
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, func
 from app.infra.db.base import Base

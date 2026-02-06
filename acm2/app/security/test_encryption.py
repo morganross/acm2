@@ -17,7 +17,17 @@ load_dotenv()
 
 from app.security.encryption import get_encryption_service
 from app.security.provider_keys import get_provider_key_manager
-from app.db.user_db import get_user_db
+from app.auth.user_registry import load_registry, get_all_user_uuids
+from app.infra.db.session import get_user_session_by_uuid
+from sqlalchemy import text
+
+
+def _get_test_user_uuid() -> str:
+    load_registry()
+    user_uuids = sorted(get_all_user_uuids())
+    if not user_uuids:
+        raise RuntimeError("No user databases found in registry")
+    return user_uuids[0]
 
 
 async def test_encryption():
@@ -56,54 +66,54 @@ async def test_provider_key_manager():
     print("Test 2: Provider Key Manager")
     print("=" * 60)
     
-    # Use test user (ID 1 from initialization)
-    user_id = 1
-    key_manager = await get_provider_key_manager(user_id)
-    
-    # Test keys
-    test_keys = {
-        'openai': 'sk-proj-test-openai-1234567890',
-        'anthropic': 'sk-ant-test-anthropic-0987654321',
-        'google': 'AIza-test-google-abcdefghij'
-    }
-    
-    print(f"\n📝 Saving provider keys for user {user_id}...")
-    for provider, api_key in test_keys.items():
-        await key_manager.save_key(provider, api_key)
-        print(f"  ✅ Saved {provider} key")
-    
-    print(f"\n📖 Retrieving provider keys...")
-    for provider, original_key in test_keys.items():
-        retrieved_key = await key_manager.get_key(provider)
-        if retrieved_key == original_key:
-            print(f"  ✅ {provider}: Key matches")
+    user_uuid = _get_test_user_uuid()
+    async with get_user_session_by_uuid(user_uuid) as session:
+        key_manager = get_provider_key_manager(session, user_uuid)
+        
+        # Test keys
+        test_keys = {
+            'openai': 'sk-proj-test-openai-1234567890',
+            'anthropic': 'sk-ant-test-anthropic-0987654321',
+            'google': 'AIza-test-google-abcdefghij'
+        }
+        
+        print(f"\n📝 Saving provider keys for user {user_uuid}...")
+        for provider, api_key in test_keys.items():
+            await key_manager.save_key(provider, api_key)
+            print(f"  ✅ Saved {provider} key")
+        
+        print(f"\n📖 Retrieving provider keys...")
+        for provider, original_key in test_keys.items():
+            retrieved_key = await key_manager.get_key(provider)
+            if retrieved_key == original_key:
+                print(f"  ✅ {provider}: Key matches")
+            else:
+                print(f"  ❌ {provider}: Key mismatch!")
+                print(f"     Expected: {original_key}")
+                print(f"     Got: {retrieved_key}")
+                return False
+        
+        print(f"\n📋 Listing configured providers...")
+        providers = await key_manager.list_configured_providers()
+        print(f"  Configured: {', '.join(providers)}")
+        
+        if set(providers) == set(test_keys.keys()):
+            print("  ✅ All providers configured")
         else:
-            print(f"  ❌ {provider}: Key mismatch!")
-            print(f"     Expected: {original_key}")
-            print(f"     Got: {retrieved_key}")
+            print("  ❌ Provider list mismatch")
             return False
-    
-    print(f"\n📋 Listing configured providers...")
-    providers = await key_manager.list_configured_providers()
-    print(f"  Configured: {', '.join(providers)}")
-    
-    if set(providers) == set(test_keys.keys()):
-        print("  ✅ All providers configured")
-    else:
-        print("  ❌ Provider list mismatch")
-        return False
-    
-    print(f"\n🗑️  Testing key deletion...")
-    await key_manager.delete_key('google')
-    has_google = await key_manager.has_key('google')
-    if not has_google:
-        print("  ✅ Google key deleted successfully")
-    else:
-        print("  ❌ Google key still exists")
-        return False
-    
-    # Restore for next tests
-    await key_manager.save_key('google', test_keys['google'])
+        
+        print(f"\n🗑️  Testing key deletion...")
+        await key_manager.delete_key('google')
+        has_google = await key_manager.has_key('google')
+        if not has_google:
+            print("  ✅ Google key deleted successfully")
+        else:
+            print("  ❌ Google key still exists")
+            return False
+        
+        # Restore for next tests
+        await key_manager.save_key('google', test_keys['google'])
     
     return True
 
@@ -114,15 +124,14 @@ async def test_database_storage():
     print("Test 3: Database Storage (Encrypted)")
     print("=" * 60)
     
-    user_id = 1
-    user_db = await get_user_db(user_id)
+    user_uuid = _get_test_user_uuid()
     
     # Get raw encrypted key from database
-    async with user_db.get_connection() as conn:
-        cursor = await conn.execute(
-            "SELECT provider, encrypted_key FROM provider_keys"
+    async with get_user_session_by_uuid(user_uuid) as session:
+        result = await session.execute(
+            text("SELECT provider, encrypted_key FROM provider_keys")
         )
-        rows = await cursor.fetchall()
+        rows = result.mappings().all()
         
         print(f"\n📦 Raw database contents:")
         for row in rows:

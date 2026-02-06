@@ -14,15 +14,15 @@ from app.infra.db.repositories.base import BaseRepository
 class GitHubConnectionRepository(BaseRepository[GitHubConnection]):
     """Repository for GitHubConnection CRUD operations."""
     
-    def __init__(self, session: AsyncSession, user_id: Optional[int] = None):
-        super().__init__(GitHubConnection, session, user_id)
+    def __init__(self, session: AsyncSession, user_uuid: Optional[str] = None):
+        super().__init__(GitHubConnection, session, user_uuid)
     
     async def get_active(
         self, 
         limit: int = 100, 
         offset: int = 0
     ) -> Sequence[GitHubConnection]:
-        """Get all connections (scoped to user if user_id is set)."""
+        """Get all connections (scoped to user if user_uuid is set)."""
         stmt = (
             select(GitHubConnection)
             .offset(offset)
@@ -34,7 +34,7 @@ class GitHubConnectionRepository(BaseRepository[GitHubConnection]):
         return result.scalars().all()
     
     async def get_by_repo(self, repo: str) -> Optional[GitHubConnection]:
-        """Get a connection by repository name (owner/repo) (scoped to user if user_id is set)."""
+        """Get a connection by repository name (owner/repo) (scoped to user if user_uuid is set)."""
         stmt = (
             select(GitHubConnection)
             .where(GitHubConnection.repo == repo)
@@ -44,7 +44,7 @@ class GitHubConnectionRepository(BaseRepository[GitHubConnection]):
         return result.scalar_one_or_none()
     
     async def get_by_name(self, name: str) -> Optional[GitHubConnection]:
-        """Get a connection by its display name (scoped to user if user_id is set)."""
+        """Get a connection by its display name (scoped to user if user_uuid is set)."""
         stmt = (
             select(GitHubConnection)
             .where(GitHubConnection.name == name)
@@ -54,7 +54,7 @@ class GitHubConnectionRepository(BaseRepository[GitHubConnection]):
         return result.scalar_one_or_none()
     
     async def get_valid_connections(self) -> Sequence[GitHubConnection]:
-        """Get all connections that have been verified as valid (scoped to user if user_id is set)."""
+        """Get all connections that have been verified as valid (scoped to user if user_uuid is set)."""
         stmt = (
             select(GitHubConnection)
             .where(GitHubConnection.is_valid == True)

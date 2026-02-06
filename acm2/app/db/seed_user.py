@@ -130,7 +130,7 @@ async def seed_user_data(user_uuid: str, source_session: AsyncSession, target_se
                 new_contents.append(
                     Content(
                         id=new_id,
-                        # No user_id - each user has own DB file
+                        user_uuid=user_uuid,
                         name=original.name,
                         content_type=original.content_type,
                         body=original.body,
@@ -157,7 +157,7 @@ async def seed_user_data(user_uuid: str, source_session: AsyncSession, target_se
         new_document_ids = [id_mapping.get(doc_id, doc_id) for doc_id in (original_preset.documents or [])]
         new_preset = Preset(
             id=new_preset_id,
-            # No user_id - each user has own DB file
+            user_uuid=user_uuid,
             name=original_preset.name,
             description=original_preset.description,
             documents=new_document_ids,
@@ -198,7 +198,7 @@ async def seed_user_data(user_uuid: str, source_session: AsyncSession, target_se
         id_mapping[original_preset.id] = new_preset_id
         logger.info(f"Created preset '{original_preset.name}' for user {user_uuid}: {new_preset_id}")
         
-        # NOTE: Sample run copying removed - source DB has incompatible schema (no user_id column)
+        # NOTE: Sample run copying removed - source DB is shared and should not include per-user runs
         # Seed a historical run so evaluation tabs render immediately
         
         meta.seed_status = "ready"

@@ -22,11 +22,11 @@ from fastapi.exceptions import RequestValidationError
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from .api.router import api_router
-from .infra.db.session import engine, get_user_session_by_id
+from .infra.db.session import engine, get_user_session_by_uuid
 from .infra.db.models import Base
 from .infra.db.repositories import PresetRepository, DocumentRepository, RunRepository
 from .config import get_settings
-from .auth.user_registry import load_registry, get_all_user_ids
+from .auth.user_registry import load_registry, get_all_user_uuids
 # Per-user auth is now handled per-route via Depends(get_current_user)
 # from .middleware.auth import ApiKeyMiddleware, RateLimitMiddleware
 
@@ -101,20 +101,20 @@ async def lifespan(app: FastAPI):
     
     # ORPHAN RECOVERY: Mark any 'running' runs as failed (they were orphaned by server restart)
     # Iterate over all per-user databases since runs are stored per-user.
-    all_user_ids = get_all_user_ids()
+    all_user_uuids = get_all_user_uuids()
     total_orphaned = 0
-    for uid in all_user_ids:
+    for user_uuid in all_user_uuids:
         try:
-            async with get_user_session_by_id(uid) as session:
-                run_repo = RunRepository(session, user_id=uid)
+            async with get_user_session_by_uuid(user_uuid) as session:
+                run_repo = RunRepository(session, user_uuid=user_uuid)
                 orphaned_runs = await run_repo.get_active_runs()
                 for run in orphaned_runs:
                     if run.status == "running":
-                        logger.warning(f"Marking orphaned run {run.id} (user {uid}) as failed")
+                        logger.warning(f"Marking orphaned run {run.id} (user {user_uuid}) as failed")
                         await run_repo.fail(run.id, error_message="Run orphaned by server restart. The server was restarted while this run was in progress.")
                         total_orphaned += 1
         except Exception as e:
-            logger.warning(f"Failed to check orphaned runs for user {uid}: {e}")
+            logger.warning(f"Failed to check orphaned runs for user {user_uuid}: {e}")
     
     if total_orphaned > 0:
         logger.info(f"Orphan recovery complete: marked {total_orphaned} orphaned runs as failed")
@@ -298,4 +298,8 @@ if __name__ == "__main__":
         import asyncio
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
     
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=False)
+    # Port 443 is hard-coded and cannot be changed
+    ACM2_PORT = 443
+    print(f"Starting ACM2 server on https://0.0.0.0:{ACM2_PORT}")
+    print("Port 443 is programmatically enforced and cannot be overridden.")
+    uvicorn.run("app.main:app", host="0.0.0.0", port=ACM2_PORT, reload=False)

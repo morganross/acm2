@@ -22,7 +22,7 @@ class CombineStrategyType(str, Enum):
 class CombineInput:
     """Input for a combine operation."""
     # User context
-    user_id: int
+    user_uuid: Optional[str] = None
     
     # Winner reports (content)
     reports: list[str]

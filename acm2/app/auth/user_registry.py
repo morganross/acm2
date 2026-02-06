@@ -122,7 +122,7 @@ def register_user(user_uuid: str) -> Path:
         
     except Exception as e:
         logger.error("[USER_REGISTRY] !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-        logger.error(f"[USER_REGISTRY] ERROR in register_user({user_id})")
+        logger.error(f"[USER_REGISTRY] ERROR in register_user({user_uuid})")
         logger.error(f"[USER_REGISTRY] Exception: {str(e)}")
         logger.error(f"[USER_REGISTRY] Traceback:\n{traceback.format_exc()}")
         logger.error("[USER_REGISTRY] !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
@@ -174,12 +174,6 @@ def get_user_count() -> int:
 def get_all_user_uuids() -> Set[str]:
     """Get set of all registered user UUIDs."""
     return set(_user_registry.keys())
-
-
-# Backwards compatibility alias
-def get_all_user_ids() -> Set[str]:
-    """DEPRECATED: Use get_all_user_uuids instead."""
-    return get_all_user_uuids()
 
 
 def unregister_user(user_uuid: str) -> bool:

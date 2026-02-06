@@ -243,7 +243,7 @@ class GptrAdapter(BaseAdapter):
         query: str,
         config: GenerationConfig, 
         *,
-        user_id: str,
+        user_uuid: str,
         document_content: Optional[str] = None,
         progress_callback: Optional[ProgressCallback] = None,
     ) -> GenerationResult:
@@ -270,10 +270,10 @@ class GptrAdapter(BaseAdapter):
         # Inject encrypted provider API keys for this user
         from app.security.key_injection import inject_provider_keys_for_user_auto
         try:
-            env = await inject_provider_keys_for_user_auto(user_id, env)
-            logger.debug(f"GPT-R: Injected encrypted API keys for user_uuid={user_id}")
+            env = await inject_provider_keys_for_user_auto(user_uuid, env)
+            logger.debug(f"GPT-R: Injected encrypted API keys for user_uuid={user_uuid}")
         except Exception as e:
-            logger.warning(f"GPT-R: Failed to inject provider keys for user {user_id}: {e}")
+            logger.warning(f"GPT-R: Failed to inject provider keys for user {user_uuid}: {e}")
         
         # Handle Model Selection
         full_model = f"{config.provider}:{config.model}" if config.provider and config.model else config.model

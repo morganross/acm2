@@ -160,7 +160,7 @@ class Judge:
         fpf_adapter: Optional[FpfAdapter] = None,
         custom_prompt: Optional[str] = None,
         stats_tracker: Optional[FpfStatsTracker] = None,
-        user_id: Optional[str] = None,
+        user_uuid: Optional[str] = None,
     ):
         """
         Initialize the judge.
@@ -177,7 +177,7 @@ class Judge:
         self._fpf = fpf_adapter
         self.custom_prompt = custom_prompt
         self.stats = stats_tracker  # Use the tracker as-is, don't create fallback
-        self.user_id = user_id
+        self.user_uuid = user_uuid
         
         # DEBUG: Log stats tracker initialization
         logger.info(f"[STATS-DEBUG] Judge.__init__ for model={self.config.model}, stats_tracker={stats_tracker is not None}")
@@ -257,8 +257,8 @@ class Judge:
                 else:
                     raise RuntimeError(f"Judge model must include provider prefix: {self.config.model}")
 
-                if self.user_id is None:
-                    raise RuntimeError("user_id is required for evaluation calls")
+                if self.user_uuid is None:
+                    raise RuntimeError("user_uuid is required for evaluation calls")
                 
                 # Build config for FPF adapter
                 eval_task_id = f"{doc_id}.single_eval.{trial}.{self.config.model}.{uuid4().hex[:6]}"
@@ -286,7 +286,7 @@ class Judge:
                             self.fpf.generate(
                                 query=prompt,
                                 config=gen_config,
-                                user_id=self.user_id,
+                                user_uuid=self.user_uuid,
                             ),
                             timeout=float(self.config.timeout_seconds + 30),  # Add buffer over FPF's internal timeout
                         )
@@ -436,8 +436,8 @@ class Judge:
                 else:
                     raise RuntimeError(f"Judge model must include provider prefix: {self.config.model}")
 
-                if self.user_id is None:
-                    raise RuntimeError("user_id is required for evaluation calls")
+                if self.user_uuid is None:
+                    raise RuntimeError("user_uuid is required for evaluation calls")
                 
                 # Build config for FPF adapter
                 pairwise_task_id = f"{doc_id_1}.vs.{doc_id_2}.pairwise.{trial}.{self.config.model}.{uuid4().hex[:6]}"
@@ -465,7 +465,7 @@ class Judge:
                             self.fpf.generate(
                                 query=prompt,
                                 config=gen_config,
-                                user_id=self.user_id,
+                                user_uuid=self.user_uuid,
                             ),
                             timeout=float(self.config.timeout_seconds + 30),
                         )

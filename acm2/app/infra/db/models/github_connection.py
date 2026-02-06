@@ -31,7 +31,7 @@ class GitHubConnection(Base):
     __tablename__ = "github_connections"
     
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_id)
-    user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    user_uuid: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
     updated_at: Mapped[Optional[datetime]] = mapped_column(default=None, onupdate=datetime.utcnow)
     

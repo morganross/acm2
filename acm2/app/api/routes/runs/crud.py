@@ -43,8 +43,8 @@ async def create_run(
     """
     from app.infra.db.repositories import PresetRepository
     
-    repo = RunRepository(db, user_id=user['uuid'])
-    preset_repo = PresetRepository(db, user_id=user['uuid'])
+    repo = RunRepository(db, user_uuid=user['uuid'])
+    preset_repo = PresetRepository(db, user_uuid=user['uuid'])
     
     # Require a preset_id: runs must be created from an existing preset
     if not data.preset_id:
@@ -75,7 +75,7 @@ async def create_run(
             )
         
         # Fetch files from GitHub and import as content
-        github_service = GitHubInputService(db, user_id=user['uuid'])
+        github_service = GitHubInputService(db, user_uuid=user['uuid'])
         result = await github_service.fetch_and_import(
             connection_id=preset.github_connection_id,
             paths=preset.github_input_paths,
@@ -199,7 +199,7 @@ async def count_runs(
     db: AsyncSession = Depends(get_user_db)
 ) -> dict:
     """Return total number of runs (optionally filtered by status)."""
-    repo = RunRepository(db, user_id=user['uuid'])
+    repo = RunRepository(db, user_uuid=user['uuid'])
     total = await repo.count(status=status)
     return {"total": total, "status": status}
 
@@ -215,7 +215,7 @@ async def list_runs(
     """
     List all runs with pagination.
     """
-    repo = RunRepository(db, user_id=user['uuid'])
+    repo = RunRepository(db, user_uuid=user['uuid'])
     offset = (page - 1) * page_size
     
     runs = await repo.get_all_with_tasks(limit=page_size, offset=offset, status=status)
@@ -243,7 +243,7 @@ async def get_run(
     Get detailed information about a specific run.
     """
     logger.debug(f"Getting run {run_id}")
-    repo = RunRepository(db, user_id=user['uuid'])
+    repo = RunRepository(db, user_uuid=user['uuid'])
     run = await repo.get_with_tasks(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -261,7 +261,7 @@ async def bulk_delete_runs(
     db: AsyncSession = Depends(get_user_db)
 ) -> dict:
     """Bulk delete runs by status groups."""
-    repo = RunRepository(db, user_id=user['uuid'])
+    repo = RunRepository(db, user_uuid=user['uuid'])
     if target == "failed":
         statuses = [RunStatus.FAILED.value, RunStatus.CANCELLED.value]
     else:
@@ -281,7 +281,7 @@ async def delete_run(
     
     Only allowed for runs in PENDING, COMPLETED, FAILED, or CANCELLED status.
     """
-    repo = RunRepository(db, user_id=user['uuid'])
+    repo = RunRepository(db, user_uuid=user['uuid'])
     run = await repo.get_by_id(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")

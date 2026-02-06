@@ -16,9 +16,20 @@ from dotenv import load_dotenv
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 load_dotenv()
 
-from app.security.key_injection import inject_provider_keys_for_user, get_provider_key
+from sqlalchemy import text
+
+from app.security.key_injection import inject_provider_keys_for_user
 from app.security.provider_keys import ProviderKeyManager
-from app.db.user_db import UserDB
+from app.auth.user_registry import load_registry, get_all_user_uuids
+from app.infra.db.session import get_user_session_by_uuid
+
+
+def _get_test_user_uuid() -> str:
+    load_registry()
+    user_uuids = sorted(get_all_user_uuids())
+    if not user_uuids:
+        raise RuntimeError("No user databases found in registry")
+    return user_uuids[0]
 
 
 async def test_key_injection():
@@ -27,51 +38,52 @@ async def test_key_injection():
     print("Test 1: Provider Key Injection Service")
     print("=" * 60)
     
-    user_id = 1
+    user_uuid = _get_test_user_uuid()
     
     # Check if user has any keys configured
-    manager = ProviderKeyManager(user_id)
-    configured = await manager.get_all_keys()
-    print(f"\n✓ User {user_id} has {len(configured)} provider(s) configured: {configured}")
-    
-    if not configured:
-        print("  ⚠ No providers configured. Adding test keys...")
-        # Add test keys (use real keys from .env if available, otherwise use placeholders)
-        test_keys = {
-            "openai": os.getenv("OPENAI_API_KEY", "sk-test-openai-key-placeholder"),
-            "anthropic": os.getenv("ANTHROPIC_API_KEY", "sk-test-anthropic-key-placeholder"),
-            "google": os.getenv("GOOGLE_API_KEY", "sk-test-google-key-placeholder"),
-        }
-        for provider, key in test_keys.items():
-            await manager.save_key(provider, key)
-            print(f"  ✓ Saved {provider} key")
+    async with get_user_session_by_uuid(user_uuid) as session:
+        manager = ProviderKeyManager(session, user_uuid)
         configured = await manager.get_all_keys()
+        print(f"\n✓ User {user_uuid} has {len(configured)} provider(s) configured: {list(configured.keys())}")
     
-    # Test injection into environment
-    env = {}
-    env = await inject_provider_keys_for_user(user_id, env)
+        if not configured:
+            print("  ⚠ No providers configured. Adding test keys...")
+            # Add test keys (use real keys from .env if available, otherwise use placeholders)
+            test_keys = {
+                "openai": os.getenv("OPENAI_API_KEY", "sk-test-openai-key-placeholder"),
+                "anthropic": os.getenv("ANTHROPIC_API_KEY", "sk-test-anthropic-key-placeholder"),
+                "google": os.getenv("GOOGLE_API_KEY", "sk-test-google-key-placeholder"),
+            }
+            for provider, key in test_keys.items():
+                await manager.save_key(provider, key)
+                print(f"  ✓ Saved {provider} key")
+            configured = await manager.get_all_keys()
     
-    print(f"\n✓ Injected {len(env)} environment variables:")
-    for var_name in env.keys():
-        key_preview = env[var_name][:20] + "..." if len(env[var_name]) > 20 else env[var_name]
-        print(f"  - {var_name}: {key_preview}")
+        # Test injection into environment
+        env = {}
+        env = await inject_provider_keys_for_user(session, user_uuid, env)
     
-    # Verify keys match what's in database
-    print("\n✓ Verifying keys match database...")
-    for provider in configured:
-        db_key = await manager.get_key(provider)
-        env_var = {
-            "openai": "OPENAI_API_KEY",
-            "anthropic": "ANTHROPIC_API_KEY",
-            "google": "GOOGLE_API_KEY",
-        }.get(provider)
-        
-        if env_var and env_var in env:
-            if env[env_var] == db_key:
-                print(f"  ✓ {provider}: Keys match")
-            else:
-                print(f"  ✗ {provider}: KEY MISMATCH!")
-                return False
+        print(f"\n✓ Injected {len(env)} environment variables:")
+        for var_name in env.keys():
+            key_preview = env[var_name][:20] + "..." if len(env[var_name]) > 20 else env[var_name]
+            print(f"  - {var_name}: {key_preview}")
+    
+        # Verify keys match what's in database
+        print("\n✓ Verifying keys match database...")
+        for provider in configured:
+            db_key = await manager.get_key(provider)
+            env_var = {
+                "openai": "OPENAI_API_KEY",
+                "anthropic": "ANTHROPIC_API_KEY",
+                "google": "GOOGLE_API_KEY",
+            }.get(provider)
+            
+            if env_var and env_var in env:
+                if env[env_var] == db_key:
+                    print(f"  ✓ {provider}: Keys match")
+                else:
+                    print(f"  ✗ {provider}: KEY MISMATCH!")
+                    return False
     
     return True
 
@@ -83,11 +95,12 @@ async def test_adapter_integration():
     print("=" * 60)
     
     # We won't actually call the LLM APIs, but we'll simulate the adapter flow
-    user_id = 1
+    user_uuid = _get_test_user_uuid()
     
     # Simulate what the adapter does
     env = os.environ.copy()
-    env = await inject_provider_keys_for_user(user_id, env)
+    async with get_user_session_by_uuid(user_uuid) as session:
+        env = await inject_provider_keys_for_user(session, user_uuid, env)
     
     # Check that the required env vars are present
     required_vars = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY"]
@@ -111,13 +124,12 @@ async def test_database_storage():
     print("Test 3: Database Storage Verification")
     print("=" * 60)
     
-    user_id = 1
+    user_uuid = _get_test_user_uuid()
     
     # Check raw database contents
-    db = UserDB(user_id)
-    async with db.get_connection() as conn:
-        cursor = await conn.execute("SELECT provider, encrypted_key FROM provider_keys")
-        rows = await cursor.fetchall()
+    async with get_user_session_by_uuid(user_uuid) as session:
+        result = await session.execute(text("SELECT provider, encrypted_key FROM provider_keys"))
+        rows = result.mappings().all()
     
     if not rows:
         print("  ⚠ No keys found in database")

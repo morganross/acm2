@@ -203,17 +203,6 @@ async def get_user_session_by_uuid(user_uuid: str) -> AsyncGenerator[AsyncSessio
             raise
 
 
-# Backwards compatibility alias - will be removed
-@asynccontextmanager
-async def get_user_session_by_id(user_id) -> AsyncGenerator[AsyncSession, None]:
-    """DEPRECATED: Use get_user_session_by_uuid instead."""
-    # If called with a string (UUID), use it directly
-    # If called with an int (old code), this will fail - good, forces migration
-    user_uuid = str(user_id) if not isinstance(user_id, str) else user_id
-    async with get_user_session_by_uuid(user_uuid) as session:
-        yield session
-
-
 async def get_user_db_session(user: Dict[str, Any]) -> AsyncGenerator[AsyncSession, None]:
     """
     Get database session for authenticated user (internal use).

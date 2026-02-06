@@ -160,7 +160,7 @@ class EvaluationService:
         self,
         config: Optional[EvaluationConfig] = None,
         criteria_manager: Optional[CriteriaManager] = None,
-        user_id: Optional[str] = None,
+        user_uuid: Optional[str] = None,
     ):
         """
         Initialize the service.
@@ -171,18 +171,18 @@ class EvaluationService:
         """
         self.config = config or EvaluationConfig()
         self.criteria = criteria_manager or CriteriaManager(self.config.criteria_path)
-        self.user_id = user_id
+        self.user_uuid = user_uuid
         
         # Initialize evaluators
         self._single_eval = SingleDocEvaluator(
             config=self.config.to_single_config(),
             criteria_manager=self.criteria,
-            user_id=self.user_id,
+            user_uuid=self.user_uuid,
         )
         self._pairwise_eval = PairwiseEvaluator(
             config=self.config.to_pairwise_config(),
             criteria_manager=self.criteria,
-            user_id=self.user_id,
+            user_uuid=self.user_uuid,
         )
     
     async def evaluate(

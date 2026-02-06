@@ -10,17 +10,32 @@ from rich.table import Table
 app = typer.Typer()
 console = Console()
 
-API_URL = os.getenv("ACM_API_URL", "http://127.0.0.1:80/api/v1")
+# Port 443 is hard-coded and cannot be changed
+ACM2_PORT = 443
+API_URL = os.getenv("ACM_API_URL", f"https://127.0.0.1:{ACM2_PORT}/api/v1")
+
+# Cloudflare Origin Certificates
+CERTS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "certs")
+SSL_CERTFILE = os.path.join(CERTS_DIR, "cloudflare.crt")
+SSL_KEYFILE = os.path.join(CERTS_DIR, "cloudflare.key")
 
 @app.command()
 def serve(
     host: str = "0.0.0.0",
-    port: int = 80,
     reload: bool = False
 ):
-    """Start the ACM2 API server."""
-    console.print(f"[green]Starting ACM2 server at http://{host}:{port}[/green]")
-    uvicorn.run("app.main:app", host=host, port=port, reload=reload)
+    """Start the ACM2 API server on port 443 with Cloudflare Origin SSL."""
+    console.print(f"[green]Starting ACM2 server at https://{host}:{ACM2_PORT}[/green]")
+    console.print("[yellow]Port 443 is programmatically enforced and cannot be overridden.[/yellow]")
+    console.print(f"[blue]Using SSL cert: {SSL_CERTFILE}[/blue]")
+    uvicorn.run(
+        "app.main:app",
+        host=host,
+        port=ACM2_PORT,
+        reload=reload,
+        ssl_keyfile=SSL_KEYFILE,
+        ssl_certfile=SSL_CERTFILE
+    )
 
 @app.command()
 def version():

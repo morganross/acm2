@@ -4,8 +4,8 @@ Authentication Middleware
 FastAPI dependency for authenticating requests via API key.
 Uses in-memory caching to avoid repeated bcrypt checks.
 
-NEW: Uses embedded user_id in API key format for O(1) database lookup.
-No master database required - user_id is parsed from key.
+NEW: Uses embedded UUID in API key format for O(1) database lookup.
+No master database required - UUID is parsed from key.
 """
 from fastapi import Header, HTTPException, status
 from typing import Optional, Dict, Any
@@ -64,7 +64,7 @@ async def get_current_user(
     Uses in-memory caching to avoid repeated DB lookups and bcrypt checks.
     
     NEW FLOW (no master database):
-    1. Parse user_id from API key (format: acm2_u{user_id}_{random})
+    1. Parse UUID from API key (format: acm2_{uuid}_{random})
     2. Open user_{uuid}.db directly
     3. Look up key hash in user's api_keys table
     4. Validate with bcrypt
@@ -98,7 +98,7 @@ async def get_current_user(
     # Check cache first (instant return if cached)
     cached_user = _get_cached_user(x_acm2_api_key)
     if cached_user:
-        logger.info(f"[AUTH] Cache HIT for user {cached_user.get('id')}")
+        logger.info(f"[AUTH] Cache HIT for user {cached_user.get('uuid')}")
         return cached_user
     
     logger.info("[AUTH] Cache MISS, validating key...")

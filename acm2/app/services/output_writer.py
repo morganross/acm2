@@ -58,7 +58,7 @@ class OutputWriter:
     def __init__(self, db: AsyncSession, user_uuid: str):
         self.db = db
         self.user_uuid = user_uuid
-        self.content_repo = ContentRepository(db, user_id=user_uuid)
+        self.content_repo = ContentRepository(db, user_uuid=user_uuid)
     
     def render_filename(
         self,
@@ -195,7 +195,7 @@ class OutputWriter:
             from github.GithubException import GithubException
             
             # Get connection
-            gh_repo = GitHubConnectionRepository(self.db, user_id=self.user_id)
+            gh_repo = GitHubConnectionRepository(self.db, user_uuid=self.user_uuid)
             connection = await gh_repo.get_by_id(connection_id)
             
             if not connection:

@@ -19,7 +19,7 @@ class UserMeta(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     
-    # UUID is the ONLY user identifier - no integer user_id, no username
+    # UUID is the ONLY user identifier - no integer IDs, no username
     uuid: Mapped[str] = mapped_column(String(36), nullable=False, index=True, unique=True)
 
     # User profile info - email only, no username

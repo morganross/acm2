@@ -131,7 +131,7 @@ async def evaluate_single_docs(
         iterations=request.iterations,
         judge_models=request.judge_models,
     )
-    evaluator = SingleDocEvaluator(config, user_id=user["uuid"])
+    evaluator = SingleDocEvaluator(config, user_uuid=user["uuid"])
     
     docs = [
         DocumentInput(doc_id=d.doc_id, content=d.content)
@@ -176,7 +176,7 @@ async def evaluate_pairwise(
         judge_models=request.judge_models,
         top_n=request.top_n,
     )
-    evaluator = PairwiseEvaluator(config, user_id=user["uuid"])
+    evaluator = PairwiseEvaluator(config, user_uuid=user["uuid"])
     
     doc_ids = [d.doc_id for d in request.documents]
     contents = {d.doc_id: d.content for d in request.documents}
@@ -230,7 +230,7 @@ async def evaluate_full(
         enable_single_eval=True,
         enable_pairwise=True,
     )
-    service = EvaluationService(config, user_id=user["uuid"])
+    service = EvaluationService(config, user_uuid=user["uuid"])
     
     docs = [
         DocumentInput(doc_id=d.doc_id, content=d.content)

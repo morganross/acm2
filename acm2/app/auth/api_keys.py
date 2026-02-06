@@ -128,12 +128,6 @@ def extract_uuid(key: str) -> Optional[str]:
     return None
 
 
-# Backwards compatibility alias (will be removed after full migration)
-def extract_user_id(key: str) -> Optional[str]:
-    """DEPRECATED: Use extract_uuid instead. Returns UUID as string."""
-    return extract_uuid(key)
-
-
 def verify_api_key(provided_key: str, stored_hash: str) -> bool:
     """Validate an API key against its stored hash.
     

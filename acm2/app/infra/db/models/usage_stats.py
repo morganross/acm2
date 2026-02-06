@@ -30,7 +30,7 @@ class UsageStats(Base):
     __tablename__ = "usage_stats"
     
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_id)
-    user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)  # Multi-tenancy: owner user ID
+    user_uuid: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)  # Multi-tenancy: owner user UUID
     
     # Date and provider/model identification
     date: Mapped[date] = mapped_column(Date, nullable=False, index=True)

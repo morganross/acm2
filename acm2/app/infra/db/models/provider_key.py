@@ -36,7 +36,7 @@ class ProviderKey(Base):
     __tablename__ = "provider_keys"
     
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_id)
-    user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)  # Multi-tenancy: owner user ID
+    user_uuid: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)  # Multi-tenancy: owner user UUID
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
     updated_at: Mapped[Optional[datetime]] = mapped_column(default=None, onupdate=datetime.utcnow)
     
@@ -53,4 +53,4 @@ class ProviderKey(Base):
     validation_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
     def __repr__(self) -> str:
-        return f"<ProviderKey(id={self.id}, provider={self.provider}, user_id={self.user_id})>"
+        return f"<ProviderKey(id={self.id}, provider={self.provider}, user_uuid={self.user_uuid})>"

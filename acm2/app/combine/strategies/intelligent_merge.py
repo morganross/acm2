@@ -141,7 +141,7 @@ class IntelligentMergeStrategy(CombineStrategy):
             result = await self._fpf_adapter.generate(
                 query=merge_prompt,
                 config=config,
-                user_id=input.user_id,
+                user_uuid=input.user_uuid,
                 document_content="Merge the following reports into a Gold Standard document.",
             )
             

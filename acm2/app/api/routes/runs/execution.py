@@ -13,7 +13,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Dict, Any
 
-from app.infra.db.session import get_user_db, get_user_session_by_id
+from app.infra.db.session import get_user_db, get_user_session_by_uuid
 from app.auth.middleware import get_current_user
 from app.infra.db.repositories import RunRepository, ContentRepository
 from app.services.run_executor import RunConfig, RunExecutor
@@ -37,7 +37,7 @@ async def execute_run_background(run_id: str, config: RunConfig):
     Background task to execute a run and update DB.
     """
     # Set up file logging for this run (per-user logs directory)
-    run_log_file = get_log_path(config.user_id, run_id, "run.log")
+    run_log_file = get_log_path(config.user_uuid, run_id, "run.log")
     
     # Create private run logger using the preset-provided log level only
     if not hasattr(config, "log_level") or config.log_level is None:
@@ -89,8 +89,8 @@ async def execute_run_background(run_id: str, config: RunConfig):
                 logger.info(f"[on_gen_complete] generated_docs_incremental now has {len(generated_docs_incremental)} items")
                 
                 # Write to DB using append method (safe against race conditions)
-                async with get_user_session_by_id(config.user_id) as session:
-                    repo = RunRepository(session, user_id=config.user_id)
+                async with get_user_session_by_uuid(config.user_uuid) as session:
+                    repo = RunRepository(session, user_uuid=config.user_uuid)
                     result = await repo.append_generated_doc(run_id, doc_info)
                     if result:
                         logger.info(f"[on_gen_complete] Appended to DB: generated_docs count now {len(result.results_summary.get('generated_docs', []))}")
@@ -98,8 +98,8 @@ async def execute_run_background(run_id: str, config: RunConfig):
                         logger.warning(f"[on_gen_complete] Run {run_id} not found in DB!")
 
                 # Also write per-source-doc generated_docs so per-doc tabs populate
-                async with get_user_session_by_id(config.user_id) as session:
-                    repo = RunRepository(session, user_id=config.user_id)
+                async with get_user_session_by_uuid(config.user_uuid) as session:
+                    repo = RunRepository(session, user_uuid=config.user_uuid)
                     await repo.append_source_doc_generated_doc(run_id, source_doc_id, doc_info)
                 
                 logger.info(f"[DB] Saved gen #{gen_count}: {doc_id} | {model}")
@@ -150,8 +150,8 @@ async def execute_run_background(run_id: str, config: RunConfig):
                     pre_combine_evals[d_id] = {c: sum(s)/len(s) for c, s in criterion_scores.items()}
                 
                 # Write to DB
-                async with get_user_session_by_id(config.user_id) as session:
-                    repo = RunRepository(session, user_id=config.user_id)
+                async with get_user_session_by_uuid(config.user_uuid) as session:
+                    repo = RunRepository(session, user_uuid=config.user_uuid)
                     run_fresh = await repo.get_by_id(run_id)
                     if run_fresh:
                         results_summary_updated = dict(run_fresh.results_summary or {})
@@ -165,8 +165,8 @@ async def execute_run_background(run_id: str, config: RunConfig):
                 # Also write per-source-doc single_eval_results so per-doc evaluation tab fills
                 if source_doc_id:
                     overall_avg = float(pre_combine_evals_detailed_incremental[doc_id]["overall_average"])
-                    async with get_user_session_by_id(config.user_id) as session:
-                        repo = RunRepository(session, user_id=config.user_id)
+                    async with get_user_session_by_uuid(config.user_uuid) as session:
+                        repo = RunRepository(session, user_uuid=config.user_uuid)
                         await repo.upsert_source_doc_single_eval_result(
                             run_id,
                             source_doc_id,
@@ -183,8 +183,8 @@ async def execute_run_background(run_id: str, config: RunConfig):
         result = await executor.execute(run_id, config)
         
         # Update run in DB
-        async with get_user_session_by_id(config.user_id) as session:
-            run_repo = RunRepository(session, user_id=config.user_id)
+        async with get_user_session_by_uuid(config.user_uuid) as session:
+            run_repo = RunRepository(session, user_uuid=config.user_uuid)
             
             if result.status.value == "completed":
                 # Build generated docs list for frontend display
@@ -562,8 +562,8 @@ async def execute_run_background(run_id: str, config: RunConfig):
                 
     except Exception as e:
         logger.exception(f"Unexpected error executing run {run_id}")
-        async with get_user_session_by_id(config.user_id) as session:
-            run_repo = RunRepository(session, user_id=config.user_id)
+        async with get_user_session_by_uuid(config.user_uuid) as session:
+            run_repo = RunRepository(session, user_uuid=config.user_uuid)
             await run_repo.fail(run_id, error_message=str(e))
     finally:
         try:
@@ -590,7 +590,7 @@ async def start_run(
     """
     Start executing a run.
     """
-    repo = RunRepository(db, user_id=user['uuid'])
+    repo = RunRepository(db, user_uuid=user['uuid'])
     run = await repo.get_by_id(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -605,7 +605,7 @@ async def start_run(
         raise HTTPException(status_code=400, detail="Cannot start run: run was not created from a preset")
 
     from app.infra.db.repositories import PresetRepository
-    preset_repo = PresetRepository(db, user_id=user['uuid'])
+    preset_repo = PresetRepository(db, user_uuid=user['uuid'])
     preset = await preset_repo.get_by_id(run.preset_id)
     if not preset:
         raise HTTPException(status_code=404, detail=f"Preset {run.preset_id} not found for this run")
@@ -615,7 +615,7 @@ async def start_run(
     run_config = run.config or {}
     
     # Fetch documents from Content Library
-    content_repo = ContentRepository(db, user_id=user['uuid'])
+    content_repo = ContentRepository(db, user_uuid=user['uuid'])
     document_contents = {}
     doc_ids = run_config.get("document_ids") or []
     
@@ -891,7 +891,7 @@ async def pause_run(
     """
     Pause a running run.
     """
-    repo = RunRepository(db, user_id=user['uuid'])
+    repo = RunRepository(db, user_uuid=user['uuid'])
     run = await repo.get_by_id(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -915,7 +915,7 @@ async def resume_run(
     """
     Resume a paused run.
     """
-    repo = RunRepository(db, user_id=user['uuid'])
+    repo = RunRepository(db, user_uuid=user['uuid'])
     run = await repo.get_by_id(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -939,7 +939,7 @@ async def cancel_run(
     """
     Cancel a running or paused run.
     """
-    repo = RunRepository(db, user_id=user['uuid'])
+    repo = RunRepository(db, user_uuid=user['uuid'])
     run = await repo.get_by_id(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")

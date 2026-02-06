@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, Dict, Any
 
-from app.infra.db.session import get_user_db, get_user_session_by_id
+from app.infra.db.session import get_user_db, get_user_session_by_uuid
 from app.infra.db.repositories import PresetRepository, RunRepository, DocumentRepository, ContentRepository
 from app.auth.middleware import get_current_user
 from app.infra.db.models.run import RunStatus
@@ -53,7 +53,7 @@ async def execute_run_background(run_id: str, config: RunConfig):
     from app.evaluation.models import SingleEvalResult
     
     # Set up file logging for this run (per-user logs directory)
-    run_log_file = get_log_path(config.user_id, run_id, "run.log")
+    run_log_file = get_log_path(config.user_uuid, run_id, "run.log")
     
     # Ensure the logs directory exists
     run_log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -94,8 +94,8 @@ async def execute_run_background(run_id: str, config: RunConfig):
         }
     
     # Save initial source_doc_results to DB immediately so UI shows collapsible sections
-    async with get_user_session_by_id(config.user_id) as session:
-        repo = RunRepository(session, user_id=config.user_id)
+    async with get_user_session_by_uuid(config.user_uuid) as session:
+        repo = RunRepository(session, user_uuid=config.user_uuid)
         run_fresh = await repo.get_by_id(run_id)
         if run_fresh:
             results_summary_updated = dict(run_fresh.results_summary or {})
@@ -154,8 +154,8 @@ async def execute_run_background(run_id: str, config: RunConfig):
                 "iteration": iteration,
             })
             
-            async with get_user_session_by_id(config.user_id) as session:
-                repo = RunRepository(session, user_id=config.user_id)
+            async with get_user_session_by_uuid(config.user_uuid) as session:
+                repo = RunRepository(session, user_uuid=config.user_uuid)
                 run_fresh = await repo.get_by_id(run_id)
                 if run_fresh:
                     results_summary_updated = dict(run_fresh.results_summary or {})
@@ -228,8 +228,8 @@ async def execute_run_background(run_id: str, config: RunConfig):
                 source_doc_results_incremental[source_doc_id]["single_eval_results"][doc_id]["avg_score"] = \
                     pre_combine_evals_detailed_incremental[doc_id]["overall_average"]
             
-            async with get_user_session_by_id(config.user_id) as session:
-                repo = RunRepository(session, user_id=config.user_id)
+            async with get_user_session_by_uuid(config.user_uuid) as session:
+                repo = RunRepository(session, user_uuid=config.user_uuid)
                 run_fresh = await repo.get_by_id(run_id)
                 if run_fresh:
                     results_summary_updated = dict(run_fresh.results_summary or {})
@@ -252,8 +252,8 @@ async def execute_run_background(run_id: str, config: RunConfig):
     logger.info(f"Executor returned for run {run_id}: status={result.status.value}, docs={len(result.generated_docs)}, errors={result.errors}")
     
     # Update run in DB
-    async with get_user_session_by_id(config.user_id) as session:
-        run_repo = RunRepository(session, user_id=config.user_id)
+    async with get_user_session_by_uuid(config.user_uuid) as session:
+        run_repo = RunRepository(session, user_uuid=config.user_uuid)
         
         if result.status.value == "completed":
             logger.info(f"Run {run_id}: Saving completed results to DB...")
@@ -454,7 +454,7 @@ async def execute_run_background(run_id: str, config: RunConfig):
                                     break
                         
                         if winner_content:
-                            output_writer = OutputWriter(session, config.user_id)
+                            output_writer = OutputWriter(session, config.user_uuid)
                             output_result = await output_writer.write_winner(
                                 content=winner_content,
                                 output_destination=config.output_destination,
@@ -624,7 +624,7 @@ async def create_preset(
     """
     Create a new preset configuration.
     """
-    repo = PresetRepository(db, user_id=user['uuid'])
+    repo = PresetRepository(db, user_uuid=user['uuid'])
     
     # Check for duplicate name
     existing = await repo.get_by_name(data.name)
@@ -745,7 +745,7 @@ async def list_presets(
     """
     List all presets with pagination.
     """
-    repo = PresetRepository(db, user_id=user['uuid'])
+    repo = PresetRepository(db, user_uuid=user['uuid'])
     
     # Get active (non-deleted) presets
     offset = (page - 1) * page_size
@@ -771,7 +771,7 @@ async def get_preset(
     """
     Get a specific preset by ID.
     """
-    repo = PresetRepository(db, user_id=user['uuid'])
+    repo = PresetRepository(db, user_uuid=user['uuid'])
     preset = await repo.get_by_id(preset_id)
     
     if not preset:
@@ -790,7 +790,7 @@ async def update_preset(
     """
     Update a preset.
     """
-    repo = PresetRepository(db, user_id=user['uuid'])
+    repo = PresetRepository(db, user_uuid=user['uuid'])
     preset = await repo.get_by_id(preset_id)
     
     if not preset:
@@ -954,7 +954,7 @@ async def delete_preset(
     
     By default performs a soft delete. Use permanent=true for hard delete.
     """
-    repo = PresetRepository(db, user_id=user['uuid'])
+    repo = PresetRepository(db, user_uuid=user['uuid'])
     preset = await repo.get_by_id(preset_id)
     
     if not preset:
@@ -978,7 +978,7 @@ async def duplicate_preset(
     """
     Create a copy of an existing preset with a new name.
     """
-    repo = PresetRepository(db, user_id=user['uuid'])
+    repo = PresetRepository(db, user_uuid=user['uuid'])
     
     # Check original exists
     original = await repo.get_by_id(preset_id)
@@ -1014,14 +1014,14 @@ async def execute_preset(
     
     Returns the created run ID.
     """
-    repo = PresetRepository(db, user_id=user['uuid'])
+    repo = PresetRepository(db, user_uuid=user['uuid'])
     preset = await repo.get_by_id(preset_id)
     
     if not preset:
         raise HTTPException(status_code=404, detail="Preset not found")
     
     # Create a new run from the preset
-    run_repo = RunRepository(db, user_id=user['uuid'])
+    run_repo = RunRepository(db, user_uuid=user['uuid'])
     run = await run_repo.create(
         preset_id=preset_id,
         title=f"Run from {preset.name} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
@@ -1036,8 +1036,8 @@ async def execute_preset(
         raise HTTPException(status_code=500, detail="Failed to start run")
         
     # Fetch document contents for execution
-    doc_repo = DocumentRepository(db, user_id=user['uuid'])
-    content_repo = ContentRepository(db, user_id=user['uuid'])
+    doc_repo = DocumentRepository(db, user_uuid=user['uuid'])
+    content_repo = ContentRepository(db, user_uuid=user['uuid'])
     document_contents = {}
     
     # preset.documents is a list of IDs that can reference either:

@@ -218,7 +218,7 @@ class SingleDocEvaluator:
         config: Optional[SingleEvalConfig] = None,
         criteria_manager: Optional[CriteriaManager] = None,
         stats_tracker: Optional[FpfStatsTracker] = None,
-        user_id: Optional[str] = None,
+        user_uuid: Optional[str] = None,
     ):
         """
         Initialize the evaluator.
@@ -231,7 +231,7 @@ class SingleDocEvaluator:
         self.config = config or SingleEvalConfig()
         self.criteria = criteria_manager or CriteriaManager(self.config.criteria_path)
         self.stats = stats_tracker
-        self.user_id = user_id
+        self.user_uuid = user_uuid
         self._judges: Dict[str, Judge] = {}
         
         # Parse custom_criteria YAML string from Content Library if provided
@@ -270,7 +270,7 @@ class SingleDocEvaluator:
                 criteria_manager=self.criteria,
                 custom_prompt=self.config.custom_instructions,
                 stats_tracker=self.stats,
-                user_id=self.user_id,
+                user_uuid=self.user_uuid,
             )
         return self._judges[model]
     

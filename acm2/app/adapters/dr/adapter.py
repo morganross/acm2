@@ -35,7 +35,7 @@ class DrAdapter(GptrAdapter):
         query: str,
         config: GenerationConfig, 
         *,
-        user_id: str,
+        user_uuid: str,
         document_content: Optional[str] = None,
         progress_callback: Optional[ProgressCallback] = None,
     ) -> GenerationResult:
@@ -72,7 +72,7 @@ class DrAdapter(GptrAdapter):
         result = await super().generate(
             query=query,
             config=config,
-            user_id=user_id,
+            user_uuid=user_uuid,
             document_content=document_content,
             progress_callback=progress_callback,
         )

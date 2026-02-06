@@ -404,7 +404,7 @@ class SourceDocPipeline:
             single_evaluator = SingleDocEvaluator(
                 eval_config,
                 stats_tracker=self.stats,
-                user_id=self.config.user_uuid,
+                user_uuid=self.config.user_uuid,
             )
         
         async def process_task(task_info):
@@ -661,7 +661,7 @@ Optimize your response to score highly on each criterion:
                     gen_result = await adapter.generate(
                         query=instructions,
                         config=gen_config,
-                        user_id=self.config.user_uuid,
+                        user_uuid=self.config.user_uuid,
                         document_content=self.content,
                         progress_callback=progress_callback,
                         fpf_log_output=fpf_log_output,
@@ -680,7 +680,7 @@ Optimize your response to score highly on each criterion:
                     gen_result = await adapter.generate(
                         query=full_query,
                         config=gen_config,
-                        user_id=self.config.user_uuid,
+                        user_uuid=self.config.user_uuid,
                         progress_callback=progress_callback,
                     )
             
@@ -756,7 +756,7 @@ Optimize your response to score highly on each criterion:
             pairwise_config,
             criteria_manager=criteria_manager,
             stats_tracker=self.stats,
-            user_id=self.config.user_uuid,
+            user_uuid=self.config.user_uuid,
         )
         
         # Filter out empty content
@@ -881,7 +881,7 @@ Optimize your response to score highly on each criterion:
                         reports=top_docs,
                         instructions=combine_instructions,
                         config=combine_gen_config,
-                        user_id=self.config.user_uuid,
+                        user_uuid=self.config.user_uuid,
                         original_instructions=original_instructions,
                     )
                     combine_completed_at = datetime.utcnow()
@@ -989,7 +989,7 @@ Optimize your response to score highly on each criterion:
                 pairwise_config,
                 criteria_manager=criteria_manager,
                 stats_tracker=self.stats,
-                user_id=self.config.user_uuid,
+                user_uuid=self.config.user_uuid,
             )
             
             # Collect documents for comparison

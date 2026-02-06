@@ -81,6 +81,7 @@ class CombineService:
         output_folder: str,
         original_instructions: str = "",
         original_query: str = "",
+        user_uuid: Optional[str] = None,
         strategy: Optional[CombineStrategyType] = None,
     ) -> CombineResult:
         """
@@ -120,6 +121,7 @@ class CombineService:
         
         # Build combine input
         combine_input = CombineInput(
+            user_uuid=user_uuid,
             reports=[w.content for w in winners],
             report_paths=[w.file_path for w in winners],
             original_instructions=original_instructions,
@@ -166,6 +168,7 @@ class CombineService:
         original_query: str = "",
         report_scores: Optional[list[float]] = None,
         report_models: Optional[list[str]] = None,
+        user_uuid: Optional[str] = None,
         strategy: Optional[CombineStrategyType] = None,
     ) -> CombineResult:
         """
@@ -185,6 +188,7 @@ class CombineService:
             CombineResult with combined content
         """
         combine_input = CombineInput(
+            user_uuid=user_uuid,
             reports=report_contents,
             original_instructions=original_instructions,
             original_query=original_query,

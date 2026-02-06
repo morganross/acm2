@@ -50,8 +50,8 @@ async def save_provider_key(
     The key will be encrypted before storage and only decrypted when needed
     to call the LLM API.
     """
-    user_id = user['uuid']
-    key_manager = get_provider_key_manager(db, user_id)
+    user_uuid = user['uuid']
+    key_manager = get_provider_key_manager(db, user_uuid)
     
     try:
         await key_manager.save_key(key_data.provider, key_data.api_key)
@@ -78,8 +78,8 @@ async def list_provider_keys(
     db: AsyncSession = Depends(get_user_db)
 ):
     """List all configured providers (without exposing the actual keys)."""
-    user_id = user['uuid']
-    key_manager = get_provider_key_manager(db, user_id)
+    user_uuid = user['uuid']
+    key_manager = get_provider_key_manager(db, user_uuid)
     
     try:
         providers = await key_manager.list_configured_providers()
@@ -99,8 +99,8 @@ async def get_provider_key_info(
     db: AsyncSession = Depends(get_user_db)
 ):
     """Check if a provider key is configured (without exposing the actual key)."""
-    user_id = user['uuid']
-    key_manager = get_provider_key_manager(db, user_id)
+    user_uuid = user['uuid']
+    key_manager = get_provider_key_manager(db, user_uuid)
     
     try:
         has_key = await key_manager.has_key(provider)
@@ -132,8 +132,8 @@ async def delete_provider_key(
     db: AsyncSession = Depends(get_user_db)
 ):
     """Delete a provider API key."""
-    user_id = user['uuid']
-    key_manager = get_provider_key_manager(db, user_id)
+    user_uuid = user['uuid']
+    key_manager = get_provider_key_manager(db, user_uuid)
     
     try:
         # Check if key exists
@@ -165,8 +165,8 @@ async def test_provider_key(
     
     This is useful for validating keys after configuration.
     """
-    user_id = user['uuid']
-    key_manager = get_provider_key_manager(db, user_id)
+    user_uuid = user['uuid']
+    key_manager = get_provider_key_manager(db, user_uuid)
     
     try:
         api_key = await key_manager.get_key(provider)

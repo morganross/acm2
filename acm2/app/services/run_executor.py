@@ -44,7 +44,7 @@ from ..evaluation.single_doc import EvalCompleteCallback
 from ..evaluation.models import SingleEvalResult, EvaluationCriterion
 from ..evaluation.criteria import CriteriaManager
 from ..infra.db.repositories import RunRepository
-from ..infra.db.session import get_user_session_by_id
+from ..infra.db.session import get_user_session_by_uuid
 
 # Callback fired after each document generation completes
 # Args: (doc_id, model, generator, source_doc_id, iteration)
@@ -505,8 +505,8 @@ class RunExecutor:
             if not getattr(self, "config", None) or not self.config.user_uuid:
                 return
 
-            async with get_user_session_by_id(self.config.user_uuid) as session:
-                repo = RunRepository(session, user_id=self.config.user_uuid)
+            async with get_user_session_by_uuid(self.config.user_uuid) as session:
+                repo = RunRepository(session, user_uuid=self.config.user_uuid)
                 run = await repo.get_by_id(run_id)
                 if not run:
                     return
@@ -547,8 +547,8 @@ class RunExecutor:
         }
         
         try:
-            async with get_user_session_by_id(self.config.user_uuid) as session:
-                run_repo = RunRepository(session, user_id=self.config.user_uuid)
+            async with get_user_session_by_uuid(self.config.user_uuid) as session:
+                run_repo = RunRepository(session, user_uuid=self.config.user_uuid)
                 await run_repo.append_timeline_event(run_id, event)
                 self.logger.debug(f"Emitted timeline event: {phase}/{event_type} for run {run_id}")
         except Exception as e:
@@ -568,7 +568,7 @@ class RunExecutor:
     async def _save_generated_content(self, run_id: str, gen_doc: GeneratedDocument) -> None:
         """Save generated document content to a file. FAILS if content is empty.
         
-        Files are stored in data/user_{user_id}/runs/{run_id}/generated/{doc_id}.md
+        Files are stored in data/user_{user_uuid}/runs/{run_id}/generated/{doc_id}.md
         """
         from pathlib import Path
         import aiofiles
@@ -845,8 +845,8 @@ class RunExecutor:
         try:
             source_doc_id = event.get("source_doc_id")
             if source_doc_id:
-                async with get_user_session_by_id(self.config.user_uuid) as session:
-                    run_repo = RunRepository(session, user_id=self.config.user_uuid)
+                async with get_user_session_by_uuid(self.config.user_uuid) as session:
+                    run_repo = RunRepository(session, user_uuid=self.config.user_uuid)
                     await run_repo.append_source_doc_timeline_event(run_id, source_doc_id, event)
         except Exception as e:
             self.logger.warning(f"Failed to append source-doc timeline event for run {run_id}: {e}")
@@ -1100,7 +1100,7 @@ class RunExecutor:
             single_evaluator = SingleDocEvaluator(
                 eval_config,
                 stats_tracker=self._fpf_stats,
-                user_id=config.user_uuid,
+                user_uuid=config.user_uuid,
             )
             result.single_eval_results = {}
         
@@ -1400,7 +1400,7 @@ Optimize your response to score highly on each criterion:
                     gen_result = await adapter.generate(
                         query=fpf_instructions,  # Use instructions with optional criteria
                         config=gen_config,
-                        user_id=config.user_uuid,
+                        user_uuid=config.user_uuid,
                         document_content=content,
                         progress_callback=progress_callback,
                         fpf_log_output=fpf_log_output,
@@ -1436,7 +1436,7 @@ Optimize your output to score highly on each criterion:
                     gen_result = await adapter.generate(
                         query=full_query,
                         config=gen_config,
-                        user_id=config.user_uuid,
+                        user_uuid=config.user_uuid,
                         progress_callback=progress_callback,
                 )
             
@@ -1533,7 +1533,7 @@ Optimize your output to score highly on each criterion:
             pairwise_config,
             criteria_manager=criteria_manager,
             stats_tracker=self._fpf_stats,
-            user_id=config.user_uuid,
+            user_uuid=config.user_uuid,
         )
         
         # Collect doc IDs and contents, filtering out empty content
@@ -1702,7 +1702,7 @@ Optimize your output to score highly on each criterion:
                         reports=top_docs,
                         instructions=combine_instructions,
                         config=combine_gen_config,
-                        user_id=config.user_uuid,
+                        user_uuid=config.user_uuid,
                         original_instructions=original_instructions
                     )
                     combine_completed_at = datetime.utcnow()
@@ -1806,7 +1806,7 @@ Optimize your output to score highly on each criterion:
             evaluator = PairwiseEvaluator(
                 pairwise_config,
                 stats_tracker=self._fpf_stats,
-                user_id=config.user_uuid,
+                user_uuid=config.user_uuid,
             )
             
             # Collect documents for comparison
@@ -1916,7 +1916,7 @@ Optimize your output to score highly on each criterion:
         self.logger.info(f"Run {run_id}: Writing outputs to {config.output_destination}")
         
         try:
-            async with get_user_session_by_id(config.user_uuid) as db:
+            async with get_user_session_by_uuid(config.user_uuid) as db:
                 output_writer = OutputWriter(db, config.user_uuid)
                 
                 written_count = 0

@@ -112,7 +112,7 @@ async def create_document(
     
     Provide content directly, a file_path to read from, or a url to fetch.
     """
-    repo = DocumentRepository(db, user_id=user['uuid'])
+    repo = DocumentRepository(db, user_uuid=user['uuid'])
     
     # Get content from one of the sources
     content = ""
@@ -164,7 +164,7 @@ async def upload_document(
     """
     Upload a document file.
     """
-    repo = DocumentRepository(db, user_id=user['uuid'])
+    repo = DocumentRepository(db, user_uuid=user['uuid'])
     
     # Read file content
     content = await file.read()
@@ -215,7 +215,7 @@ async def list_documents(
     """
     List all documents with pagination.
     """
-    repo = DocumentRepository(db, user_id=user['uuid'])
+    repo = DocumentRepository(db, user_uuid=user['uuid'])
     offset = (page - 1) * page_size
     
     # Get documents from DB
@@ -251,7 +251,7 @@ async def get_document(
     """
     Get detailed information about a document.
     """
-    repo = DocumentRepository(db, user_id=user['uuid'])
+    repo = DocumentRepository(db, user_uuid=user['uuid'])
     doc = await repo.get_by_id(doc_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -267,7 +267,7 @@ async def get_document_content(
     """
     Get the full content of a document.
     """
-    repo = DocumentRepository(db, user_id=user['uuid'])
+    repo = DocumentRepository(db, user_uuid=user['uuid'])
     doc = await repo.get_by_id(doc_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -290,7 +290,7 @@ async def update_document(
     """
     Update document metadata.
     """
-    repo = DocumentRepository(db, user_id=user['uuid'])
+    repo = DocumentRepository(db, user_uuid=user['uuid'])
     doc = await repo.get_by_id(doc_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -315,7 +315,7 @@ async def delete_document(
     """
     Delete a document permanently.
     """
-    repo = DocumentRepository(db, user_id=user['uuid'])
+    repo = DocumentRepository(db, user_uuid=user['uuid'])
     deleted = await repo.delete(doc_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Document not found")

@@ -19,19 +19,22 @@ app.add_typer(run_app, name="runs")
 app.add_typer(preset_app, name="presets")
 
 
+# Port 443 is hard-coded and cannot be changed
+ACM2_PORT = 443
+
 @app.command()
 def serve(
-	host: str = typer.Option("127.0.0.1", help="Host interface"),
-	port: int = typer.Option(8002, help="Port to bind"),
+	host: str = typer.Option("0.0.0.0", help="Host interface"),
 	reload: bool = typer.Option(False, help="Enable autoreload (dev only)"),
 ):
-	"""Start the ACM2 API + SPA server."""
-
+	"""Start the ACM2 API + SPA server on port 443 (hard-coded, cannot be changed)."""
+	print(f"Starting ACM2 server on https://{host}:{ACM2_PORT}")
+	print("Port 443 is programmatically enforced and cannot be overridden.")
 	app_dir = Path(__file__).resolve().parents[1]
 	uvicorn.run(
 		"app.main:create_app",
 		host=host,
-		port=port,
+		port=ACM2_PORT,
 		reload=reload,
 		factory=True,
 		app_dir=str(app_dir),

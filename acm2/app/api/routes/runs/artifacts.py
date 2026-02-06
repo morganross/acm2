@@ -37,7 +37,7 @@ async def get_run_report(
     Generate and download the HTML report for a run.
     Includes the Evaluation Timeline Chart.
     """
-    repo = RunRepository(db, user_id=user['uuid'])
+    repo = RunRepository(db, user_uuid=user['uuid'])
     run = await repo.get_with_tasks(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -70,7 +70,7 @@ async def get_run_logs(
     Returns log lines from the run's log files.
     For VERBOSE mode runs, can also include FPF subprocess output.
     """
-    repo = RunRepository(db, user_id=user['uuid'])
+    repo = RunRepository(db, user_uuid=user['uuid'])
     run = await repo.get_by_id(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -131,9 +131,9 @@ async def get_generated_doc_content(
     Get the content of a generated document.
     
     Returns the markdown content of a generated or combined document.
-    Documents are stored in data/user_{user_id}/runs/{run_id}/generated/{doc_id}.md
+    Documents are stored in data/user_{user_uuid}/runs/{run_id}/generated/{doc_id}.md
     """
-    repo = RunRepository(db, user_id=user['uuid'])
+    repo = RunRepository(db, user_uuid=user['uuid'])
     run = await repo.get_by_id(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")

@@ -13,9 +13,9 @@ from typing import Optional
 
 from sqlalchemy import select, func
 
-from app.auth.user_registry import load_registry, get_all_user_ids
+from app.auth.user_registry import load_registry, get_all_user_uuids
 from app.db.seed_user import initialize_user
-from app.infra.db.session import get_user_session_by_id
+from app.infra.db.session import get_user_session_by_uuid
 from app.infra.db.models.user_meta import UserMeta
 from app.infra.db.models.preset import Preset
 from app.infra.db.models.run import Run
@@ -29,14 +29,14 @@ def _now_iso() -> str:
     return datetime.datetime.utcnow().isoformat()
 
 
-async def _ensure_user_meta(user_id: int) -> str:
+async def _ensure_user_meta(user_uuid: str) -> str:
     settings = get_settings()
     if not settings.seed_version:
         raise ValueError("seed_version must be set")
 
-    async with get_user_session_by_id(user_id) as session:
+    async with get_user_session_by_uuid(user_uuid) as session:
         result = await session.execute(
-            select(UserMeta).where(UserMeta.user_id == user_id)
+            select(UserMeta).where(UserMeta.uuid == user_uuid)
         )
         meta = result.scalar_one_or_none()
         if meta and meta.seed_status == "ready":
@@ -49,7 +49,7 @@ async def _ensure_user_meta(user_id: int) -> str:
             if not meta:
                 meta = UserMeta(
                     id=str(uuid.uuid4()),
-                    user_id=user_id,
+                    uuid=user_uuid,
                     seed_status="ready",
                     seed_version=settings.seed_version,
                     seeded_at=None,
@@ -60,25 +60,25 @@ async def _ensure_user_meta(user_id: int) -> str:
                 meta.seed_version = settings.seed_version
             return "ready"
 
-    await initialize_user(user_id)
+    await initialize_user(user_uuid)
     return "seeded"
 
 
-async def main(user_id: Optional[int] = None) -> None:
+async def main(user_uuid: Optional[str] = None) -> None:
     logging.basicConfig(level=logging.INFO)
 
     # Load user registry from filesystem
     load_registry()
-    user_ids = get_all_user_ids()
+    user_uuids = get_all_user_uuids()
     
-    if user_id is not None:
-        user_ids = {user_id} if user_id in user_ids else set()
+    if user_uuid is not None:
+        user_uuids = {user_uuid} if user_uuid in user_uuids else set()
 
-    if not user_ids:
+    if not user_uuids:
         logger.info("No users to process")
         return
 
-    for uid in sorted(user_ids):
+    for uid in sorted(user_uuids):
         try:
             status = await _ensure_user_meta(uid)
             logger.info(f"User {uid}: {status} ({_now_iso()})")
@@ -89,5 +89,5 @@ async def main(user_id: Optional[int] = None) -> None:
 if __name__ == "__main__":
     import sys
 
-    arg = int(sys.argv[1]) if len(sys.argv) > 1 else None
+    arg = sys.argv[1] if len(sys.argv) > 1 else None
     asyncio.run(main(arg))

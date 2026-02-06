@@ -81,7 +81,7 @@ async def list_contents(
     - Search by name for partial matches
     - Filter by tag
     """
-    repo = ContentRepository(db, user_id=user['uuid'])
+    repo = ContentRepository(db, user_uuid=user['uuid'])
     offset = (page - 1) * page_size
     
     if search:
@@ -119,7 +119,7 @@ async def get_content_counts(
     db: AsyncSession = Depends(get_user_db),
 ) -> ContentTypeCounts:
     """Get count of contents by type."""
-    repo = ContentRepository(db, user_id=user['uuid'])
+    repo = ContentRepository(db, user_uuid=user['uuid'])
     
     counts = ContentTypeCounts()
     counts.generation_instructions = await repo.count_by_type(DBContentType.GENERATION_INSTRUCTIONS)
@@ -153,7 +153,7 @@ async def create_content(
     db: AsyncSession = Depends(get_user_db),
 ) -> ContentDetail:
     """Create new content."""
-    repo = ContentRepository(db, user_id=user['uuid'])
+    repo = ContentRepository(db, user_uuid=user['uuid'])
     
     # Check if name already exists for this type
     existing = await repo.get_by_name(data.name)
@@ -183,7 +183,7 @@ async def get_content(
     db: AsyncSession = Depends(get_user_db),
 ) -> ContentDetail:
     """Get content by ID."""
-    repo = ContentRepository(db, user_id=user['uuid'])
+    repo = ContentRepository(db, user_uuid=user['uuid'])
     content = await repo.get_by_id(content_id)
     
     if not content:
@@ -200,7 +200,7 @@ async def update_content(
     db: AsyncSession = Depends(get_user_db),
 ) -> ContentDetail:
     """Update content."""
-    repo = ContentRepository(db, user_id=user['uuid'])
+    repo = ContentRepository(db, user_uuid=user['uuid'])
     content = await repo.get_by_id(content_id)
     
     if not content:
@@ -233,7 +233,7 @@ async def delete_content(
     db: AsyncSession = Depends(get_user_db),
 ):
     """Delete content permanently."""
-    repo = ContentRepository(db, user_id=user['uuid'])
+    repo = ContentRepository(db, user_uuid=user['uuid'])
     
     success = await repo.delete(content_id)
     if not success:
@@ -259,7 +259,7 @@ async def resolve_content(
     Static variables (linked to other content) are resolved recursively.
     Runtime variables are substituted from the request body.
     """
-    repo = ContentRepository(db, user_id=user['uuid'])
+    repo = ContentRepository(db, user_uuid=user['uuid'])
     content = await repo.get_by_id(content_id)
     
     if not content:
@@ -346,7 +346,7 @@ async def duplicate_content(
     db: AsyncSession = Depends(get_user_db),
 ) -> ContentDetail:
     """Create a copy of existing content."""
-    repo = ContentRepository(db, user_id=user['uuid'])
+    repo = ContentRepository(db, user_uuid=user['uuid'])
     content = await repo.get_by_id(content_id)
     
     if not content:

@@ -31,7 +31,7 @@ async def get_settings(
 ) -> Dict[str, Any]:
     """Get stored settings for the current user."""
     result = await db.execute(
-        select(UserSettings).where(UserSettings.user_id == user["uuid"])
+        select(UserSettings).where(UserSettings.user_uuid == user["uuid"])
     )
     settings_row = result.scalar_one_or_none()
     if not settings_row:
@@ -49,7 +49,7 @@ async def update_settings(
     settings_data = payload.model_dump()
 
     result = await db.execute(
-        select(UserSettings).where(UserSettings.user_id == user["uuid"])
+        select(UserSettings).where(UserSettings.user_uuid == user["uuid"])
     )
     settings_row = result.scalar_one_or_none()
 
@@ -58,7 +58,7 @@ async def update_settings(
         settings_row.updated_at = datetime.utcnow()
     else:
         settings_row = UserSettings(
-            user_id=user["uuid"],
+            user_uuid=user["uuid"],
             settings=settings_data,
             updated_at=datetime.utcnow(),
         )

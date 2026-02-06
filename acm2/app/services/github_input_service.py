@@ -49,8 +49,8 @@ class GitHubInputService:
     def __init__(self, db: AsyncSession, user_uuid: str):
         self.db = db
         self.user_uuid = user_uuid
-        self.gh_repo = GitHubConnectionRepository(db, user_id=user_uuid)
-        self.content_repo = ContentRepository(db, user_id=user_uuid)
+        self.gh_repo = GitHubConnectionRepository(db, user_uuid=user_uuid)
+        self.content_repo = ContentRepository(db, user_uuid=user_uuid)
     
     def _decrypt_token(self, encrypted_token: str) -> str:
         """Decrypt a GitHub token."""
