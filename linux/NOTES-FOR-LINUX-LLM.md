@@ -48,6 +48,14 @@ sudo loginctl enable-linger $USER
 
 Then connect from VS Code: `Ctrl+Shift+P` → "Remote-Tunnels: Connect to Tunnel" → select your tunnel name.
 
+### CRITICAL: Open the correct folder!
+
+**DO NOT open `/` as your workspace** - this causes Agent mode to hang trying to index the entire filesystem.
+
+Instead:
+1. Create the workspace folder: `sudo mkdir -p /opt/acm2 && sudo chown $USER:$USER /opt/acm2`
+2. In VS Code: `Ctrl+Shift+P` → "File: Open Folder" → `/opt/acm2`
+
 ---
 
 ## 1. Python Version
