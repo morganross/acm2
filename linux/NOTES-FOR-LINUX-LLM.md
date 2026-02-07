@@ -4,11 +4,61 @@ These are critical details NOT fully covered in the other documentation files.
 
 ---
 
+## 0. FIRST STEP: SSH Access and Prerequisites
+
+Before anything else, you need SSH access to the server.
+
+### Get credentials from user:
+1. **Server IP address** (e.g., `54.71.183.56`)
+2. **SSH key file** (`.pem` file) - should be in `linux/twentysix.pem` or user will provide
+
+### Connect and install prerequisites:
+
+```bash
+# From Windows PowerShell (fix .pem permissions first):
+icacls "C:\devlop\acm2\linux\twentysix.pem" /inheritance:r
+icacls "C:\devlop\acm2\linux\twentysix.pem" /grant:r "Administrator:R"
+
+# SSH to server (Amazon Linux uses ec2-user, Ubuntu uses ubuntu):
+ssh -i C:\devlop\acm2\linux\twentysix.pem -o StrictHostKeyChecking=no ec2-user@SERVER_IP
+
+# Install git (required for VS Code Agent mode):
+sudo dnf install -y git           # Amazon Linux 2023
+# OR
+sudo apt install -y git           # Ubuntu/Debian
+
+# Install VS Code tunnel (download CLI):
+curl -Lk 'https://code.visualstudio.com/sha/download?build=stable&os=cli-alpine-x64' --output vscode_cli.tar.gz
+tar -xf vscode_cli.tar.gz
+chmod +x code
+
+# Start tunnel and authenticate:
+./code tunnel --accept-server-license-terms
+
+# Follow the GitHub authentication link, then install as service:
+./code tunnel service install
+sudo loginctl enable-linger $USER
+```
+
+### Verify tunnel is running:
+```bash
+./code tunnel status
+# Should show: {"tunnel":{"name":"YOUR_TUNNEL_NAME"...},"service_installed":true}
+```
+
+Then connect from VS Code: `Ctrl+Shift+P` → "Remote-Tunnels: Connect to Tunnel" → select your tunnel name.
+
+---
+
 ## 1. Python Version
 
 Server requires **Python 3.11** specifically:
 
 ```bash
+# Amazon Linux 2023:
+sudo dnf install -y python3.11 python3.11-pip python3.11-devel
+
+# Ubuntu/Debian:
 sudo apt update
 sudo apt install python3.11 python3.11-venv python3.11-dev
 ```
@@ -52,11 +102,11 @@ The certs directory is at the **OUTER** level:
 Copy the data folder from Windows to preserve user data:
 
 ```bash
-# From the Linux server:
-scp -r Administrator@54.71.183.56:'c:/devlop/acm2/acm2/data' /opt/acm2/acm2/
+# From the Linux server (Windows backend is at 16.144.148.159):
+scp -i ~/twentysix.pem -r Administrator@16.144.148.159:'c:/devlop/acm2/acm2/data' /opt/acm2/acm2/
 
 # Or from Windows (run in PowerShell):
-scp -r c:\devlop\acm2\acm2\data ubuntu@NEW_LINUX_IP:/opt/acm2/acm2/
+scp -r c:\devlop\acm2\acm2\data ec2-user@NEW_LINUX_IP:/opt/acm2/acm2/
 ```
 
 ---
